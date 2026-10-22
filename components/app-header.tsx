@@ -7,6 +7,7 @@ import {
   CloseIcon,
   DownloadIcon,
   MenuIcon,
+  ReloadIcon,
   PlusIcon,
   ReorderIcon,
   SearchIcon,
@@ -162,6 +163,16 @@ export function AppHeader({
                 >
                   <SortIcon className="size-5" />
                 </MenuItem>
+                <div role="separator" className="mx-3 my-1 h-px bg-neutral-200" />
+                <MenuItem
+                  label="רענון האפליקציה"
+                  onClick={() => {
+                    window.location.reload();
+                  }}
+                >
+                  <ReloadIcon className="size-5" />
+                </MenuItem>
+                <div role="separator" className="mx-3 my-1 h-px bg-neutral-200" />
                 <MenuItem
                   label={exporting ? "מייצא…" : "ייצוא כל המוצרים"}
                   disabled={!actionsEnabled || !onExport || exporting}

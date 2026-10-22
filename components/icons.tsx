@@ -168,6 +168,15 @@ export function SettingsIcon(props: IconProps) {
   );
 }
 
+export function ReloadIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true" {...props}>
+      <path d="M19.5 12a7.5 7.5 0 1 1-2.1-5.2" strokeLinecap="round" />
+      <path d="M19.5 4.5V8h-3.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 export function DownloadIcon(props: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true" {...props}>
