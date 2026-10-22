@@ -1,0 +1,35 @@
+@import "tailwindcss";
+
+:root {
+  --cream: #f6f0e8;
+  --teal: #128f86;
+  --ink: #1d1d1f;
+  --orange: #ef5b25;
+  --bar: #e6e6e6;
+}
+
+body {
+  background: #efe7dc;
+  color: var(--ink);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+input,
+select,
+textarea {
+  font-size: 16px;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
+}

@@ -1,0 +1,83 @@
+import { colorHex } from "@/lib/colors";
+import { createClient } from "@/lib/supabase/server";
+import type { Category, GroceryLine, Item, ListsData } from "@/lib/types";
+import { isUnitId } from "@/lib/units";
+
+export async function loadLists(userId: string): Promise<ListsData | null> {
+  const supabase = await createClient();
+  const [{ data: profile }, { data: account }] = await Promise.all([
+    supabase.from("profiles").select("username").eq("id", userId).maybeSingle(),
+    supabase.from("accounts").select("id").eq("owner_id", userId).maybeSingle(),
+  ]);
+  if (!profile || !account) return null;
+
+  const [{ data: categories }, { data: items }, { data: grocery }] = await Promise.all([
+    supabase.from("categories").select("*").eq("account_id", account.id).order("sort_order"),
+    supabase.from("items").select("*").eq("account_id", account.id).order("sort_order"),
+    supabase.from("grocery_items").select("*").eq("account_id", account.id),
+  ]);
+
+  return {
+    accountId: account.id,
+    username: profile.username,
+    categories: (categories ?? []).map(normalizeCategory),
+    items: (items ?? []).map(normalizeItem),
+    grocery: (grocery ?? []).map(normalizeGrocery),
+  };
+}
+
+function normalizeCategory(row: {
+  id: string;
+  account_id: string;
+  name: string;
+  color: string;
+  image_path: string | null;
+  sort_order: number;
+}): Category {
+  return {
+    id: row.id,
+    account_id: row.account_id,
+    name: row.name,
+    color: colorHex(row.color),
+    image_path: row.image_path,
+    sort_order: row.sort_order,
+  };
+}
+
+function normalizeItem(row: {
+  id: string;
+  account_id: string;
+  category_id: string;
+  name: string;
+  unit: string;
+  comments: string | null;
+  image_path: string | null;
+  quantity: number | string;
+  sort_order: number;
+}): Item {
+  return {
+    id: row.id,
+    account_id: row.account_id,
+    category_id: row.category_id,
+    name: row.name,
+    unit: isUnitId(row.unit) ? row.unit : "unit",
+    comments: row.comments ?? "",
+    image_path: row.image_path,
+    quantity: Number(row.quantity) || 1,
+    sort_order: row.sort_order,
+  };
+}
+
+function normalizeGrocery(row: {
+  id: string;
+  account_id: string;
+  item_id: string;
+  checked: boolean;
+}): GroceryLine {
+  return {
+    id: row.id,
+    account_id: row.account_id,
+    item_id: row.item_id,
+    checked: row.checked,
+  };
+}
