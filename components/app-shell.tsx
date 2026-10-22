@@ -7,7 +7,8 @@ import { AppPathContext } from "@/components/app-path";
 import { AppHeader } from "@/components/app-header";
 import { BottomNav } from "@/components/bottom-nav";
 import { ListPage } from "@/components/list-page";
-import { useLists } from "@/components/lists-provider";
+import { useLists, useListsOptional } from "@/components/lists-provider";
+import { bindKeepAwake } from "@/lib/keep-awake";
 import { SignedInSettings } from "@/components/settings-panel";
 
 export function AppShell({
@@ -26,6 +27,7 @@ export function AppShell({
   const restoreRef = useRef<string | null>(null);
   const nativePushState = useRef<History["pushState"] | null>(null);
   const [warm, setWarm] = useState(false);
+  const lists = useListsOptional();
 
   useLayoutEffect(() => {
     // Keep the browser's own pushState. Next.js patches it and would refetch these pages from the server.
@@ -36,6 +38,11 @@ export function AppShell({
     const timer = window.setTimeout(() => setWarm(true), 250);
     return () => window.clearTimeout(timer);
   }, []);
+
+  useEffect(() => {
+    if (!signedIn) return;
+    return bindKeepAwake();
+  }, [signedIn]);
 
   useEffect(() => {
     const onPop = () => {
@@ -61,6 +68,48 @@ export function AppShell({
     setPath(href);
     if (href === "/settings") window.scrollTo(0, 0);
   }, []);
+
+  useEffect(() => {
+    if (!signedIn) return;
+    let startX = 0;
+    let startY = 0;
+    let tracking = false;
+    const onStart = (event: TouchEvent) => {
+      if (event.touches.length !== 1) return;
+      const current = pathRef.current;
+      if (current !== "/grocery" && current !== "/inventory") return;
+      if (lists?.reorderMode) return;
+      if (document.querySelector("[role='dialog'], [role='menu']")) return;
+      const target = event.target;
+      if (target instanceof Element && target.closest("input, textarea, select, nav")) return;
+      tracking = true;
+      startX = event.touches[0].clientX;
+      startY = event.touches[0].clientY;
+    };
+    const onEnd = (event: TouchEvent) => {
+      if (!tracking) return;
+      tracking = false;
+      const touch = event.changedTouches[0];
+      if (!touch) return;
+      const dx = touch.clientX - startX;
+      const dy = touch.clientY - startY;
+      if (Math.abs(dx) < 70 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+      const current = pathRef.current;
+      if (current === "/grocery" && dx > 0) go("/inventory");
+      else if (current === "/inventory" && dx < 0) go("/grocery");
+    };
+    const stop = () => {
+      tracking = false;
+    };
+    window.addEventListener("touchstart", onStart, { passive: true });
+    window.addEventListener("touchend", onEnd, { passive: true });
+    window.addEventListener("touchcancel", stop);
+    return () => {
+      window.removeEventListener("touchstart", onStart);
+      window.removeEventListener("touchend", onEnd);
+      window.removeEventListener("touchcancel", stop);
+    };
+  }, [go, lists?.reorderMode, signedIn]);
 
   const body = signedIn ? (
     <>

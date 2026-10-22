@@ -139,39 +139,57 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
     };
   }, [initial.accountId, refetch]);
 
-  const pathsKey = useMemo(() => {
-    return [...categories.map((category) => category.image_path), ...items.map((item) => item.image_path)]
-      .filter(Boolean)
-      .join("|");
-  }, [categories, items]);
+  const imagePlan = useMemo(() => {
+    const onGrocery = new Set(grocery.map((line) => line.item_id));
+    const urgent: string[] = [];
+    const later: string[] = [];
+    const seen = new Set<string>();
+    const add = (path: string | null, bucket: string[]) => {
+      if (!path || seen.has(path)) return;
+      seen.add(path);
+      bucket.push(path);
+    };
+    for (const item of items) {
+      if (onGrocery.has(item.id)) add(item.image_path, urgent);
+    }
+    for (const category of categories) add(category.image_path, later);
+    for (const item of items) add(item.image_path, later);
+    return { urgent, later, key: [...seen].sort().join("|") };
+  }, [categories, grocery, items]);
+  const imagePlanRef = useRef(imagePlan);
+  imagePlanRef.current = imagePlan;
 
   useEffect(() => {
-    const paths = pathsKey ? pathsKey.split("|") : [];
+    const { urgent, later } = imagePlanRef.current;
+    const paths = [...urgent, ...later];
     if (paths.length === 0) {
       setImageSrcs({});
       return;
     }
     let cancelled = false;
     const blobUrls: string[] = [];
-    void (async () => {
-      const cached: Record<string, string> = {};
+    const publish = (path: string, blob: Blob) => {
+      const url = URL.createObjectURL(blob);
+      blobUrls.push(url);
+      setImageSrcs((current) => ({ ...current, [path]: url }));
+    };
+    const loadGroup = async (group: string[]) => {
       const missing: string[] = [];
-      for (const path of paths) {
-        const blob = await readCachedImage(path);
-        if (cancelled) return;
-        if (!blob) {
-          missing.push(path);
-          continue;
+      let readIndex = 0;
+      const readOne = async () => {
+        while (readIndex < group.length) {
+          const path = group[readIndex];
+          readIndex += 1;
+          const blob = await readCachedImage(path);
+          if (cancelled) return;
+          if (blob) publish(path, blob);
+          else missing.push(path);
         }
-        const url = URL.createObjectURL(blob);
-        blobUrls.push(url);
-        cached[path] = url;
-      }
-      if (cancelled) return;
-      setImageSrcs(cached);
-      void pruneImageCache(new Set(paths));
+      };
+      await Promise.all(Array.from({ length: Math.min(8, group.length) }, () => readOne()));
+      if (cancelled || missing.length === 0) return;
       let next = 0;
-      async function loadOne() {
+      const downloadOne = async () => {
         while (next < missing.length) {
           const path = missing[next];
           next += 1;
@@ -179,19 +197,22 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
           if (cancelled || downloadError || !blob) continue;
           await writeCachedImage(path, blob);
           if (cancelled) return;
-          const url = URL.createObjectURL(blob);
-          blobUrls.push(url);
-          setImageSrcs((current) => ({ ...current, [path]: url }));
+          publish(path, blob);
         }
-      }
-      const workers = Math.min(4, missing.length);
-      await Promise.all(Array.from({ length: workers }, () => loadOne()));
+      };
+      await Promise.all(Array.from({ length: Math.min(6, missing.length) }, () => downloadOne()));
+    };
+    void (async () => {
+      await loadGroup(urgent);
+      if (cancelled) return;
+      await loadGroup(later);
+      if (!cancelled) void pruneImageCache(new Set(paths));
     })();
     return () => {
       cancelled = true;
       for (const url of blobUrls) URL.revokeObjectURL(url);
     };
-  }, [pathsKey]);
+  }, [imagePlan.key]);
 
   const imageSrc = useCallback(
     (kind: "item" | "category", id: string, path: string | null) => {

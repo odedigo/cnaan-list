@@ -1,10 +1,11 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useState } from "react";
 import Link from "next/link";
 
 import { login, logout } from "@/app/actions/auth";
 import { AppHeader } from "@/components/app-header";
+import { readKeepAwake, writeKeepAwake } from "@/lib/keep-awake";
 import { createClient } from "@/lib/supabase/client";
 
 export function SignedOutSettings({ configured, authError, version = "" }: { configured: boolean; authError?: string; version?: string }) {
@@ -13,7 +14,7 @@ export function SignedOutSettings({ configured, authError, version = "" }: { con
     <div>
       <AppHeader title="הגדרות" actionsEnabled={false} />
       <AppTitle />
-      <form className="space-y-4 px-6 pt-8" action={action}>
+      <form className="mx-6 mt-8 space-y-4 rounded-xl border border-neutral-200 bg-white px-4 py-6" action={action}>
         {!configured ? (
           <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
             חסרים פרטי החיבור ל-Supabase. העתיקו את .env.example אל .env.local לפי ההסבר ב-README.
@@ -46,6 +47,10 @@ export function SignedOutSettings({ configured, authError, version = "" }: { con
 
 export function SignedInSettings({ username, version = "" }: { username: string; version?: string }) {
   const [pending, setPending] = useState(false);
+  const [keepAwake, setKeepAwake] = useState(false);
+  useEffect(() => {
+    setKeepAwake(readKeepAwake());
+  }, []);
   async function handleLogout() {
     setPending(true);
     try {
@@ -58,12 +63,29 @@ export function SignedInSettings({ username, version = "" }: { username: string;
   return (
     <div className="text-center">
       <AppTitle />
-      <div className="px-6 pt-10">
-        <p className="text-sm text-neutral-500">מחובר</p>
-        <p className="mt-2 text-2xl font-semibold">{username}</p>
-        <button type="button" disabled={pending} onClick={() => void handleLogout()} className="mt-8 w-full rounded-xl bg-[var(--teal)] py-3 font-medium text-white disabled:opacity-60">
-          {pending ? "מתנתק…" : "התנתקות"}
-        </button>
+      <div className="px-6 pt-8">
+        <div className="rounded-xl border border-neutral-200 bg-white px-4 py-6">
+          <p className="text-sm text-neutral-500">מחובר</p>
+          <p className="mt-2 text-2xl font-semibold">{username}</p>
+          <button type="button" disabled={pending} onClick={() => void handleLogout()} className="mt-6 w-full rounded-xl bg-[var(--teal)] py-3 font-medium text-white disabled:opacity-60">
+            {pending ? "מתנתק…" : "התנתקות"}
+          </button>
+        </div>
+        <div className="mt-4 rounded-xl border border-neutral-200 bg-white px-4 py-3 text-start">
+          <label className="flex items-center gap-3 text-sm">
+            <input
+              type="checkbox"
+              checked={keepAwake}
+              onChange={(event) => {
+                const enabled = event.target.checked;
+                setKeepAwake(enabled);
+                writeKeepAwake(enabled);
+              }}
+              className="size-5 accent-[var(--teal)]"
+            />
+            <span>מניעת כיבוי המסך</span>
+          </label>
+        </div>
         <CreditBox version={version} />
       </div>
     </div>
