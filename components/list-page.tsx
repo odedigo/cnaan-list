@@ -245,12 +245,7 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
                   }
                 }}
               >
-                <ImageBubble
-                  src={lists.imageSrc("item", item.id, item.image_path)}
-                  label={item.name}
-                  size="size-9"
-                  onOpen={() => openImage("item", item.id, item.name, item.image_path)}
-                />
+                <ImageBubble src={lists.imageSrc("item", item.id, item.image_path)} label={item.name} size="size-9" />
                 <span className="min-w-0 flex-1 text-start">
                   <span className="block truncate">{item.name}</span>
                   {item.comments ? <span className="block truncate text-xs text-neutral-500">{item.comments}</span> : null}
