@@ -9,6 +9,11 @@
   --bar: #e6e6e6;
 }
 
+html,
+body {
+  overscroll-behavior-y: none;
+}
+
 body {
   background: #efe7dc;
   color: var(--ink);
