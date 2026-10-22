@@ -7,7 +7,7 @@ import { login, logout } from "@/app/actions/auth";
 import { AppHeader } from "@/components/app-header";
 import { createClient } from "@/lib/supabase/client";
 
-export function SignedOutSettings({ configured, authError }: { configured: boolean; authError?: string }) {
+export function SignedOutSettings({ configured, authError, version = "" }: { configured: boolean; authError?: string; version?: string }) {
   const [state, action, pending] = useActionState(login, null);
   return (
     <div>
@@ -37,13 +37,13 @@ export function SignedOutSettings({ configured, authError }: { configured: boole
         </div>
       </form>
       <div className="px-6">
-        <CreditBox />
+        <CreditBox version={version} />
       </div>
     </div>
   );
 }
 
-export function SignedInSettings({ username }: { username: string }) {
+export function SignedInSettings({ username, version = "" }: { username: string; version?: string }) {
   const [pending, setPending] = useState(false);
   async function handleLogout() {
     setPending(true);
@@ -61,17 +61,18 @@ export function SignedInSettings({ username }: { username: string }) {
       <button type="button" disabled={pending} onClick={() => void handleLogout()} className="mt-8 w-full rounded-xl bg-[var(--teal)] py-3 font-medium text-white disabled:opacity-60">
         {pending ? "מתנתק…" : "התנתקות"}
       </button>
-      <CreditBox />
+      <CreditBox version={version} />
     </div>
   );
 }
 
-function CreditBox() {
+function CreditBox({ version }: { version: string }) {
   return (
     <div className="fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] left-1/2 z-40 w-full max-w-[480px] -translate-x-1/2 px-6">
       <div className="rounded-xl border border-neutral-200 bg-white px-4 py-3 text-center text-sm text-neutral-600">
         <p>פותח על ידי עודד כנען</p>
         <p className="mt-1">כל הזכויות שמורות</p>
+        {version ? <p className="mt-1">גרסה {version}</p> : null}
       </div>
     </div>
   );

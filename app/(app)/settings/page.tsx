@@ -7,19 +7,20 @@ export const dynamic = "force-dynamic";
 
 export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
   const params = await searchParams;
+  const version = process.env.APP_VERSION ?? "";
   if (!hasPublicEnv()) {
-    return <SignedOutSettings configured={false} authError={params.error} />;
+    return <SignedOutSettings configured={false} authError={params.error} version={version} />;
   }
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return <SignedOutSettings configured={hasServiceEnv()} authError={params.error} />;
+  if (!user) return <SignedOutSettings configured={hasServiceEnv()} authError={params.error} version={version} />;
   const { data: profile } = await supabase.from("profiles").select("username").eq("id", user.id).maybeSingle();
   return (
     <>
       <AppHeader title="הגדרות" actionsEnabled={false} />
-      <SignedInSettings username={profile?.username ?? ""} />
+      <SignedInSettings username={profile?.username ?? ""} version={version} />
     </>
   );
 }
