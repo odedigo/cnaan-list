@@ -10,13 +10,24 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { flushSync } from "react-dom";
 
+import {
+  changeIndent,
+  insertChecklistRow,
+  moveChecklistRow,
+  normalizeChecklist,
+  numberRows,
+  siblingInsertIndex,
+  sortChecklist,
+  withoutChecklistRow,
+} from "@/lib/checklist";
 import { colorHex, nextCategoryColor, uniqueCategoryColors } from "@/lib/colors";
 import { pruneImageCache, readCachedImage, writeCachedImage } from "@/lib/image-cache";
 import { compressImage } from "@/lib/images";
 import { applyOrder, moveVisible, sortByOrder } from "@/lib/order";
 import { createClient } from "@/lib/supabase/client";
-import type { Category, GroceryLine, Item, ListsData } from "@/lib/types";
+import type { Category, ChecklistRow, GroceryLine, Item, ListsData } from "@/lib/types";
 import { parseQuantity, type UnitId } from "@/lib/units";
 
 type ListsContextValue = {
@@ -51,6 +62,14 @@ type ListsContextValue = {
   removeFromGrocery: (itemId: string) => Promise<void>;
   clearPurchased: () => Promise<void>;
   clearGrocery: () => Promise<void>;
+  checklist: ChecklistRow[];
+  checklistError: string | null;
+  addChecklistRow: (where: { at: "start" } | { afterId: string }) => string | null;
+  setChecklistBody: (id: string, body: string) => Promise<void>;
+  setChecklistIndent: (id: string, direction: "increase" | "decrease") => Promise<void>;
+  moveChecklist: (activeId: string, overId: string) => Promise<void>;
+  setChecklistChecked: (id: string, checked: boolean) => Promise<void>;
+  deleteChecklistRow: (id: string) => Promise<void>;
   uploadImage: (kind: "item" | "category", id: string, file: File) => Promise<void>;
   removeImage: (kind: "item" | "category", id: string) => Promise<void>;
 };
@@ -61,6 +80,8 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
   const [categories, setCategories] = useState(initial.categories);
   const [items, setItems] = useState(initial.items);
   const [grocery, setGrocery] = useState(initial.grocery);
+  const [checklist, setChecklist] = useState(initial.checklist);
+  const [checklistError, setChecklistError] = useState<string | null>(null);
   const [reorderMode, setReorderMode] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -68,19 +89,42 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
   const [previews, setPreviews] = useState<Record<string, string>>({});
   const reorderRef = useRef(false);
   const supabaseRef = useRef(createClient());
+  const checklistRef = useRef(initial.checklist);
+  const writeChain = useRef(Promise.resolve());
+  const pendingIds = useRef(new Set<string>());
+  const pendingDeletes = useRef(new Set<string>());
+  const dirtyBody = useRef(new Map<string, string>());
+  checklistRef.current = checklist;
 
   const refetch = useCallback(async () => {
     if (reorderRef.current) return;
     const supabase = supabaseRef.current;
-    const [{ data: categoryRows }, { data: itemRows }, { data: groceryRows }] = await Promise.all([
+    const [{ data: categoryRows }, { data: itemRows }, { data: groceryRows }, checklistResult] = await Promise.all([
       supabase.from("categories").select("*").eq("account_id", initial.accountId).order("sort_order"),
       supabase.from("items").select("*").eq("account_id", initial.accountId).order("sort_order"),
       supabase.from("grocery_items").select("*").eq("account_id", initial.accountId),
+      supabase.from("checklist_rows").select("*").eq("account_id", initial.accountId).order("sort_order"),
     ]);
     if (reorderRef.current) return;
     if (categoryRows) setCategories(categoryRows.map(normalizeCategory));
     if (itemRows) setItems(itemRows.map(normalizeItem));
     if (groceryRows) setGrocery(groceryRows as GroceryLine[]);
+    if (checklistResult.error) {
+      setChecklistError("לא ניתן לטעון את הרשימות");
+    } else if (checklistResult.data) {
+      const server = checklistResult.data.map(normalizeChecklist).filter((row) => !pendingDeletes.current.has(row.id));
+      const merged = server.map((row) => {
+        const dirty = dirtyBody.current.get(row.id);
+        return dirty === undefined ? row : { ...row, body: dirty };
+      });
+      const missing = checklistRef.current.filter(
+        (row) => pendingIds.current.has(row.id) && !merged.some((entry) => entry.id === row.id),
+      );
+      const next = sortChecklist([...merged, ...missing]);
+      checklistRef.current = next;
+      setChecklist(next);
+      setChecklistError(null);
+    }
   }, [initial.accountId]);
 
   useEffect(() => {
@@ -125,6 +169,7 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
       .on("postgres_changes", { event: "*", schema: "public", table: "categories", filter: `account_id=eq.${initial.accountId}` }, schedule)
       .on("postgres_changes", { event: "*", schema: "public", table: "items", filter: `account_id=eq.${initial.accountId}` }, schedule)
       .on("postgres_changes", { event: "*", schema: "public", table: "grocery_items", filter: `account_id=eq.${initial.accountId}` }, schedule)
+      .on("postgres_changes", { event: "*", schema: "public", table: "checklist_rows", filter: `account_id=eq.${initial.accountId}` }, schedule)
       .subscribe((status) => {
         if (status === "SUBSCRIBED") schedule();
       });
@@ -225,6 +270,159 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
     setError(message);
     void refetch();
   };
+
+  const enqueue = useCallback((task: () => Promise<void>) => {
+    const run = writeChain.current.then(task, task);
+    writeChain.current = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }, []);
+
+  const persistChecklist = useCallback(
+    async (previous: ChecklistRow[], next: ChecklistRow[]) => {
+      const supabase = supabaseRef.current;
+      const prevById = new Map(previous.map((row) => [row.id, row]));
+      const nextIds = new Set(next.map((row) => row.id));
+      const inserts = next.filter((row) => !prevById.has(row.id));
+      const deletes = previous.filter((row) => !nextIds.has(row.id));
+      const updates = next.filter((row) => {
+        const old = prevById.get(row.id);
+        if (!old) return false;
+        return old.body !== row.body || old.indent !== row.indent || old.checked !== row.checked || old.sort_order !== row.sort_order;
+      });
+      for (const row of inserts) pendingIds.current.add(row.id);
+      for (const row of deletes) pendingDeletes.current.add(row.id);
+      const results = await Promise.all([
+        ...inserts.map((row) =>
+          supabase.from("checklist_rows").insert({
+            id: row.id,
+            account_id: initial.accountId,
+            body: row.body,
+            indent: row.indent,
+            checked: row.checked,
+            sort_order: row.sort_order,
+          }),
+        ),
+        ...updates.map((row) =>
+          supabase
+            .from("checklist_rows")
+            .update({
+              body: row.body,
+              indent: row.indent,
+              checked: row.checked,
+              sort_order: row.sort_order,
+            })
+            .eq("id", row.id),
+        ),
+        ...deletes.map((row) => supabase.from("checklist_rows").delete().eq("id", row.id)),
+      ]);
+      for (const row of inserts) pendingIds.current.delete(row.id);
+      for (const row of deletes) pendingDeletes.current.delete(row.id);
+      if (results.some((result) => result.error)) {
+        setChecklistError("לא ניתן לשמור את הרשימה");
+        await refetch();
+        return false;
+      }
+      setChecklistError(null);
+      return true;
+    },
+    [initial.accountId, refetch],
+  );
+
+  const commitChecklist = useCallback(
+    (previous: ChecklistRow[], next: ChecklistRow[]) => {
+      const ordered = numberRows(next);
+      checklistRef.current = ordered;
+      flushSync(() => setChecklist(ordered));
+      return enqueue(() => persistChecklist(previous, ordered).then(() => undefined));
+    },
+    [enqueue, persistChecklist],
+  );
+
+  const addChecklistRow = useCallback(
+    (where: { at: "start" } | { afterId: string }) => {
+      const previous = sortChecklist(checklistRef.current);
+      const index = "at" in where ? 0 : siblingInsertIndex(previous, where.afterId);
+      if (index < 0) return null;
+      const source = "at" in where ? null : previous.find((row) => row.id === where.afterId);
+      const row: ChecklistRow = {
+        id: crypto.randomUUID(),
+        account_id: initial.accountId,
+        body: "",
+        indent: source?.indent ?? 0,
+        checked: false,
+        sort_order: index,
+      };
+      void commitChecklist(previous, insertChecklistRow(previous, row, index));
+      return row.id;
+    },
+    [commitChecklist, initial.accountId],
+  );
+
+  const setChecklistBody = useCallback(
+    (id: string, body: string) => {
+      return enqueue(async () => {
+        const previous = sortChecklist(checklistRef.current);
+        const current = previous.find((row) => row.id === id);
+        if (!current || current.body === body) return;
+        dirtyBody.current.set(id, body);
+        const next = previous.map((row) => (row.id === id ? { ...row, body } : row));
+        checklistRef.current = next;
+        setChecklist(next);
+        const { error: updateError } = await supabaseRef.current.from("checklist_rows").update({ body }).eq("id", id);
+        if (dirtyBody.current.get(id) === body) dirtyBody.current.delete(id);
+        if (updateError) {
+          setChecklistError("לא ניתן לשמור את הרשימה");
+          await refetch();
+          return;
+        }
+        setChecklistError(null);
+      });
+    },
+    [enqueue, refetch],
+  );
+
+  const setChecklistIndent = useCallback(
+    (id: string, direction: "increase" | "decrease") => {
+      const previous = sortChecklist(checklistRef.current);
+      const next = changeIndent(previous, id, direction);
+      if (!next) return Promise.resolve();
+      return commitChecklist(previous, next);
+    },
+    [commitChecklist],
+  );
+
+  const moveChecklist = useCallback(
+    (activeId: string, overId: string) => {
+      const previous = sortChecklist(checklistRef.current);
+      const next = moveChecklistRow(previous, activeId, overId);
+      if (!next) return Promise.resolve();
+      return commitChecklist(previous, next);
+    },
+    [commitChecklist],
+  );
+
+  const setChecklistChecked = useCallback(
+    (id: string, checked: boolean) => {
+      const previous = sortChecklist(checklistRef.current);
+      const current = previous.find((row) => row.id === id);
+      if (!current || current.checked === checked) return Promise.resolve();
+      const next = previous.map((row) => (row.id === id ? { ...row, checked } : row));
+      return commitChecklist(previous, next);
+    },
+    [commitChecklist],
+  );
+
+  const deleteChecklistRow = useCallback(
+    (id: string) => {
+      const previous = sortChecklist(checklistRef.current);
+      if (!previous.some((row) => row.id === id)) return Promise.resolve();
+      return commitChecklist(previous, withoutChecklistRow(previous, id));
+    },
+    [commitChecklist],
+  );
 
   const value = useMemo<ListsContextValue>(() => {
     return {
@@ -566,8 +764,35 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
         }
         if (currentPath) await supabaseRef.current.storage.from("item-images").remove([currentPath]);
       },
+      checklist: sortChecklist(checklist),
+      checklistError,
+      addChecklistRow,
+      setChecklistBody,
+      setChecklistIndent,
+      moveChecklist,
+      setChecklistChecked,
+      deleteChecklistRow,
     };
-  }, [categories, error, grocery, imageSrc, initial.accountId, initial.username, items, refetch, reorderMode, saving]);
+  }, [
+    addChecklistRow,
+    categories,
+    checklist,
+    checklistError,
+    deleteChecklistRow,
+    error,
+    grocery,
+    imageSrc,
+    initial.accountId,
+    initial.username,
+    items,
+    refetch,
+    reorderMode,
+    saving,
+    setChecklistBody,
+    setChecklistChecked,
+    moveChecklist,
+    setChecklistIndent,
+  ]);
 
   return <ListsContext.Provider value={value}>{children}</ListsContext.Provider>;
 }

@@ -32,7 +32,7 @@ export function ListPage({ mode }: { mode: "inventory" | "grocery" }) {
   if (!lists) {
     return (
       <div>
-        <AppHeader title={mode === "inventory" ? "רשימת המוצרים" : "רשימת הקניות"} actionsEnabled={false} />
+        <AppHeader title={mode === "inventory" ? "רשימת המוצרים" : "עגלת קניות"} actionsEnabled={false} />
         <p className="px-6 pt-16 text-center text-neutral-500">יש להתחבר כדי לראות את הרשימה.</p>
       </div>
     );
@@ -167,7 +167,7 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
     });
   }
 
-  const title = mode === "inventory" ? "רשימת המוצרים" : "רשימת הקניות";
+  const title = mode === "inventory" ? "רשימת המוצרים" : "עגלת קניות";
 
   return (
     <div>

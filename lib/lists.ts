@@ -1,3 +1,4 @@
+import { normalizeChecklist } from "@/lib/checklist";
 import { colorHex } from "@/lib/colors";
 import { createClient } from "@/lib/supabase/server";
 import type { Category, GroceryLine, Item, ListsData } from "@/lib/types";
@@ -11,10 +12,11 @@ export async function loadLists(userId: string): Promise<ListsData | null> {
   ]);
   if (!profile || !account) return null;
 
-  const [{ data: categories }, { data: items }, { data: grocery }] = await Promise.all([
+  const [{ data: categories }, { data: items }, { data: grocery }, checklistResult] = await Promise.all([
     supabase.from("categories").select("*").eq("account_id", account.id).order("sort_order"),
     supabase.from("items").select("*").eq("account_id", account.id).order("sort_order"),
     supabase.from("grocery_items").select("*").eq("account_id", account.id),
+    supabase.from("checklist_rows").select("*").eq("account_id", account.id).order("sort_order"),
   ]);
 
   return {
@@ -23,6 +25,7 @@ export async function loadLists(userId: string): Promise<ListsData | null> {
     categories: (categories ?? []).map(normalizeCategory),
     items: (items ?? []).map(normalizeItem),
     grocery: (grocery ?? []).map(normalizeGrocery),
+    checklist: checklistResult.error ? [] : (checklistResult.data ?? []).map(normalizeChecklist),
   };
 }
 

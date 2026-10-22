@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { AppPathContext } from "@/components/app-path";
 import { AppHeader } from "@/components/app-header";
 import { BottomNav } from "@/components/bottom-nav";
+import { ChecklistPage } from "@/components/checklist-page";
 import { ListPage } from "@/components/list-page";
 import { useLists, useListsOptional } from "@/components/lists-provider";
 import { bindKeepAwake } from "@/lib/keep-awake";
@@ -47,7 +48,7 @@ export function AppShell({
   useEffect(() => {
     const onPop = () => {
       const next = window.location.pathname;
-      if (next === "/grocery" || next === "/inventory") restoreRef.current = next;
+      if (next === "/grocery" || next === "/inventory" || next === "/lists") restoreRef.current = next;
       pathRef.current = next;
       setPath(next);
     };
@@ -60,7 +61,7 @@ export function AppShell({
     if (current === href) return;
     scrolls.current[current] = window.scrollY;
     pathRef.current = href;
-    if (href === "/grocery" || href === "/inventory") restoreRef.current = href;
+    if (href === "/grocery" || href === "/inventory" || href === "/lists") restoreRef.current = href;
     if (window.location.pathname !== href) {
       const push = nativePushState.current ?? window.history.pushState.bind(window.history);
       push(null, "", href);
@@ -115,6 +116,7 @@ export function AppShell({
     <>
       <LazyList mode="grocery" active={path === "/grocery"} warm={warm} scrolls={scrolls} restoreRef={restoreRef} />
       <LazyList mode="inventory" active={path === "/inventory"} warm={warm} scrolls={scrolls} restoreRef={restoreRef} />
+      <LazyChecklist active={path === "/lists"} warm={warm} scrolls={scrolls} restoreRef={restoreRef} />
       {path === "/settings" ? <SignedInSettingsView version={version} /> : null}
     </>
   ) : (
@@ -126,6 +128,37 @@ export function AppShell({
       <div className="pb-24">{body}</div>
       <BottomNav signedIn={signedIn} />
     </AppPathContext.Provider>
+  );
+}
+
+function LazyChecklist({
+  active,
+  warm,
+  scrolls,
+  restoreRef,
+}: {
+  active: boolean;
+  warm: boolean;
+  scrolls: RefObject<Record<string, number>>;
+  restoreRef: RefObject<string | null>;
+}) {
+  const [mounted, setMounted] = useState(active);
+
+  useEffect(() => {
+    if (active || warm) setMounted(true);
+  }, [active, warm]);
+
+  useLayoutEffect(() => {
+    if (!active || restoreRef.current !== "/lists") return;
+    restoreRef.current = null;
+    window.scrollTo(0, scrolls.current?.["/lists"] ?? 0);
+  }, [active, restoreRef, scrolls]);
+
+  if (!mounted) return null;
+  return (
+    <div hidden={!active}>
+      <ChecklistPage active={active} />
+    </div>
   );
 }
 

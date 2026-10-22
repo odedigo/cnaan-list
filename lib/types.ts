@@ -28,10 +28,20 @@ export type GroceryLine = {
   checked: boolean;
 };
 
+export type ChecklistRow = {
+  id: string;
+  account_id: string;
+  body: string;
+  indent: 0 | 1;
+  checked: boolean;
+  sort_order: number;
+};
+
 export type ListsData = {
   accountId: string;
   username: string;
   categories: Category[];
   items: Item[];
   grocery: GroceryLine[];
+  checklist: ChecklistRow[];
 };

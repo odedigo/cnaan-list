@@ -4,12 +4,18 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 import { useAppPath } from "@/components/app-path";
-import { GroceryIcon, ProductsIcon, SettingsIcon } from "@/components/icons";
+import {
+  GroceryIcon,
+  ListsIcon,
+  ProductsIcon,
+  SettingsIcon,
+} from "@/components/icons";
 import { useListsOptional } from "@/components/lists-provider";
 
 const tabs = [
   { href: "/inventory", label: "רשימת מוצרים", icon: ProductsIcon },
-  { href: "/grocery", label: "רשימת קניות", icon: GroceryIcon },
+  { href: "/grocery", label: "עגלת קניות", icon: GroceryIcon },
+  { href: "/lists", label: "רשימות", icon: ListsIcon },
   { href: "/settings", label: "הגדרות", icon: SettingsIcon },
 ] as const;
 
@@ -26,12 +32,17 @@ export function BottomNav({ signedIn }: { signedIn: boolean }) {
       aria-label="ניווט ראשי"
     >
       {tabs.map((tab) => {
-        const active = pathname === tab.href || pathname.startsWith(`${tab.href}/`);
-        const href = signedIn || tab.href === "/settings" ? tab.href : "/settings";
+        const active =
+          pathname === tab.href || pathname.startsWith(`${tab.href}/`);
+        const href =
+          signedIn || tab.href === "/settings" ? tab.href : "/settings";
         const Icon = tab.icon;
         const instant = signedIn && href === tab.href;
-        const className = `flex flex-1 flex-col items-center gap-1 py-2 text-[11px] ${active ? "text-black" : "text-neutral-400"}`;
-        const label = tab.href === "/grocery" && groceryCount > 0 ? `${tab.label}, ${groceryCount}` : undefined;
+        const className = `flex min-w-0 flex-1 flex-col items-center gap-1 px-0.5 py-2 text-center text-[10px] leading-tight ${active ? "text-black" : "text-neutral-400"}`;
+        const label =
+          tab.href === "/grocery" && groceryCount > 0
+            ? `${tab.label}, ${groceryCount}`
+            : undefined;
         if (instant) {
           return (
             <a
@@ -41,7 +52,14 @@ export function BottomNav({ signedIn }: { signedIn: boolean }) {
               aria-current={active ? "page" : undefined}
               aria-label={label}
               onClick={(event) => {
-                if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
+                if (
+                  event.metaKey ||
+                  event.ctrlKey ||
+                  event.shiftKey ||
+                  event.altKey ||
+                  event.button !== 0
+                )
+                  return;
                 event.preventDefault();
                 appPath?.go(href);
               }}

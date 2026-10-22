@@ -35,6 +35,7 @@ export function AppHeader({
   onToggleCategories,
   onClearGrocery,
   clearGroceryEnabled = false,
+  onPlus,
 }: {
   title: string;
   actionsEnabled: boolean;
@@ -55,6 +56,7 @@ export function AppHeader({
   onToggleCategories?: () => void;
   onClearGrocery?: () => void;
   clearGroceryEnabled?: boolean;
+  onPlus?: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const showMenu = Boolean(onAdd || onSort || onReorder || onExport);
@@ -114,6 +116,11 @@ export function AppHeader({
               onClick={() => setMenuOpen((open) => !open)}
             >
               <MenuIcon className="size-6" />
+            </HeaderButton>
+          ) : null}
+          {onPlus ? (
+            <HeaderButton label="הוספת שורה" disabled={!actionsEnabled} onClick={onPlus}>
+              <PlusIcon className="size-7" />
             </HeaderButton>
           ) : null}
           {searchSide === "end" ? searchButton : null}

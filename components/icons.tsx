@@ -36,6 +36,15 @@ export function SortIcon(props: IconProps) {
   );
 }
 
+export function ArrowIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true" {...props}>
+      <path d="M5 12h14" strokeLinecap="round" />
+      <path d="M13 6.5 18.5 12 13 17.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 export function ChevronIcon(props: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true" {...props}>
@@ -139,19 +148,36 @@ export function ImageIcon(props: IconProps) {
 
 export function ProductsIcon(props: IconProps) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true" {...props}>
-      <path d="M12 3 20 7.5 12 12 4 7.5 12 3Z" />
-      <path d="M20 7.5V16.5L12 21 4 16.5V7.5" />
-      <path d="M12 12v9" />
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" aria-hidden="true" {...props}>
+      <path d="M12 2.2 15.7 4.2 12 6.2 8.3 4.2Z" />
+      <path d="M8.3 4.2v3.3L12 9.5V6.2" />
+      <path d="M15.7 4.2v3.3L12 9.5" />
+      <path d="M7.5 11.2 11.2 13.2 7.5 15.2 3.8 13.2Z" />
+      <path d="M3.8 13.2v3.3L7.5 18.5v-3.3" />
+      <path d="M11.2 13.2v3.3L7.5 18.5" />
+      <path d="M16.5 11.2 20.2 13.2 16.5 15.2 12.8 13.2Z" />
+      <path d="M12.8 13.2v3.3L16.5 18.5v-3.3" />
+      <path d="M20.2 13.2v3.3L16.5 18.5" />
     </svg>
   );
 }
 
 export function GroceryIcon(props: IconProps) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true" {...props}>
-      <path d="M8 4h8v16H8z" />
-      <path d="M10 8h4M10 12h4M10 16h2" strokeLinecap="round" />
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" {...props}>
+      <path d="M4 5.5h1.7l1.6 9.1a1.4 1.4 0 0 0 1.4 1.1h8.6a1.4 1.4 0 0 0 1.4-1.2L20.2 8H7.2" />
+      <circle cx="9.3" cy="19" r="1.25" fill="currentColor" stroke="none" />
+      <circle cx="16.8" cy="19" r="1.25" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+export function ListsIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" {...props}>
+      <rect x="6" y="4.2" width="12" height="16" rx="1.6" />
+      <path d="M9.2 4.2v-.5A1.4 1.4 0 0 1 10.6 2.3h2.8a1.4 1.4 0 0 1 1.4 1.4v.5" />
+      <path d="M8.8 10h6.4M8.8 13.4h6.4M8.8 16.8h4" />
     </svg>
   );
 }
