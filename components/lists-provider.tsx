@@ -49,6 +49,7 @@ type ListsContextValue = {
   setChecked: (itemId: string, checked: boolean) => Promise<void>;
   removeFromGrocery: (itemId: string) => Promise<void>;
   clearPurchased: () => Promise<void>;
+  clearGrocery: () => Promise<void>;
   uploadImage: (kind: "item" | "category", id: string, file: File) => Promise<void>;
   removeImage: (kind: "item" | "category", id: string) => Promise<void>;
 };
@@ -492,6 +493,15 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
         setGrocery((current) => current.filter((line) => !line.checked));
         const { error: deleteError } = await supabaseRef.current.from("grocery_items").delete().in("id", ids);
         if (deleteError) fail("לא ניתן לנקות את הפריטים שנקנו");
+      },
+      async clearGrocery() {
+        if (grocery.length === 0) return;
+        setGrocery([]);
+        const { error: deleteError } = await supabaseRef.current.from("grocery_items").delete().eq("account_id", initial.accountId);
+        if (deleteError) {
+          fail("לא ניתן לרוקן את רשימת הקניות");
+          void refetch();
+        }
       },
       async uploadImage(kind, id, file) {
         setError(null);

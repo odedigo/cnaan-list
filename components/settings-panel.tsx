@@ -36,6 +36,9 @@ export function SignedOutSettings({ configured, authError }: { configured: boole
           <Link href="/forgot-password">שכחתי סיסמה</Link>
         </div>
       </form>
+      <div className="px-6">
+        <CreditBox />
+      </div>
     </div>
   );
 }
@@ -58,6 +61,18 @@ export function SignedInSettings({ username }: { username: string }) {
       <button type="button" disabled={pending} onClick={() => void handleLogout()} className="mt-8 w-full rounded-xl bg-[var(--teal)] py-3 font-medium text-white disabled:opacity-60">
         {pending ? "מתנתק…" : "התנתקות"}
       </button>
+      <CreditBox />
+    </div>
+  );
+}
+
+function CreditBox() {
+  return (
+    <div className="fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] left-1/2 z-40 w-full max-w-[480px] -translate-x-1/2 px-6">
+      <div className="rounded-xl border border-neutral-200 bg-white px-4 py-3 text-center text-sm text-neutral-600">
+        <p>פותח על ידי עודד כנען</p>
+        <p className="mt-1">כל הזכויות שמורות</p>
+      </div>
     </div>
   );
 }

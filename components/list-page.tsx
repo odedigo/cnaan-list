@@ -48,6 +48,7 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
   const collapseKey = mode === "inventory" ? `cnaanlist-inventory-collapsed:${lists.accountId}` : null;
   const [editor, setEditor] = useState<Editor | null>(null);
   const [confirmClearPurchased, setConfirmClearPurchased] = useState(false);
+  const [confirmClearGrocery, setConfirmClearGrocery] = useState(false);
   const [lightbox, setLightbox] = useState<{
     src: string | null;
     label: string;
@@ -173,6 +174,7 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
         searchValue={query}
         searchPlaceholder={mode === "inventory" ? "חיפוש במלאי" : "חיפוש מוצר להוספה"}
         searchInputRef={searchInputRef}
+        searchSide={mode === "grocery" ? "end" : "start"}
         onSearchToggle={() => {
           setSearchOpen((open) => !open);
           setQuery("");
@@ -193,10 +195,12 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
             return next;
           });
         }}
-        onAdd={() => setEditor({ kind: "new-category" })}
-        onSort={() => void lists.sortAlphabetically()}
-        onReorder={() => void lists.toggleReorder()}
+        onAdd={mode === "inventory" ? () => setEditor({ kind: "new-category" }) : undefined}
+        onSort={mode === "inventory" ? () => void lists.sortAlphabetically() : undefined}
+        onReorder={mode === "inventory" ? () => void lists.toggleReorder() : undefined}
         categoriesExpanded={categoriesOpen()}
+        onClearGrocery={mode === "grocery" ? () => setConfirmClearGrocery(true) : undefined}
+        clearGroceryEnabled={lists.grocery.length > 0}
         onToggleCategories={
           lists.categories.length > 0 || purchasedVisible
             ? () => {
@@ -265,7 +269,7 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
                     <section className="mb-2">
                       {mode === "grocery" && !lists.reorderMode ? (
                         <div
-                          className="mb-1 grid cursor-pointer grid-cols-[4.75rem_minmax(0,1fr)_4.75rem] items-center rounded-md bg-[var(--bar)] py-2"
+                          className="mb-1 grid cursor-pointer grid-cols-[4.75rem_minmax(0,1fr)_4.75rem] items-center rounded-md bg-[var(--bar)] py-1"
                           onClick={() => toggleCategory(category.id)}
                         >
                           <div className="flex items-center ps-2">
@@ -274,18 +278,7 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
                             </span>
                           </div>
                           <div className="min-w-0 truncate px-1 text-center text-sm font-medium">{category.name}</div>
-                          <div className="flex items-center justify-end gap-2 pe-1">
-                            <button
-                              type="button"
-                              className="grid size-8 place-items-center text-[var(--orange)]"
-                              aria-label="הוספת מוצר חדש"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                setEditor({ kind: "new-item", categoryId: category.id });
-                              }}
-                            >
-                              <PlusIcon className="size-4" />
-                            </button>
+                          <div className="flex items-center justify-end pe-1">
                             <button
                               type="button"
                               className="grid size-8 place-items-center text-neutral-600"
@@ -346,7 +339,7 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
             {purchasedVisible ? (
               <section className="mt-6">
                 <div
-                  className="mb-2 grid cursor-pointer grid-cols-[4.75rem_minmax(0,1fr)_4.75rem] items-center rounded-md bg-[#e7f3ef] py-2"
+                  className="mb-2 grid cursor-pointer grid-cols-[4.75rem_minmax(0,1fr)_4.75rem] items-center rounded-md bg-[#e7f3ef] py-2.5"
                   onClick={() => toggleCategory(purchasedCategoryId)}
                 >
                   <div className="flex items-center ps-2">
@@ -398,6 +391,26 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
           onClose={() => setEditor(null)}
           onEnlarge={(src, label, onReplace, onRemove) => setLightbox({ src, label, onReplace, onRemove })}
         />
+      ) : null}
+      {confirmClearGrocery ? (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true" aria-label="אישור ריקון רשימת הקניות">
+          <div className="w-full max-w-xs rounded-2xl bg-white p-4 text-center">
+            <p className="text-sm font-medium">להסיר את כל הפריטים מרשימת הקניות, כולל הפריטים שנקנו?</p>
+            <button
+              type="button"
+              className="mt-4 w-full rounded-xl bg-red-50 py-3 font-medium text-red-700"
+              onClick={() => {
+                setConfirmClearGrocery(false);
+                void lists.clearGrocery();
+              }}
+            >
+              אישור מחיקה
+            </button>
+            <button type="button" className="mt-2 w-full rounded-xl bg-neutral-100 py-3 font-medium text-neutral-700" onClick={() => setConfirmClearGrocery(false)}>
+              ביטול
+            </button>
+          </div>
+        </div>
       ) : null}
       {confirmClearPurchased ? (
         <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true" aria-label="אישור ניקוי הפריטים שנקנו">
@@ -543,10 +556,10 @@ function EntityCard({
     <div
       dir="rtl"
       onClick={onClick}
-      className={`relative mb-1 flex items-center gap-1.5 overflow-hidden rounded-lg py-1.5 pe-1 ps-2.5 shadow-sm ${purchased ? "bg-neutral-200" : highlighted ? "bg-[#d7efe9]" : "bg-white"} ${onClick ? "cursor-pointer" : ""} ${nested ? "ms-6 w-[calc(100%-1.5rem)]" : ""}`}
+      className={`relative mb-1 flex items-center gap-1.5 overflow-hidden rounded-lg py-2 pe-1 ps-2.5 shadow-sm ${purchased ? "bg-neutral-200" : highlighted ? "bg-[#d7efe9]" : "bg-white"} ${onClick ? "cursor-pointer" : ""} ${nested ? "ms-6 w-[calc(100%-1.5rem)]" : ""}`}
     >
       <span className="absolute inset-y-0 start-0 w-1.5" style={{ background: color }} />
-      <ImageBubble src={src} label={name} onOpen={onOpenImage} size="size-9" />
+      <ImageBubble src={src} label={name} onOpen={onOpenImage} size="size-10" />
       <div className="min-w-0 flex-1 text-start text-sm leading-tight">
         <div className="flex min-w-0 items-baseline gap-1">
           <span className="truncate">{name}</span>
@@ -596,8 +609,8 @@ function Stepper({ quantity, unitShort, onChange }: { quantity: number; unitShor
       <button type="button" aria-label="הפחתה" className="grid size-7 place-items-center rounded-full border border-neutral-300" onClick={() => onChange(quantity - 1)}>
         −
       </button>
-      <span className="min-w-12 text-center">
-        {formatQuantity(quantity)} {unitShort}
+      <span dir="rtl" className="min-w-12 text-center">
+        <bdi>{formatQuantity(quantity)}</bdi> <bdi>{unitShort}</bdi>
       </span>
       <button type="button" aria-label="הוספה" className="grid size-7 place-items-center rounded-full border border-neutral-300" onClick={() => onChange(quantity + 1)}>
         +
