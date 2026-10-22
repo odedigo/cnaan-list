@@ -12,16 +12,18 @@ import {
 } from "@dnd-kit/core";
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { AppHeader } from "@/components/app-header";
 import { DetailsSheet, type Editor } from "@/components/details-sheet";
-import { DotsIcon, GripIcon, PlusIcon } from "@/components/icons";
+import { DotsIcon, GripIcon, PlusIcon, TrashIcon } from "@/components/icons";
 import { ImageBubble, Lightbox } from "@/components/images";
 import { useLists, useListsOptional } from "@/components/lists-provider";
 import { colorHex } from "@/lib/colors";
 import type { Category, Item } from "@/lib/types";
 import { formatQuantity, unitById } from "@/lib/units";
+
+const purchasedCategoryId = "purchased";
 
 export function ListPage({ mode }: { mode: "inventory" | "grocery" }) {
   const lists = useListsOptional();
@@ -40,10 +42,12 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
   const lists = useLists();
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [collapseReady, setCollapseReady] = useState(mode !== "inventory");
   const collapseKey = mode === "inventory" ? `cnaanlist-inventory-collapsed:${lists.accountId}` : null;
   const [editor, setEditor] = useState<Editor | null>(null);
+  const [confirmClearPurchased, setConfirmClearPurchased] = useState(false);
   const [lightbox, setLightbox] = useState<{
     src: string | null;
     label: string;
@@ -99,6 +103,13 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
       return categoryA - categoryB || a.sort_order - b.sort_order;
     });
 
+  const purchasedVisible = mode === "grocery" && !lists.reorderMode && cartItems.length > 0;
+
+  function categoriesOpen(state: Record<string, boolean> = collapsed) {
+    if (lists.categories.some((category) => isExpanded(category.id, state))) return true;
+    return purchasedVisible && isExpanded(purchasedCategoryId, state);
+  }
+
   const searchResults =
     mode === "grocery" && needle
       ? lists.items.filter((item) => {
@@ -135,6 +146,12 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
     lists.moveItems(activeItem.category_id, activeId, overId, itemsFor(category).map((item) => item.id));
   }
 
+  function chooseSearchResult(itemId: string) {
+    void lists.addToGrocery(itemId);
+    setQuery("");
+    searchInputRef.current?.focus();
+  }
+
   function openImage(kind: "item" | "category", id: string, label: string, path: string | null) {
     setLightbox({
       src: lists.imageSrc(kind, id, path),
@@ -155,6 +172,7 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
         searchOpen={searchOpen}
         searchValue={query}
         searchPlaceholder={mode === "inventory" ? "חיפוש במלאי" : "חיפוש מוצר להוספה"}
+        searchInputRef={searchInputRef}
         onSearchToggle={() => {
           setSearchOpen((open) => !open);
           setQuery("");
@@ -178,14 +196,16 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
         onAdd={() => setEditor({ kind: "new-category" })}
         onSort={() => void lists.sortAlphabetically()}
         onReorder={() => void lists.toggleReorder()}
-        categoriesExpanded={lists.categories.some((category) => isExpanded(category.id))}
+        categoriesExpanded={categoriesOpen()}
         onToggleCategories={
-          lists.categories.length > 0
+          lists.categories.length > 0 || purchasedVisible
             ? () => {
                 setCollapsed((current) => {
-                  const expanded = lists.categories.some((category) => isExpanded(category.id, current));
+                  const ids = lists.categories.map((category) => category.id);
+                  if (mode === "grocery") ids.push(purchasedCategoryId);
+                  const expanded = ids.some((id) => (id === purchasedCategoryId && !purchasedVisible ? false : isExpanded(id, current)));
                   const next: Record<string, boolean> = {};
-                  for (const category of lists.categories) next[category.id] = expanded;
+                  for (const id of ids) next[id] = expanded;
                   return next;
                 });
               }
@@ -203,11 +223,12 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
                 role="button"
                 tabIndex={0}
                 className="flex w-full items-center gap-3 px-3 py-2 text-start"
-                onClick={() => void lists.addToGrocery(item.id)}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => chooseSearchResult(item.id)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" || event.key === " ") {
                     event.preventDefault();
-                    void lists.addToGrocery(item.id);
+                    chooseSearchResult(item.id);
                   }
                 }}
               >
@@ -244,11 +265,16 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
                     <section className="mb-2">
                       {mode === "grocery" && !lists.reorderMode ? (
                         <div
-                          className="relative mb-1 flex cursor-pointer items-center rounded-md bg-[var(--bar)] py-1"
+                          className="mb-1 grid cursor-pointer grid-cols-[4.75rem_minmax(0,1fr)_4.75rem] items-center rounded-md bg-[var(--bar)] py-2"
                           onClick={() => toggleCategory(category.id)}
                         >
-                          <div className="flex-1 text-center text-sm font-medium">{category.name}</div>
-                          <div className="absolute end-1 flex items-center gap-2">
+                          <div className="flex items-center ps-2">
+                            <span className="min-w-5 rounded-full bg-white px-1.5 text-center text-xs font-semibold leading-5 text-neutral-800">
+                              {categoryItems.length}
+                            </span>
+                          </div>
+                          <div className="min-w-0 truncate px-1 text-center text-sm font-medium">{category.name}</div>
+                          <div className="flex items-center justify-end gap-2 pe-1">
                             <button
                               type="button"
                               className="grid size-8 place-items-center text-[var(--orange)]"
@@ -317,22 +343,48 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
                 </SortableBlock>
               );
             })}
-            {mode === "grocery" && !lists.reorderMode && cartItems.length > 0 ? (
+            {purchasedVisible ? (
               <section className="mt-6">
-                <div className="mb-2 rounded-md bg-[#e7f3ef] py-2 text-center text-sm font-medium">בעגלת הקניות</div>
-                {cartItems.map((item) => (
-                  <EntityCard
-                    key={item.id}
-                    nested
-                    name={item.name}
-                    comment={item.comments}
-                    color={colorHex(lists.categories.find((category) => category.id === item.category_id)?.color)}
-                    src={lists.imageSrc("item", item.id, item.image_path)}
-                    onOpenImage={() => openImage("item", item.id, item.name, item.image_path)}
-                    onDots={() => setEditor({ kind: "item", id: item.id })}
-                    onClick={() => void lists.setChecked(item.id, false)}
-                  />
-                ))}
+                <div
+                  className="mb-2 grid cursor-pointer grid-cols-[4.75rem_minmax(0,1fr)_4.75rem] items-center rounded-md bg-[#e7f3ef] py-2"
+                  onClick={() => toggleCategory(purchasedCategoryId)}
+                >
+                  <div className="flex items-center ps-2">
+                    <span className="min-w-5 rounded-full bg-white px-1.5 text-center text-xs font-semibold leading-5 text-neutral-800">
+                      {cartItems.length}
+                    </span>
+                  </div>
+                  <div className="min-w-0 truncate px-1 text-center text-sm font-medium">בעגלת הקניות</div>
+                  <div className="flex items-center justify-end pe-1">
+                    <button
+                      type="button"
+                      className="grid size-8 place-items-center text-neutral-600"
+                      aria-label="ניקוי הפריטים שנקנו"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setConfirmClearPurchased(true);
+                      }}
+                    >
+                      <TrashIcon className="size-5" />
+                    </button>
+                  </div>
+                </div>
+                {isExpanded(purchasedCategoryId)
+                  ? cartItems.map((item) => (
+                      <EntityCard
+                        key={item.id}
+                        nested
+                        purchased
+                        name={item.name}
+                        comment={item.comments}
+                        color={colorHex(lists.categories.find((category) => category.id === item.category_id)?.color)}
+                        src={lists.imageSrc("item", item.id, item.image_path)}
+                        onOpenImage={() => openImage("item", item.id, item.name, item.image_path)}
+                        onDots={() => setEditor({ kind: "item", id: item.id })}
+                        onClick={() => void lists.setChecked(item.id, false)}
+                      />
+                    ))
+                  : null}
               </section>
             ) : null}
           </div>
@@ -346,6 +398,26 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
           onClose={() => setEditor(null)}
           onEnlarge={(src, label, onReplace, onRemove) => setLightbox({ src, label, onReplace, onRemove })}
         />
+      ) : null}
+      {confirmClearPurchased ? (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true" aria-label="אישור ניקוי הפריטים שנקנו">
+          <div className="w-full max-w-xs rounded-2xl bg-white p-4 text-center">
+            <p className="text-sm font-medium">להסיר את הפריטים שנקנו מהרשימה?</p>
+            <button
+              type="button"
+              className="mt-4 w-full rounded-xl bg-red-50 py-3 font-medium text-red-700"
+              onClick={() => {
+                setConfirmClearPurchased(false);
+                void lists.clearPurchased();
+              }}
+            >
+              אישור מחיקה
+            </button>
+            <button type="button" className="mt-2 w-full rounded-xl bg-neutral-100 py-3 font-medium text-neutral-700" onClick={() => setConfirmClearPurchased(false)}>
+              ביטול
+            </button>
+          </div>
+        </div>
       ) : null}
       {lightbox ? (
         <Lightbox
@@ -446,6 +518,7 @@ function EntityCard({
   extra,
   nested = false,
   highlighted = false,
+  purchased = false,
   onOpenImage,
   onAdd,
   onDots,
@@ -460,6 +533,7 @@ function EntityCard({
   extra?: ReactNode;
   nested?: boolean;
   highlighted?: boolean;
+  purchased?: boolean;
   onOpenImage?: () => void;
   onAdd?: () => void;
   onDots?: () => void;
@@ -469,10 +543,10 @@ function EntityCard({
     <div
       dir="rtl"
       onClick={onClick}
-      className={`relative mb-1 flex items-center gap-1.5 overflow-hidden rounded-lg py-1 pe-1 ps-2.5 shadow-sm ${highlighted ? "bg-[#d7efe9]" : "bg-white"} ${onClick ? "cursor-pointer" : ""} ${nested ? "ms-6 w-[calc(100%-1.5rem)]" : ""}`}
+      className={`relative mb-1 flex items-center gap-1.5 overflow-hidden rounded-lg py-1.5 pe-1 ps-2.5 shadow-sm ${purchased ? "bg-neutral-200" : highlighted ? "bg-[#d7efe9]" : "bg-white"} ${onClick ? "cursor-pointer" : ""} ${nested ? "ms-6 w-[calc(100%-1.5rem)]" : ""}`}
     >
       <span className="absolute inset-y-0 start-0 w-1.5" style={{ background: color }} />
-      <ImageBubble src={src} label={name} onOpen={onOpenImage} size="size-8" />
+      <ImageBubble src={src} label={name} onOpen={onOpenImage} size="size-9" />
       <div className="min-w-0 flex-1 text-start text-sm leading-tight">
         <div className="flex min-w-0 items-baseline gap-1">
           <span className="truncate">{name}</span>

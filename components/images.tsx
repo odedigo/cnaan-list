@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type DragEvent } from "react";
+import { createPortal } from "react-dom";
 
-import { CameraIcon, CheckIcon, CloseIcon, FolderIcon, ImageIcon, TrashIcon } from "@/components/icons";
+import { CameraIcon, CheckIcon, CloseIcon, FolderIcon, ImageIcon, SearchIcon, TrashIcon } from "@/components/icons";
 
 function denied(error: unknown) {
   return error instanceof DOMException && (error.name === "NotAllowedError" || error.name === "PermissionDeniedError");
@@ -34,6 +35,14 @@ export function ImageBubble({
   );
 }
 
+function desktopCanDrop() {
+  return window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+}
+
+function droppedImage(transfer: DataTransfer) {
+  return Array.from(transfer.files).find((file) => file.type.startsWith("image/")) ?? null;
+}
+
 export function Lightbox({
   src,
   label,
@@ -47,8 +56,52 @@ export function Lightbox({
   onReplace: (file: File) => void;
   onRemove?: () => void;
 }) {
+  const [dragOver, setDragOver] = useState(false);
+  const dragDepth = useRef(0);
+
+  function onDragEnter(event: DragEvent) {
+    if (!desktopCanDrop() || !event.dataTransfer.types.includes("Files")) return;
+    event.preventDefault();
+    dragDepth.current += 1;
+    setDragOver(true);
+  }
+
+  function onDragOver(event: DragEvent) {
+    if (!desktopCanDrop() || !event.dataTransfer.types.includes("Files")) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+  }
+
+  function onDragLeave(event: DragEvent) {
+    if (!desktopCanDrop()) return;
+    event.preventDefault();
+    dragDepth.current -= 1;
+    if (dragDepth.current <= 0) {
+      dragDepth.current = 0;
+      setDragOver(false);
+    }
+  }
+
+  function onDrop(event: DragEvent) {
+    if (!desktopCanDrop()) return;
+    event.preventDefault();
+    dragDepth.current = 0;
+    setDragOver(false);
+    const file = droppedImage(event.dataTransfer);
+    if (file) onReplace(file);
+  }
+
   return (
-    <div className="fixed inset-0 z-[70] flex flex-col bg-black/85 p-4" role="dialog" aria-modal="true" aria-label={label}>
+    <div
+      className="fixed inset-0 z-[70] flex flex-col bg-black/85 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-label={label}
+      onDragEnter={onDragEnter}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+    >
       <button type="button" className="ms-auto grid size-10 place-items-center text-white" onClick={onClose} aria-label="סגירה">
         <CloseIcon className="size-6" />
       </button>
@@ -59,8 +112,13 @@ export function Lightbox({
           <ImageIcon className="size-16" />
         </div>
       )}
+      {dragOver ? (
+        <div className="pointer-events-none absolute inset-6 grid place-items-center rounded-2xl border-2 border-dashed border-white bg-black/40 text-lg text-white">
+          שחררו להעלאת תמונה
+        </div>
+      ) : null}
       <div className="mx-auto mt-4">
-        <ImagePicker hasImage={Boolean(src)} variant="dark" onFile={onReplace} onRemove={onRemove} />
+        <ImagePicker hasImage={Boolean(src)} variant="dark" searchName={label} onFile={onReplace} onRemove={onRemove} />
       </div>
     </div>
   );
@@ -69,11 +127,13 @@ export function Lightbox({
 export function ImagePicker({
   hasImage,
   variant,
+  searchName = "",
   onFile,
   onRemove,
 }: {
   hasImage: boolean;
   variant: "dark" | "light";
+  searchName?: string;
   onFile: (file: File) => void;
   onRemove?: () => void;
 }) {
@@ -81,6 +141,7 @@ export function ImagePicker({
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [confirmRemove, setConfirmRemove] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const buttonClass =
@@ -189,6 +250,9 @@ export function ImagePicker({
         <button type="button" className={buttonClass} aria-label="צילום" onClick={() => void openCamera()}>
           <CameraIcon className="size-6" />
         </button>
+        <button type="button" className={`${buttonClass} hidden`} aria-label="חיפוש תמונה" onClick={() => setSearchOpen(true)}>
+          <SearchIcon className="size-6" />
+        </button>
         {hasImage && onRemove ? (
           <button type="button" className={removeClass} aria-label="הסרת תמונה" onClick={() => setConfirmRemove(true)}>
             <TrashIcon className="size-5" />
@@ -230,6 +294,16 @@ export function ImagePicker({
           </div>
         </div>
       ) : null}
+      {searchOpen ? (
+        <ImageSearch
+          initialQuery={searchName.trim()}
+          onFile={(file) => {
+            onFile(file);
+            setSearchOpen(false);
+          }}
+          onClose={() => setSearchOpen(false)}
+        />
+      ) : null}
       {confirmRemove ? (
         <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true" aria-label="אישור הסרת תמונה">
           <div className="w-full max-w-xs rounded-2xl bg-white p-4 text-center">
@@ -251,5 +325,127 @@ export function ImagePicker({
         </div>
       ) : null}
     </>
+  );
+}
+
+type SearchImage = { title: string; thumb: string; url: string };
+
+function ImageSearch({ initialQuery, onFile, onClose }: { initialQuery: string; onFile: (file: File) => void; onClose: () => void }) {
+  const [query, setQuery] = useState(initialQuery);
+  const [images, setImages] = useState<SearchImage[]>([]);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [message, setMessage] = useState("");
+  const [searching, setSearching] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  async function search(value: string) {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      setImages([]);
+      setSelected(null);
+      setMessage("יש להזין חיפוש");
+      return;
+    }
+    setSearching(true);
+    setMessage("");
+    setSelected(null);
+    try {
+      const response = await fetch(`/api/image-search?q=${encodeURIComponent(trimmed)}`);
+      const body = (await response.json()) as { images?: SearchImage[]; error?: string };
+      if (!response.ok) {
+        setImages([]);
+        setMessage(body.error ?? "לא ניתן לחפש תמונות");
+        return;
+      }
+      const next = body.images ?? [];
+      setImages(next);
+      setMessage(next.length === 0 ? "לא נמצאו תמונות" : "");
+    } catch {
+      setImages([]);
+      setMessage("לא ניתן לחפש תמונות");
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  useEffect(() => {
+    if (initialQuery) void search(initialQuery);
+  }, [initialQuery]);
+
+  async function choose() {
+    if (!selected) return;
+    setSaving(true);
+    setMessage("");
+    try {
+      const response = await fetch("/api/image-search", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url: selected }),
+      });
+      if (!response.ok) {
+        const body = (await response.json().catch(() => null)) as { error?: string } | null;
+        setMessage(body?.error ?? "לא ניתן להוריד את התמונה");
+        return;
+      }
+      const blob = await response.blob();
+      const type = blob.type || "image/jpeg";
+      const extension = type.includes("png") ? "png" : type.includes("webp") ? "webp" : type.includes("gif") ? "gif" : "jpg";
+      onFile(new File([blob], `search.${extension}`, { type }));
+    } catch {
+      setMessage("לא ניתן להוריד את התמונה");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return createPortal(
+    <div className="fixed inset-0 z-[85] flex justify-center bg-[var(--cream)]">
+    <div className="flex h-full w-full max-w-[480px] flex-col" role="dialog" aria-modal="true" aria-label="חיפוש תמונה">
+      <form
+        className="flex items-center gap-2 p-3"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void search(query);
+        }}
+      >
+        <input
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          aria-label="מילות חיפוש"
+          placeholder="מילות חיפוש"
+          className="min-w-0 flex-1 rounded-xl border border-neutral-200 bg-white px-3 py-2 outline-none focus:border-[var(--teal)]"
+        />
+        <button type="submit" disabled={searching} className="rounded-xl bg-[var(--teal)] px-3 py-2 text-sm font-medium text-white disabled:opacity-60">
+          {searching ? "מחפש…" : "חיפוש"}
+        </button>
+      </form>
+      <div className="min-h-0 flex-1 overflow-y-auto px-3">
+        {message ? <p className="py-6 text-center text-sm text-neutral-600">{message}</p> : null}
+        <div className="grid grid-cols-3 gap-2 pb-3">
+          {images.map((image) => (
+            <button
+              key={image.url}
+              type="button"
+              aria-label={image.title}
+              aria-pressed={selected === image.url}
+              className={`aspect-square overflow-hidden rounded-xl bg-white ${selected === image.url ? "ring-2 ring-[var(--teal)]" : ""}`}
+              onClick={() => setSelected(image.url)}
+            >
+              <img src={image.thumb} alt="" className="size-full object-cover" />
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="flex gap-2 border-t border-neutral-200 bg-white p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+        <button type="button" disabled={!selected || saving} onClick={() => void choose()} className="flex-1 rounded-xl bg-[var(--teal)] py-3 font-medium text-white disabled:opacity-60">
+          {saving ? "מוריד…" : "בחירה"}
+        </button>
+        <button type="button" onClick={onClose} className="flex-1 rounded-xl bg-neutral-100 py-3 font-medium text-neutral-700">
+          ביטול
+        </button>
+      </div>
+    </div>
+    </div>,
+    document.body,
   );
 }

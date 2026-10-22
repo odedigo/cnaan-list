@@ -1,6 +1,6 @@
 "use client";
 
-import { startTransition, useActionState, useEffect, useState } from "react";
+import { useActionState, useState } from "react";
 import Link from "next/link";
 
 import { login, logout } from "@/app/actions/auth";
@@ -9,22 +9,10 @@ import { createClient } from "@/lib/supabase/client";
 
 export function SignedOutSettings({ configured, authError }: { configured: boolean; authError?: string }) {
   const [state, action, pending] = useActionState(login, null);
-  useEffect(() => {
-    if (state?.ok) window.location.assign("/inventory");
-  }, [state]);
   return (
     <div>
       <AppHeader title="הגדרות" actionsEnabled={false} />
-      <form
-        className="space-y-4 px-6 pt-8"
-        onSubmit={(event) => {
-          event.preventDefault();
-          const formData = new FormData(event.currentTarget);
-          startTransition(() => {
-            action(formData);
-          });
-        }}
-      >
+      <form className="space-y-4 px-6 pt-8" action={action}>
         {!configured ? (
           <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
             חסרים פרטי החיבור ל-Supabase. העתיקו את .env.example אל .env.local לפי ההסבר ב-README.

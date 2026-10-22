@@ -48,6 +48,7 @@ type ListsContextValue = {
   addToGrocery: (itemId: string) => Promise<void>;
   setChecked: (itemId: string, checked: boolean) => Promise<void>;
   removeFromGrocery: (itemId: string) => Promise<void>;
+  clearPurchased: () => Promise<void>;
   uploadImage: (kind: "item" | "category", id: string, file: File) => Promise<void>;
   removeImage: (kind: "item" | "category", id: string) => Promise<void>;
 };
@@ -484,6 +485,13 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
         setGrocery((current) => current.filter((line) => line.item_id !== itemId));
         const { error: deleteError } = await supabaseRef.current.from("grocery_items").delete().eq("id", existing.id);
         if (deleteError) fail("לא ניתן להסיר מהרשימה");
+      },
+      async clearPurchased() {
+        const ids = grocery.filter((line) => line.checked).map((line) => line.id);
+        if (ids.length === 0) return;
+        setGrocery((current) => current.filter((line) => !line.checked));
+        const { error: deleteError } = await supabaseRef.current.from("grocery_items").delete().in("id", ids);
+        if (deleteError) fail("לא ניתן לנקות את הפריטים שנקנו");
       },
       async uploadImage(kind, id, file) {
         setError(null);

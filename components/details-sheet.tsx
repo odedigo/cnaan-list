@@ -291,7 +291,7 @@ function ImageField({
   return (
     <div className="flex flex-col items-center gap-1">
       <ImageBubble src={src} label={label} onOpen={onEnlarge} />
-      <ImagePicker hasImage={Boolean(src)} variant="light" onFile={onChoose} onRemove={onRemove} />
+      <ImagePicker hasImage={Boolean(src)} variant="light" searchName={label} onFile={onChoose} onRemove={onRemove} />
     </div>
   );
 }
