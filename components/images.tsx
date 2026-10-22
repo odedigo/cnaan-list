@@ -20,17 +20,20 @@ export function ImageBubble({
   onOpen?: () => void;
   size?: string;
 }) {
+  const picture = src ? <img src={src} alt="" className="size-full object-cover" /> : <ImageIcon className="size-1/2" />;
+  const className = `grid ${size} shrink-0 place-items-center overflow-hidden rounded-full bg-neutral-100 text-neutral-400`;
+  if (!onOpen) return <span className={className}>{picture}</span>;
   return (
     <button
       type="button"
-      className={`grid ${size} shrink-0 place-items-center overflow-hidden rounded-full bg-neutral-100 text-neutral-400`}
+      className={className}
       onClick={(event) => {
         event.stopPropagation();
-        onOpen?.();
+        onOpen();
       }}
       aria-label={`הגדלת התמונה של ${label}`}
     >
-      {src ? <img src={src} alt="" className="size-full object-cover" /> : <ImageIcon className="size-1/2" />}
+      {picture}
     </button>
   );
 }

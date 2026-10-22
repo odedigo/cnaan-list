@@ -262,7 +262,7 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
       ) : null}
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
         <SortableContext items={visibleCategories.map((category) => category.id)} strategy={verticalListSortingStrategy}>
-          <div className="px-3 pb-4">
+          <div className="px-3 pt-2 pb-4">
             {visibleCategories.length === 0 ? (
               <p className="px-4 pt-16 text-center text-neutral-500">
                 {mode === "inventory" ? "אין עדיין קטגוריות. לחצו על + כדי להוסיף קטגוריה." : "רשימת הקניות ריקה. חפשו מוצר כדי להוסיף אותו."}
@@ -308,7 +308,6 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
                           color={colorHex(category.color)}
                           src={lists.imageSrc("category", category.id, category.image_path)}
                           handle={lists.reorderMode ? handle : undefined}
-                          onOpenImage={() => openImage("category", category.id, category.name, category.image_path)}
                           onAdd={
                             mode === "inventory" && !lists.reorderMode
                               ? () => setEditor({ kind: "new-item", categoryId: category.id })

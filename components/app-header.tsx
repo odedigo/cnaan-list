@@ -127,7 +127,7 @@ export function AppHeader({
               <div
                 dir="rtl"
                 role="menu"
-                className="absolute end-1 top-12 z-30 w-52 overflow-hidden rounded-xl bg-white py-1 text-start shadow-lg"
+                className="absolute right-0 top-12 z-30 w-52 overflow-hidden rounded-xl bg-white py-1 text-start shadow-lg"
               >
                 <MenuItem
                   label="הוספת קטגוריה"
