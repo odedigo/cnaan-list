@@ -12,6 +12,7 @@ export function SignedOutSettings({ configured, authError, version = "" }: { con
   return (
     <div>
       <AppHeader title="הגדרות" actionsEnabled={false} />
+      <AppTitle />
       <form className="space-y-4 px-6 pt-8" action={action}>
         {!configured ? (
           <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
@@ -55,15 +56,22 @@ export function SignedInSettings({ username, version = "" }: { username: string;
     }
   }
   return (
-    <div className="px-6 pt-16 text-center">
-      <p className="text-sm text-neutral-500">מחובר</p>
-      <p className="mt-2 text-2xl font-semibold">{username}</p>
-      <button type="button" disabled={pending} onClick={() => void handleLogout()} className="mt-8 w-full rounded-xl bg-[var(--teal)] py-3 font-medium text-white disabled:opacity-60">
-        {pending ? "מתנתק…" : "התנתקות"}
-      </button>
-      <CreditBox version={version} />
+    <div className="text-center">
+      <AppTitle />
+      <div className="px-6 pt-10">
+        <p className="text-sm text-neutral-500">מחובר</p>
+        <p className="mt-2 text-2xl font-semibold">{username}</p>
+        <button type="button" disabled={pending} onClick={() => void handleLogout()} className="mt-8 w-full rounded-xl bg-[var(--teal)] py-3 font-medium text-white disabled:opacity-60">
+          {pending ? "מתנתק…" : "התנתקות"}
+        </button>
+        <CreditBox version={version} />
+      </div>
     </div>
   );
+}
+
+function AppTitle() {
+  return <h2 className="px-6 pt-5 text-center text-lg font-semibold">רשימת הקניות של משפחת כנען</h2>;
 }
 
 function CreditBox({ version }: { version: string }) {

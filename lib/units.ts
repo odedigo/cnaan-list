@@ -20,14 +20,24 @@ export function unitById(id: string) {
   return UNITS.find((unit) => unit.id === id) ?? UNITS[0];
 }
 
+export const MIN_QUANTITY = 0.01;
+
 export function formatQuantity(value: number) {
   if (!Number.isFinite(value)) return "1";
   const rounded = Math.round(value * 100) / 100;
-  return Number.isInteger(rounded) ? String(rounded) : String(rounded);
+  return String(rounded);
 }
 
 export function parseQuantity(value: string) {
   const parsed = Number(value.replace(",", ".").trim());
-  if (!Number.isFinite(parsed) || parsed < 1) return 1;
-  return Math.round(parsed * 100) / 100;
+  if (!Number.isFinite(parsed)) return 1;
+  const rounded = Math.round(parsed * 100) / 100;
+  if (rounded < MIN_QUANTITY) return 1;
+  return rounded;
+}
+
+export function stepQuantity(quantity: number, delta: number) {
+  const next = Math.round((quantity + delta) * 100) / 100;
+  if (next < MIN_QUANTITY) return quantity;
+  return next;
 }

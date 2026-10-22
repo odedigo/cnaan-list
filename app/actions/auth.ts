@@ -39,7 +39,7 @@ export async function login(_state: AuthState, formData: FormData): Promise<Auth
     }
     return { error: GENERIC_LOGIN_ERROR };
   }
-  redirect("/inventory");
+  redirect("/grocery");
 }
 
 export async function logout() {

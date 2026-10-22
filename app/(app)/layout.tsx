@@ -1,4 +1,5 @@
-import { BottomNav } from "@/components/bottom-nav";
+import { AppShell } from "@/components/app-shell";
+import { StartAtGrocery } from "@/components/start-at-grocery";
 import { ListsProvider } from "@/components/lists-provider";
 import { loadLists } from "@/lib/lists";
 import { createClient, hasPublicEnv } from "@/lib/supabase/server";
@@ -20,10 +21,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     }
   }
 
+  const version = process.env.APP_VERSION ?? "";
   const content = (
     <>
-      <div className="pb-24">{children}</div>
-      <BottomNav signedIn={signedIn} />
+      <StartAtGrocery signedIn={signedIn} />
+      <AppShell signedIn={Boolean(initial)} version={version}>
+        {children}
+      </AppShell>
     </>
   );
 

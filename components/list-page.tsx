@@ -21,7 +21,9 @@ import { ImageBubble, Lightbox } from "@/components/images";
 import { useLists, useListsOptional } from "@/components/lists-provider";
 import { colorHex } from "@/lib/colors";
 import type { Category, Item } from "@/lib/types";
-import { formatQuantity, unitById } from "@/lib/units";
+import { downloadInventoryZip } from "@/lib/export-inventory";
+import { createClient } from "@/lib/supabase/client";
+import { formatQuantity, stepQuantity, unitById } from "@/lib/units";
 
 const purchasedCategoryId = "purchased";
 
@@ -49,6 +51,9 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
   const [editor, setEditor] = useState<Editor | null>(null);
   const [confirmClearPurchased, setConfirmClearPurchased] = useState(false);
   const [confirmClearGrocery, setConfirmClearGrocery] = useState(false);
+  const [confirmExport, setConfirmExport] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState<{
     src: string | null;
     label: string;
@@ -198,6 +203,8 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
         onAdd={mode === "inventory" ? () => setEditor({ kind: "new-category" }) : undefined}
         onSort={mode === "inventory" ? () => void lists.sortAlphabetically() : undefined}
         onReorder={mode === "inventory" ? () => void lists.toggleReorder() : undefined}
+        onExport={mode === "inventory" ? () => setConfirmExport(true) : undefined}
+        exporting={exporting}
         categoriesExpanded={categoriesOpen()}
         onClearGrocery={mode === "grocery" ? () => setConfirmClearGrocery(true) : undefined}
         clearGroceryEnabled={lists.grocery.length > 0}
@@ -217,7 +224,9 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
         }
       />
       {lists.reorderMode ? <p className="px-4 pb-2 text-center text-sm text-[var(--teal)]">גררו לסידור, ולחצו שוב על כפתור הסידור לשמירה</p> : null}
+      {exporting ? <p className="px-4 pb-2 text-center text-sm text-neutral-500">מייצא את רשימת המוצרים…</p> : null}
       {lists.error ? <p className="mx-4 mb-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{lists.error}</p> : null}
+      {exportError ? <p className="mx-4 mb-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{exportError}</p> : null}
       {mode === "grocery" && searchOpen && needle ? (
         <ul className="mx-4 mb-3 overflow-hidden rounded-xl bg-white shadow-sm">
           {searchResults.length === 0 ? <li className="px-3 py-3 text-sm text-neutral-500">לא נמצאו מוצרים במלאי</li> : null}
@@ -391,6 +400,30 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
           onClose={() => setEditor(null)}
           onEnlarge={(src, label, onReplace, onRemove) => setLightbox({ src, label, onReplace, onRemove })}
         />
+      ) : null}
+      {confirmExport ? (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true" aria-label="אישור ייצוא המלאי">
+          <div className="w-full max-w-xs rounded-2xl bg-white p-4 text-center">
+            <p className="text-sm font-medium">לייצא את רשימת המוצרים לקובץ?</p>
+            <button
+              type="button"
+              className="mt-4 w-full rounded-xl bg-[var(--teal)] py-3 font-medium text-white"
+              onClick={() => {
+                setConfirmExport(false);
+                setExporting(true);
+                setExportError(null);
+                void downloadInventoryZip(createClient(), lists.categories, lists.items)
+                  .catch(() => setExportError("לא ניתן לייצא את הרשימה"))
+                  .finally(() => setExporting(false));
+              }}
+            >
+              ייצוא
+            </button>
+            <button type="button" className="mt-2 w-full rounded-xl bg-neutral-100 py-3 font-medium text-neutral-700" onClick={() => setConfirmExport(false)}>
+              ביטול
+            </button>
+          </div>
+        </div>
       ) : null}
       {confirmClearGrocery ? (
         <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true" aria-label="אישור ריקון רשימת הקניות">
@@ -606,13 +639,13 @@ function EntityCard({
 function Stepper({ quantity, unitShort, onChange }: { quantity: number; unitShort: string; onChange: (quantity: number) => void }) {
   return (
     <div dir="ltr" className="flex items-center gap-1 text-sm" onClick={(event) => event.stopPropagation()}>
-      <button type="button" aria-label="הפחתה" className="grid size-7 place-items-center rounded-full border border-neutral-300" onClick={() => onChange(quantity - 1)}>
+      <button type="button" aria-label="הפחתה" className="grid size-7 place-items-center rounded-full border border-neutral-300" onClick={() => onChange(stepQuantity(quantity, -1))}>
         −
       </button>
       <span dir="rtl" className="min-w-12 text-center">
         <bdi>{formatQuantity(quantity)}</bdi> <bdi>{unitShort}</bdi>
       </span>
-      <button type="button" aria-label="הוספה" className="grid size-7 place-items-center rounded-full border border-neutral-300" onClick={() => onChange(quantity + 1)}>
+      <button type="button" aria-label="הוספה" className="grid size-7 place-items-center rounded-full border border-neutral-300" onClick={() => onChange(stepQuantity(quantity, 1))}>
         +
       </button>
     </div>

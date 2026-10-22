@@ -12,6 +12,7 @@ import {
 } from "react";
 
 import { colorHex, nextCategoryColor, uniqueCategoryColors } from "@/lib/colors";
+import { pruneImageCache, readCachedImage, writeCachedImage } from "@/lib/image-cache";
 import { compressImage } from "@/lib/images";
 import { applyOrder, moveVisible, sortByOrder } from "@/lib/order";
 import { createClient } from "@/lib/supabase/client";
@@ -63,7 +64,7 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
   const [reorderMode, setReorderMode] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
+  const [imageSrcs, setImageSrcs] = useState<Record<string, string>>({});
   const [previews, setPreviews] = useState<Record<string, string>>({});
   const reorderRef = useRef(false);
   const supabaseRef = useRef(createClient());
@@ -146,43 +147,57 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
 
   useEffect(() => {
     const paths = pathsKey ? pathsKey.split("|") : [];
-    if (paths.length === 0) return;
+    if (paths.length === 0) {
+      setImageSrcs({});
+      return;
+    }
     let cancelled = false;
-    void supabaseRef.current.storage
-      .from("item-images")
-      .createSignedUrls(paths, 60 * 60)
-      .then(({ data }) => {
-        if (cancelled || !data) return;
-        const next: Record<string, string> = {};
-        for (const entry of data) {
-          if (entry.path && entry.signedUrl) next[entry.path] = entry.signedUrl;
+    const blobUrls: string[] = [];
+    void (async () => {
+      const cached: Record<string, string> = {};
+      const missing: string[] = [];
+      for (const path of paths) {
+        const blob = await readCachedImage(path);
+        if (cancelled) return;
+        if (!blob) {
+          missing.push(path);
+          continue;
         }
-        setSignedUrls(next);
-      });
-    const refresh = window.setInterval(() => {
-      void supabaseRef.current.storage
-        .from("item-images")
-        .createSignedUrls(paths, 60 * 60)
-        .then(({ data }) => {
-          if (!data) return;
-          const next: Record<string, string> = {};
-          for (const entry of data) {
-            if (entry.path && entry.signedUrl) next[entry.path] = entry.signedUrl;
-          }
-          setSignedUrls(next);
-        });
-    }, 50 * 60 * 1000);
+        const url = URL.createObjectURL(blob);
+        blobUrls.push(url);
+        cached[path] = url;
+      }
+      if (cancelled) return;
+      setImageSrcs(cached);
+      void pruneImageCache(new Set(paths));
+      let next = 0;
+      async function loadOne() {
+        while (next < missing.length) {
+          const path = missing[next];
+          next += 1;
+          const { data: blob, error: downloadError } = await supabaseRef.current.storage.from("item-images").download(path);
+          if (cancelled || downloadError || !blob) continue;
+          await writeCachedImage(path, blob);
+          if (cancelled) return;
+          const url = URL.createObjectURL(blob);
+          blobUrls.push(url);
+          setImageSrcs((current) => ({ ...current, [path]: url }));
+        }
+      }
+      const workers = Math.min(4, missing.length);
+      await Promise.all(Array.from({ length: workers }, () => loadOne()));
+    })();
     return () => {
       cancelled = true;
-      window.clearInterval(refresh);
+      for (const url of blobUrls) URL.revokeObjectURL(url);
     };
   }, [pathsKey]);
 
   const imageSrc = useCallback(
     (kind: "item" | "category", id: string, path: string | null) => {
-      return previews[`${kind}:${id}`] ?? (path ? signedUrls[path] ?? null : null);
+      return previews[`${kind}:${id}`] ?? (path ? imageSrcs[path] ?? null : null);
     },
-    [previews, signedUrls],
+    [previews, imageSrcs],
   );
 
   const fail = (message: string) => {

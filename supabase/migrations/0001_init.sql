@@ -37,7 +37,7 @@ create table public.items (
   quantity numeric(10, 2) not null default 1,
   sort_order integer not null default 0,
   constraint items_unit_check check (unit in ('unit', 'kg', 'g', 'l', 'ml', 'pack', 'box', 'bag', 'bottle')),
-  constraint items_quantity_check check (quantity >= 1)
+  constraint items_quantity_check check (quantity >= 0.01)
 );
 
 create table public.grocery_items (

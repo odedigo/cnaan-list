@@ -1,8 +1,18 @@
 "use client";
 
-import type { ReactNode, Ref } from "react";
+import { useState, type ReactNode, Ref } from "react";
 
-import { ChevronIcon, CloseIcon, PlusIcon, ReorderIcon, SearchIcon, SortIcon, TrashIcon } from "@/components/icons";
+import {
+  ChevronIcon,
+  CloseIcon,
+  DownloadIcon,
+  MenuIcon,
+  PlusIcon,
+  ReorderIcon,
+  SearchIcon,
+  SortIcon,
+  TrashIcon,
+} from "@/components/icons";
 
 export function AppHeader({
   title,
@@ -18,6 +28,8 @@ export function AppHeader({
   onAdd,
   onSort,
   onReorder,
+  onExport,
+  exporting = false,
   categoriesExpanded,
   onToggleCategories,
   onClearGrocery,
@@ -36,11 +48,15 @@ export function AppHeader({
   onAdd?: () => void;
   onSort?: () => void;
   onReorder?: () => void;
+  onExport?: () => void;
+  exporting?: boolean;
   categoriesExpanded?: boolean;
   onToggleCategories?: () => void;
   onClearGrocery?: () => void;
   clearGroceryEnabled?: boolean;
 }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const showMenu = Boolean(onAdd || onSort || onReorder || onExport);
   const searchButton = onSearchToggle ? (
     <button
       type="button"
@@ -49,7 +65,9 @@ export function AppHeader({
       disabled={!actionsEnabled}
       onClick={onSearchToggle}
     >
-      <SearchIcon className={`size-6 ${searchOpen ? "text-[var(--teal)]" : ""}`} />
+      <SearchIcon
+        className={`size-6 ${searchOpen ? "text-[var(--teal)]" : ""}`}
+      />
     </button>
   ) : null;
   return (
@@ -66,39 +84,107 @@ export function AppHeader({
               pressed={categoriesExpanded}
               onClick={onToggleCategories}
             >
-              <ChevronIcon className={`size-6 ${categoriesExpanded ? "" : "rotate-180"}`} />
+              <ChevronIcon
+                className={`size-6 ${categoriesExpanded ? "" : "rotate-180"}`}
+              />
             </HeaderButton>
           ) : null}
           {onClearGrocery ? (
-            <HeaderButton label="ריקון רשימת הקניות" disabled={!actionsEnabled || !clearGroceryEnabled} onClick={onClearGrocery}>
+            <HeaderButton
+              label="ריקון רשימת הקניות"
+              disabled={!actionsEnabled || !clearGroceryEnabled}
+              onClick={onClearGrocery}
+            >
               <TrashIcon className="size-5" />
             </HeaderButton>
           ) : null}
           {searchSide === "start" ? searchButton : null}
         </div>
-        <h1 className="min-w-0 truncate px-1 text-center text-lg font-semibold">{title}</h1>
-        <div className="flex shrink-0 items-center justify-self-end">
-          {onAdd ? (
-            <HeaderButton label="הוספה" disabled={!actionsEnabled} onClick={onAdd}>
-              <PlusIcon className="size-6" />
-            </HeaderButton>
-          ) : null}
-          {onSort ? (
-            <HeaderButton label="מיון אלפביתי" disabled={!actionsEnabled} onClick={onSort}>
-              <SortIcon className="size-6" />
-            </HeaderButton>
-          ) : null}
-          {onReorder ? (
-            <HeaderButton label={reorderActive ? "שמירת הסדר" : "סידור"} disabled={!actionsEnabled} pressed={reorderActive} onClick={onReorder}>
-              <ReorderIcon className={`size-6 ${reorderActive ? "text-[var(--teal)]" : ""}`} />
+        <h1 dir="rtl" className="flex min-w-0 items-center justify-center gap-1.5 px-1 text-lg font-semibold">
+          <img src="/header-logo.png" alt="" className="h-[1.2em] w-auto shrink-0" />
+          <span className="min-w-0 truncate">{title}</span>
+        </h1>
+        <div className="relative flex shrink-0 items-center justify-self-end">
+          {showMenu ? (
+            <HeaderButton
+              label="תפריט"
+              disabled={!actionsEnabled}
+              pressed={menuOpen}
+              onClick={() => setMenuOpen((open) => !open)}
+            >
+              <MenuIcon className="size-6" />
             </HeaderButton>
           ) : null}
           {searchSide === "end" ? searchButton : null}
+          {menuOpen && showMenu ? (
+            <>
+              <button
+                type="button"
+                className="fixed inset-0 z-20 cursor-default"
+                aria-label="סגירת תפריט"
+                onClick={() => setMenuOpen(false)}
+              />
+              <div
+                dir="rtl"
+                role="menu"
+                className="absolute end-1 top-12 z-30 w-52 overflow-hidden rounded-xl bg-white py-1 text-start shadow-lg"
+              >
+                <MenuItem
+                  label="הוספת קטגוריה"
+                  disabled={!actionsEnabled || !onAdd}
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onAdd?.();
+                  }}
+                >
+                  <PlusIcon className="size-5" />
+                </MenuItem>
+                <MenuItem
+                  label={reorderActive ? "שמירת הסדר" : "שינוי סדר"}
+                  pressed={reorderActive}
+                  disabled={!actionsEnabled || !onReorder}
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onReorder?.();
+                  }}
+                >
+                  <ReorderIcon
+                    className={`size-5 ${reorderActive ? "text-[var(--teal)]" : ""}`}
+                  />
+                </MenuItem>
+                <MenuItem
+                  label="מיון אלפביתי"
+                  disabled={!actionsEnabled || !onSort}
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onSort?.();
+                  }}
+                >
+                  <SortIcon className="size-5" />
+                </MenuItem>
+                <MenuItem
+                  label={exporting ? "מייצא…" : "ייצוא כל המוצרים"}
+                  disabled={!actionsEnabled || !onExport || exporting}
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onExport?.();
+                  }}
+                >
+                  <DownloadIcon className="size-5" />
+                </MenuItem>
+              </div>
+            </>
+          ) : null}
         </div>
       </div>
       {searchOpen ? (
         <div dir="ltr" className="flex items-center gap-1 px-2 pb-3">
-          <button type="button" className="grid size-10 shrink-0 place-items-center text-neutral-500" aria-label="סגירת חיפוש" onClick={onSearchToggle}>
+          <button
+            type="button"
+            className="grid size-10 shrink-0 place-items-center text-neutral-500"
+            aria-label="סגירת חיפוש"
+            onClick={onSearchToggle}
+          >
             <CloseIcon className="size-5" />
           </button>
           <input
@@ -114,6 +200,34 @@ export function AppHeader({
         </div>
       ) : null}
     </header>
+  );
+}
+
+function MenuItem({
+  label,
+  disabled,
+  pressed,
+  onClick,
+  children,
+}: {
+  label: string;
+  disabled?: boolean;
+  pressed?: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      disabled={disabled}
+      aria-pressed={pressed}
+      onClick={onClick}
+      className="flex w-full items-center gap-2 px-3 py-2.5 text-sm disabled:opacity-30"
+    >
+      {children}
+      <span>{label}</span>
+    </button>
   );
 }
 

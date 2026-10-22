@@ -5,7 +5,7 @@ import { useState, type ReactNode } from "react";
 import { CloseIcon, PenIcon } from "@/components/icons";
 import { ImageBubble, ImagePicker } from "@/components/images";
 import { useLists } from "@/components/lists-provider";
-import { formatQuantity, parseQuantity, UNITS, unitById, type UnitId } from "@/lib/units";
+import { formatQuantity, parseQuantity, stepQuantity, UNITS, unitById, type UnitId } from "@/lib/units";
 
 export type Editor =
   | { kind: "category"; id: string }
@@ -164,10 +164,10 @@ export function DetailsSheet({
                   <PenIcon className="size-4" />
                 </button>
                 <div dir="ltr" className="flex items-center gap-1">
-                  <RoundButton label="הפחתה" onClick={() => setQuantityText(formatQuantity(Math.max(1, parseQuantity(quantityText) - 1)))}>
+                  <RoundButton label="הפחתה" onClick={() => setQuantityText(formatQuantity(stepQuantity(parseQuantity(quantityText), -1)))}>
                     −
                   </RoundButton>
-                  <RoundButton label="הוספה" onClick={() => setQuantityText(formatQuantity(parseQuantity(quantityText) + 1))}>
+                  <RoundButton label="הוספה" onClick={() => setQuantityText(formatQuantity(stepQuantity(parseQuantity(quantityText), 1)))}>
                     +
                   </RoundButton>
                 </div>
