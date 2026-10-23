@@ -21,6 +21,7 @@ import {
   readSingleOpenCategory,
   writeSingleOpenCategory,
 } from "@/lib/single-category";
+import { readShowStoreBadge, writeShowStoreBadge } from "@/lib/store-badge";
 import { createClient } from "@/lib/supabase/client";
 import { isProduction } from "@/lib/supabase/env";
 
@@ -144,11 +145,13 @@ export function SignedInSettings({ username }: { username: string }) {
   const [switchError, setSwitchError] = useState("");
   const [keepAwake, setKeepAwake] = useState(false);
   const [singleCategory, setSingleCategory] = useState(true);
+  const [showStoreBadge, setShowStoreBadge] = useState(true);
   const [accounts, setAccounts] = useState<SavedAccount[]>([]);
   const [userId, setUserId] = useState("");
   useEffect(() => {
     setKeepAwake(readKeepAwake());
     setSingleCategory(readSingleOpenCategory());
+    setShowStoreBadge(readShowStoreBadge());
     const sync = () => setAccounts(readSavedAccounts());
     sync();
     window.addEventListener(savedAccountsEvent, sync);
@@ -239,6 +242,19 @@ export function SignedInSettings({ username }: { username: string }) {
               className="size-5 accent-[var(--teal)]"
             />
             <span>קטגוריה אחת פתוחה ברשימת המוצרים</span>
+          </label>
+          <label className="mt-3 flex items-center gap-3 text-sm">
+            <input
+              type="checkbox"
+              checked={showStoreBadge}
+              onChange={(event) => {
+                const enabled = event.target.checked;
+                setShowStoreBadge(enabled);
+                writeShowStoreBadge(enabled);
+              }}
+              className="size-5 accent-[var(--teal)]"
+            />
+            <span>הצגת תג החנות ברשימת המוצרים</span>
           </label>
         </div>
         <StoresEditor />

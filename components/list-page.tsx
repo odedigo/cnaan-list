@@ -36,6 +36,7 @@ import {
   readSingleOpenCategory,
   singleOpenCategoryEvent,
 } from "@/lib/single-category";
+import { readShowStoreBadge, showStoreBadgeEvent } from "@/lib/store-badge";
 import { useLists, useListsOptional } from "@/components/lists-provider";
 import { colorHex } from "@/lib/colors";
 import { DEFAULT_STORE_COLOR, inkFor } from "@/lib/stores";
@@ -88,6 +89,7 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
   const [importing, setImporting] = useState(false);
   const [importProgress, setImportProgress] = useState(0);
   const [sorting, setSorting] = useState(false);
+  const [showStoreBadge, setShowStoreBadge] = useState(true);
   const importInputRef = useRef<HTMLInputElement>(null);
   const [lightbox, setLightbox] = useState<{
     src: string | null;
@@ -180,6 +182,14 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
     if (query) setQuery("");
     if (searchOpen) setSearchOpen(false);
   }
+
+  useEffect(() => {
+    if (mode !== "inventory") return;
+    const syncBadge = () => setShowStoreBadge(readShowStoreBadge());
+    syncBadge();
+    window.addEventListener(showStoreBadgeEvent, syncBadge);
+    return () => window.removeEventListener(showStoreBadgeEvent, syncBadge);
+  }, [mode]);
 
   useEffect(() => {
     if (mode !== "inventory") return;
@@ -525,7 +535,8 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
                 (entry) => entry.id === category.store_id,
               );
               const storeLabel =
-                store && (mode === "inventory" || !store.protected)
+                store &&
+                (mode === "inventory" ? showStoreBadge : !store.protected)
                   ? store.name
                   : null;
               const categoryBackground = shadedCategory
