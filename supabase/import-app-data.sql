@@ -22,6 +22,7 @@ $cnaanlist_dump$;
   new_id uuid;
   new_category_id uuid;
   new_item_id uuid;
+  store_id uuid;
 begin
   select account.id
   into target_account
@@ -49,14 +50,34 @@ begin
     insert into id_map (old_id, new_id)
     values ((category->>'id')::uuid, new_id);
 
-    insert into public.categories (id, account_id, name, color, image_path, sort_order)
+    store_id := null;
+    if nullif(category->>'store', '') is not null then
+      select store.id
+      into store_id
+      from public.stores as store
+      where store.account_id = target_account
+        and lower(store.name) = lower(category->>'store')
+      limit 1;
+    end if;
+    if store_id is null then
+      select store.id
+      into store_id
+      from public.stores as store
+      where store.account_id = target_account
+        and store.protected = true
+      order by store.sort_order
+      limit 1;
+    end if;
+
+    insert into public.categories (id, account_id, name, color, image_path, sort_order, store_id)
     values (
       new_id,
       target_account,
       category->>'name',
       coalesce(category->>'color', '#2563EB'),
       null,
-      coalesce((category->>'sort_order')::integer, 0)
+      coalesce((category->>'sort_order')::integer, 0),
+      store_id
     );
   end loop;
 

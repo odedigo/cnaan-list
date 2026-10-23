@@ -28,14 +28,17 @@ import { pruneImageCache, readCachedImage, writeCachedImage } from "@/lib/image-
 import { replaceInventory } from "@/lib/import-inventory";
 import { compressImage } from "@/lib/images";
 import { applyOrder, moveVisible, sortByOrder } from "@/lib/order";
+import { defaultStore, normalizeStore, sortStores } from "@/lib/stores";
 import { createClient } from "@/lib/supabase/client";
-import type { Category, ChecklistRow, GroceryLine, Item, ListsData } from "@/lib/types";
+import type { Category, ChecklistRow, GroceryLine, Item, ListsData, Store } from "@/lib/types";
 import { parseQuantity, type UnitId } from "@/lib/units";
 
 type ListsContextValue = {
   accountId: string;
   username: string;
   categories: Category[];
+  stores: Store[];
+  storesError: string | null;
   items: Item[];
   grocery: GroceryLine[];
   reorderMode: boolean;
@@ -46,9 +49,12 @@ type ListsContextValue = {
   sortAlphabetically: () => Promise<boolean>;
   moveCategories: (activeId: string, overId: string, visibleIds: string[]) => void;
   moveItems: (categoryId: string, activeId: string, overId: string, visibleIds: string[]) => void;
-  addCategory: (name: string, imageFile?: File | null) => Promise<string | null>;
-  saveCategory: (input: { id: string; name: string; imageFile?: File | null }) => Promise<boolean>;
+  addCategory: (name: string, imageFile?: File | null, storeId?: string) => Promise<string | null>;
+  saveCategory: (input: { id: string; name: string; imageFile?: File | null; storeId?: string }) => Promise<boolean>;
   deleteCategory: (id: string) => Promise<void>;
+  saveStore: (input: { id: string; name?: string; color?: string }) => Promise<string | null>;
+  addStore: (name: string, color: string) => Promise<string | null>;
+  deleteStore: (id: string) => Promise<string | null>;
   saveItem: (input: {
     id?: string;
     categoryId: string;
@@ -81,6 +87,9 @@ const ListsContext = createContext<ListsContextValue | null>(null);
 
 export function ListsProvider({ initial, children }: { initial: ListsData; children: ReactNode }) {
   const [categories, setCategories] = useState(initial.categories);
+  const [stores, setStores] = useState(initial.stores);
+  const [storesReady, setStoresReady] = useState(initial.storesReady);
+  const [storesError, setStoresError] = useState<string | null>(initial.storesReady ? null : "לא ניתן לטעון את החנויות");
   const [items, setItems] = useState(initial.items);
   const [grocery, setGrocery] = useState(initial.grocery);
   const [checklist, setChecklist] = useState(initial.checklist);
@@ -103,14 +112,21 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
   const refetch = useCallback(async () => {
     if (reorderRef.current || importingRef.current) return;
     const supabase = supabaseRef.current;
-    const [{ data: categoryRows }, { data: itemRows }, { data: groceryRows }, checklistResult] = await Promise.all([
+    const [{ data: categoryRows }, { data: itemRows }, { data: groceryRows }, checklistResult, storesResult] = await Promise.all([
       supabase.from("categories").select("*").eq("account_id", initial.accountId).order("sort_order"),
       supabase.from("items").select("*").eq("account_id", initial.accountId).order("sort_order"),
       supabase.from("grocery_items").select("*").eq("account_id", initial.accountId),
       supabase.from("checklist_rows").select("*").eq("account_id", initial.accountId).order("sort_order"),
+      supabase.from("stores").select("*").eq("account_id", initial.accountId).order("sort_order"),
     ]);
     if (reorderRef.current || importingRef.current) return;
     if (categoryRows) setCategories(categoryRows.map(normalizeCategory));
+    if (storesResult.error) setStoresError("לא ניתן לטעון את החנויות");
+    else if (storesResult.data) {
+      setStores(sortStores(storesResult.data.map(normalizeStore)));
+      setStoresError(null);
+      setStoresReady(true);
+    }
     if (itemRows) setItems(itemRows.map(normalizeItem));
     if (groceryRows) setGrocery(mergePendingGrocery(initial.accountId, groceryRows as GroceryLine[]));
     if (checklistResult.error) {
@@ -168,15 +184,18 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
         void refetch();
       }, 40);
     };
-    const channel = supabase
+    let channel = supabase
       .channel(`account-${initial.accountId}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "categories", filter: `account_id=eq.${initial.accountId}` }, schedule)
       .on("postgres_changes", { event: "*", schema: "public", table: "items", filter: `account_id=eq.${initial.accountId}` }, schedule)
       .on("postgres_changes", { event: "*", schema: "public", table: "grocery_items", filter: `account_id=eq.${initial.accountId}` }, schedule)
-      .on("postgres_changes", { event: "*", schema: "public", table: "checklist_rows", filter: `account_id=eq.${initial.accountId}` }, schedule)
-      .subscribe((status) => {
-        if (status === "SUBSCRIBED") schedule();
-      });
+      .on("postgres_changes", { event: "*", schema: "public", table: "checklist_rows", filter: `account_id=eq.${initial.accountId}` }, schedule);
+    if (storesReady) {
+      channel = channel.on("postgres_changes", { event: "*", schema: "public", table: "stores", filter: `account_id=eq.${initial.accountId}` }, schedule);
+    }
+    channel.subscribe((status) => {
+      if (status === "SUBSCRIBED") schedule();
+    });
     const onVisible = () => {
       if (document.visibilityState === "visible") schedule();
     };
@@ -186,7 +205,7 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
       document.removeEventListener("visibilitychange", onVisible);
       void supabase.removeChannel(channel);
     };
-  }, [initial.accountId, refetch]);
+  }, [initial.accountId, refetch, storesReady]);
 
   const imagePlan = useMemo(() => {
     const onGrocery = new Set(grocery.map((line) => line.item_id));
@@ -516,6 +535,8 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
       accountId: initial.accountId,
       username: initial.username,
       categories: sortByOrder(categories),
+      stores: sortStores(stores),
+      storesError,
       items: sortByOrder(items),
       grocery,
       reorderMode,
@@ -608,7 +629,7 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
           );
         });
       },
-      async addCategory(name, imageFile) {
+      async addCategory(name, imageFile, storeId) {
         const trimmed = name.trim();
         if (!trimmed) {
           setError("יש להזין שם");
@@ -618,9 +639,16 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
         setError(null);
         const sortOrder = categories.reduce((max, category) => Math.max(max, category.sort_order), -1) + 1;
         const color = nextCategoryColor(categories.map((category) => category.color));
+        const chosenStore = storeId || defaultStore(stores)?.id;
         const { data, error: insertError } = await supabaseRef.current
           .from("categories")
-          .insert({ account_id: initial.accountId, name: trimmed, color, sort_order: sortOrder })
+          .insert({
+            account_id: initial.accountId,
+            name: trimmed,
+            color,
+            sort_order: sortOrder,
+            ...(chosenStore ? { store_id: chosenStore } : {}),
+          })
           .select("*")
           .single();
         if (insertError || !data) {
@@ -647,13 +675,21 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
         }
         setSaving(true);
         setError(null);
-        const { error: updateError } = await supabaseRef.current.from("categories").update({ name }).eq("id", input.id);
+        const chosenStore = input.storeId || undefined;
+        const { error: updateError } = await supabaseRef.current
+          .from("categories")
+          .update({ name, ...(chosenStore ? { store_id: chosenStore } : {}) })
+          .eq("id", input.id);
         if (updateError) {
           setSaving(false);
           fail("לא ניתן לשמור את הקטגוריה");
           return false;
         }
-        setCategories((current) => current.map((category) => (category.id === input.id ? { ...category, name } : category)));
+        setCategories((current) =>
+          current.map((category) =>
+            category.id === input.id ? { ...category, name, store_id: chosenStore ?? category.store_id } : category,
+          ),
+        );
         if (input.imageFile) {
           const uploaded = await upload(supabaseRef.current, initial.accountId, "category", input.id, input.imageFile, setPreviews, setCategories, setItems);
           setSaving(false);
@@ -682,6 +718,59 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
         setCategories((current) => current.filter((category) => category.id !== id));
         setItems((current) => current.filter((item) => item.category_id !== id));
         setGrocery((current) => current.filter((line) => !removedItems.has(line.item_id)));
+      },
+      async saveStore(input) {
+        const current = stores.find((store) => store.id === input.id);
+        if (!current) return "לא ניתן לשמור את החנות";
+        const name = (input.name ?? current.name).trim();
+        const color = colorHex(input.color ?? current.color);
+        if (!name) return "יש להזין שם";
+        const duplicate = stores.some(
+          (store) => store.id !== input.id && store.name.toLocaleLowerCase("he") === name.toLocaleLowerCase("he"),
+        );
+        if (duplicate) return "שם החנות כבר קיים";
+        const { error: updateError } = await supabaseRef.current.from("stores").update({ name, color }).eq("id", input.id);
+        if (updateError) return "לא ניתן לשמור את החנות";
+        setStores((rows) => sortStores(rows.map((store) => (store.id === input.id ? { ...store, name, color } : store))));
+        return null;
+      },
+      async addStore(name, color) {
+        const trimmed = name.trim();
+        if (!trimmed) return "יש להזין שם";
+        if (stores.some((store) => store.name.toLocaleLowerCase("he") === trimmed.toLocaleLowerCase("he"))) return "שם החנות כבר קיים";
+        const sortOrder = stores.reduce((max, store) => Math.max(max, store.sort_order), -1) + 1;
+        const { data, error: insertError } = await supabaseRef.current
+          .from("stores")
+          .insert({
+            account_id: initial.accountId,
+            name: trimmed,
+            color: colorHex(color),
+            sort_order: sortOrder,
+            protected: false,
+          })
+          .select("*")
+          .single();
+        if (insertError || !data) return "לא ניתן להוסיף חנות";
+        setStores((rows) => sortStores([...rows, normalizeStore(data)]));
+        return null;
+      },
+      async deleteStore(id) {
+        const current = stores.find((store) => store.id === id);
+        if (!current) return "לא ניתן למחוק את החנות";
+        if (current.protected) return "לא ניתן למחוק את החנות הראשית";
+        const fallback = stores.find((store) => store.protected);
+        if (!fallback) return "לא ניתן למחוק את החנות";
+        const { error: moveError } = await supabaseRef.current
+          .from("categories")
+          .update({ store_id: fallback.id })
+          .eq("account_id", initial.accountId)
+          .eq("store_id", id);
+        if (moveError) return "לא ניתן למחוק את החנות";
+        const { error: deleteError } = await supabaseRef.current.from("stores").delete().eq("id", id);
+        if (deleteError) return "לא ניתן למחוק את החנות";
+        setStores((rows) => rows.filter((store) => store.id !== id));
+        setCategories((rows) => rows.map((category) => (category.store_id === id ? { ...category, store_id: fallback.id } : category)));
+        return null;
       },
       async saveItem(input) {
         const name = input.name.trim();
@@ -885,6 +974,8 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
   }, [
     addChecklistRow,
     categories,
+    stores,
+    storesError,
     checklist,
     checklistError,
     deleteChecklistRow,
@@ -924,6 +1015,7 @@ function normalizeCategory(row: {
   color: string;
   image_path: string | null;
   sort_order: number;
+  store_id?: string | null;
 }): Category {
   return {
     id: row.id,
@@ -932,6 +1024,7 @@ function normalizeCategory(row: {
     color: colorHex(row.color),
     image_path: row.image_path,
     sort_order: row.sort_order,
+    store_id: row.store_id ?? "",
   };
 }
 

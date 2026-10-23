@@ -16,7 +16,12 @@ select jsonb_pretty(
             'name', category.name,
             'color', category.color,
             'image_path', category.image_path,
-            'sort_order', category.sort_order
+            'sort_order', category.sort_order,
+            'store', (
+              select store.name
+              from public.stores as store
+              where store.id = category.store_id
+            )
           )
           order by category.sort_order, category.name
         )

@@ -5,6 +5,7 @@ import { useState, type ReactNode } from "react";
 import { CloseIcon, PenIcon } from "@/components/icons";
 import { ImageBubble, ImagePicker } from "@/components/images";
 import { useLists } from "@/components/lists-provider";
+import { defaultStore, sortStores } from "@/lib/stores";
 import { formatQuantity, parseQuantity, stepQuantity, UNITS, unitById, type UnitId } from "@/lib/units";
 
 export type Editor =
@@ -27,7 +28,11 @@ export function DetailsSheet({
   const lists = useLists();
   const category = editor.kind === "category" ? lists.categories.find((entry) => entry.id === editor.id) : null;
   const item = editor.kind === "item" ? lists.items.find((entry) => entry.id === editor.id) : null;
+  const stores = sortStores(lists.stores);
   const [name, setName] = useState(category?.name ?? item?.name ?? "");
+  const [storeId, setStoreId] = useState(
+    category?.store_id && stores.some((store) => store.id === category.store_id) ? category.store_id : (defaultStore(stores)?.id ?? ""),
+  );
   const [categoryId, setCategoryId] = useState(item?.category_id ?? (editor.kind === "new-item" ? editor.categoryId : lists.categories[0]?.id ?? ""));
   const [unit, setUnit] = useState<UnitId>(item?.unit ?? "unit");
   const [quantityText, setQuantityText] = useState(formatQuantity(item?.quantity ?? 1));
@@ -76,14 +81,14 @@ export function DetailsSheet({
     }
     setFormError(null);
     if (editor.kind === "new-category") {
-      const id = await lists.addCategory(name, imageFile);
+      const id = await lists.addCategory(name, imageFile, storeId || undefined);
       if (id) onClose();
       else setFormError("לא ניתן לשמור");
       return;
     }
     const ok =
       editor.kind === "category" && category
-        ? await lists.saveCategory({ id: category.id, name, imageFile })
+        ? await lists.saveCategory({ id: category.id, name, imageFile, storeId: storeId || undefined })
         : await lists.saveItem({
             id: editor.kind === "item" ? editor.id : undefined,
             categoryId,
@@ -104,6 +109,23 @@ export function DetailsSheet({
         {editor.kind === "category" || editor.kind === "new-category" ? (
           <div className="space-y-3">
             <Field value={name} onChange={setName} label="שם הקטגוריה" autoFocus={editor.kind === "new-category"} onClear={() => setName("")} />
+            {stores.length > 0 ? (
+              <label className="block">
+                <span className="mb-1 block text-sm">חנות</span>
+                <select
+                  aria-label="חנות"
+                  value={storeId}
+                  onChange={(event) => setStoreId(event.target.value)}
+                  className="w-full rounded-xl border border-neutral-200 bg-white px-3 py-3"
+                >
+                  {stores.map((store) => (
+                    <option key={store.id} value={store.id}>
+                      {store.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
             <ImageField
               src={src}
               label={label}

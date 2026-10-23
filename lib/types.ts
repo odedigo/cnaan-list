@@ -1,5 +1,14 @@
 import type { UnitId } from "@/lib/units";
 
+export type Store = {
+  id: string;
+  account_id: string;
+  name: string;
+  color: string;
+  sort_order: number;
+  protected: boolean;
+};
+
 export type Category = {
   id: string;
   account_id: string;
@@ -7,6 +16,7 @@ export type Category = {
   color: string;
   image_path: string | null;
   sort_order: number;
+  store_id: string;
 };
 
 export type Item = {
@@ -44,4 +54,6 @@ export type ListsData = {
   items: Item[];
   grocery: GroceryLine[];
   checklist: ChecklistRow[];
+  stores: Store[];
+  storesReady: boolean;
 };

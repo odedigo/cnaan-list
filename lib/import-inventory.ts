@@ -40,6 +40,7 @@ export async function replaceInventory(
         name: category.name,
         color: category.color,
         sortOrder: category.sortOrder,
+        store: category.store,
         image: category.image,
         imagePath: null as string | null,
         items,
@@ -73,6 +74,15 @@ export async function replaceInventory(
   };
   const uploaded: string[] = [];
   let categories: Category[] = [];
+  const { data: storeRows } = await supabase.from("stores").select("id, name, protected").eq("account_id", accountId);
+  const knownStores = (storeRows ?? []) as { id: string; name: string; protected: boolean }[];
+  const fallbackStoreId = knownStores.find((store) => store.protected)?.id ?? knownStores[0]?.id ?? "";
+  const storeIdFor = (name: string | null) => {
+    if (!name) return fallbackStoreId;
+    return (
+      knownStores.find((store) => store.name.toLocaleLowerCase("he") === name.toLocaleLowerCase("he"))?.id ?? fallbackStoreId
+    );
+  };
   let items: Item[] = [];
   try {
     await mapPool(photos, 4, async (job) => {
@@ -88,14 +98,18 @@ export async function replaceInventory(
       await writeCachedImage(path, prepared.body).catch(() => undefined);
       tick();
     });
-    categories = plan.map((category) => ({
-      id: category.id,
-      account_id: accountId,
-      name: category.name,
-      color: category.color,
-      image_path: category.imagePath,
-      sort_order: category.sortOrder,
-    }));
+    categories = plan.map((category) => {
+      const storeId = storeIdFor(category.store);
+      return {
+        id: category.id,
+        account_id: accountId,
+        name: category.name,
+        color: category.color,
+        image_path: category.imagePath,
+        sort_order: category.sortOrder,
+        store_id: storeId,
+      };
+    });
     items = plan.flatMap((category) =>
       category.items.map((item) => ({
         id: item.id,
@@ -110,7 +124,12 @@ export async function replaceInventory(
       })),
     );
     for (const group of chunks(categories, 100)) {
-      const { error } = await supabase.from("categories").insert(group);
+      const rows = group.map((category) => {
+        if (category.store_id) return category;
+        const { store_id: _storeId, ...rest } = category;
+        return rest;
+      });
+      const { error } = await supabase.from("categories").insert(rows);
       if (error) throw new Error("insert");
       tick();
     }

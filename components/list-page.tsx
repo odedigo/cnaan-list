@@ -21,6 +21,7 @@ import { ImageBubble, Lightbox } from "@/components/images";
 import { readSingleOpenCategory, singleOpenCategoryEvent } from "@/lib/single-category";
 import { useLists, useListsOptional } from "@/components/lists-provider";
 import { colorHex } from "@/lib/colors";
+import { DEFAULT_STORE_COLOR, inkFor } from "@/lib/stores";
 import type { Category, Item } from "@/lib/types";
 import { downloadInventoryZip } from "@/lib/export-inventory";
 import { createClient } from "@/lib/supabase/client";
@@ -339,14 +340,17 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
               const productCount = lists.items.filter((item) => item.category_id === category.id).length;
               const shadedCategory = category.name.includes("----");
               const categoryLabel = shadedCategory ? category.name.replaceAll("----", " ").replace(/\s+/g, " ").trim() : category.name;
+              const store = lists.stores.find((entry) => entry.id === category.store_id);
+              const categoryBackground = shadedCategory ? "#b5b5b5" : (store?.color ?? DEFAULT_STORE_COLOR);
+              const categoryInk = inkFor(categoryBackground);
               return (
                 <SortableBlock key={category.id} id={category.id}>
                   {(handle) => (
                     <section className="mb-2">
                       {mode === "grocery" && !lists.reorderMode ? (
                         <div
-                          className="mb-1 grid cursor-pointer grid-cols-[4.75rem_minmax(0,1fr)_4.75rem] items-center rounded-md bg-[var(--bar)] py-1"
-                          style={shadedCategory ? { background: "#b5b5b5" } : undefined}
+                          className="mb-1 grid cursor-pointer grid-cols-[4.75rem_minmax(0,1fr)_4.75rem] items-center rounded-md py-1"
+                          style={{ background: categoryBackground, color: categoryInk }}
                           onClick={() => toggleCategory(category.id)}
                         >
                           <div className="flex items-center ps-2">
@@ -358,7 +362,7 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
                           <div className="flex items-center justify-end pe-1">
                             <button
                               type="button"
-                              className="grid size-8 place-items-center text-neutral-600"
+                              className="grid size-8 place-items-center text-inherit"
                               aria-label="פרטי קטגוריה"
                               onClick={(event) => {
                                 event.stopPropagation();
@@ -508,7 +512,7 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
                 setConfirmExport(false);
                 setExporting(true);
                 setExportError(null);
-                void downloadInventoryZip(createClient(), lists.categories, lists.items, lists.checklist)
+                void downloadInventoryZip(createClient(), lists.categories, lists.items, lists.checklist, lists.stores)
                   .catch(() => setExportError("לא ניתן לייצא את הרשימה"))
                   .finally(() => setExporting(false));
               }}

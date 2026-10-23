@@ -1,7 +1,7 @@
 import { readCachedImage, writeCachedImage } from "@/lib/image-cache";
 import { createClient } from "@/lib/supabase/client";
 import { zipStore } from "@/lib/zip";
-import type { Category, ChecklistRow, Item } from "@/lib/types";
+import type { Category, ChecklistRow, Item, Store } from "@/lib/types";
 
 type Supabase = ReturnType<typeof createClient>;
 
@@ -55,7 +55,13 @@ async function mapPool<T, R>(items: T[], limit: number, task: (item: T) => Promi
   return results;
 }
 
-export async function downloadInventoryZip(supabase: Supabase, categories: Category[], items: Item[], checklist: ChecklistRow[]) {
+export async function downloadInventoryZip(
+  supabase: Supabase,
+  categories: Category[],
+  items: Item[],
+  checklist: ChecklistRow[],
+  stores: Store[] = [],
+) {
   const jobs: { key: string; path: string; fileName: string }[] = [];
   for (const category of categories) {
     if (category.image_path) {
@@ -89,6 +95,7 @@ export async function downloadInventoryZip(supabase: Supabase, categories: Categ
       name: category.name,
       color: category.color,
       sortOrder: category.sort_order,
+      store: stores.find((store) => store.id === category.store_id)?.name ?? null,
       image: byKey.get(`category:${category.id}`)?.fileName ?? null,
       items: items
         .filter((item) => item.category_id === category.id)

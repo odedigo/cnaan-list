@@ -1,11 +1,13 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 
 import { login, logout } from "@/app/actions/auth";
 import { AppHeader } from "@/components/app-header";
 import { ChevronIcon, UserIcon } from "@/components/icons";
+import { useLists } from "@/components/lists-provider";
+import { colorHex } from "@/lib/colors";
 import { readKeepAwake, writeKeepAwake } from "@/lib/keep-awake";
 import {
   readSavedAccounts,
@@ -196,7 +198,7 @@ export function SignedInSettings({
   return (
     <div>
       <DevBanner />
-      <div className="px-4 pt-4">
+      <div className="px-4 pt-4" style={{ paddingBottom: "9rem" }}>
         <AccountCard
           accounts={options}
           value={currentValue}
@@ -246,6 +248,7 @@ export function SignedInSettings({
             <span>קטגוריה אחת פתוחה ברשימת המוצרים</span>
           </label>
         </div>
+        <StoresEditor />
         <CreditBox version={version} />
       </div>
     </div>
@@ -323,6 +326,181 @@ function AccountCard({
       {error ? (
         <p className="mt-3 text-center text-sm text-red-600">{error}</p>
       ) : null}
+    </div>
+  );
+}
+
+function StoresEditor() {
+  const lists = useLists();
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [adding, setAdding] = useState("");
+  const [addColor, setAddColor] = useState("#2563EB");
+  const [confirmId, setConfirmId] = useState<string | null>(null);
+  const [colors, setColors] = useState<Record<string, string>>({});
+  const [message, setMessage] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const colorTimers = useRef<Record<string, number>>({});
+  useEffect(() => {
+    const timers = colorTimers.current;
+    return () => {
+      for (const timer of Object.values(timers)) window.clearTimeout(timer);
+    };
+  }, []);
+
+  function clearDraft(id: string) {
+    setDrafts((current) => {
+      if (!(id in current)) return current;
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
+  }
+
+  async function commitName(id: string) {
+    const store = lists.stores.find((entry) => entry.id === id);
+    if (!store) return;
+    const name = (drafts[id] ?? store.name).trim();
+    if (name === store.name) {
+      clearDraft(id);
+      return;
+    }
+    setBusy(true);
+    setMessage(null);
+    const error = await lists.saveStore({ id, name });
+    setBusy(false);
+    if (error) {
+      setMessage(error);
+      return;
+    }
+    clearDraft(id);
+  }
+
+  function queueColor(id: string, color: string) {
+    setColors((current) => ({ ...current, [id]: color }));
+    window.clearTimeout(colorTimers.current[id]);
+    colorTimers.current[id] = window.setTimeout(() => {
+      void (async () => {
+        setMessage(null);
+        const error = await lists.saveStore({ id, color });
+        if (error) setMessage(error);
+        else setColors((current) => {
+          if (current[id] !== color) return current;
+          const next = { ...current };
+          delete next[id];
+          return next;
+        });
+      })();
+    }, 300);
+  }
+
+  async function createStore() {
+    setBusy(true);
+    setMessage(null);
+    const error = await lists.addStore(adding, addColor);
+    setBusy(false);
+    if (error) {
+      setMessage(error);
+      return;
+    }
+    setAdding("");
+    setAddColor("#2563EB");
+  }
+
+  async function removeStore(id: string) {
+    setBusy(true);
+    setMessage(null);
+    const error = await lists.deleteStore(id);
+    setBusy(false);
+    setConfirmId(null);
+    if (error) setMessage(error);
+  }
+
+  return (
+    <div className="mt-4 rounded-xl border border-neutral-200 bg-white px-4 py-4 text-start">
+      <h2 className="text-base font-semibold">חנויות</h2>
+      {lists.storesError ? <p className="mt-2 text-sm text-red-600">{lists.storesError}</p> : null}
+      <div className="mt-3 space-y-2">
+        {lists.stores.map((store) => (
+          <div key={store.id} className="flex items-center gap-2">
+            <input
+              aria-label={`שם ${store.name}`}
+              value={drafts[store.id] ?? store.name}
+              disabled={busy}
+              onChange={(event) => setDrafts((current) => ({ ...current, [store.id]: event.target.value }))}
+              onBlur={() => void commitName(store.id)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  event.currentTarget.blur();
+                }
+              }}
+              className="min-w-0 flex-1 rounded-lg border border-neutral-300 bg-white px-3 py-2 outline-none focus:border-[var(--teal)]"
+            />
+            <input
+              type="color"
+              aria-label={`צבע ${store.name}`}
+              value={colorHex(colors[store.id] ?? store.color).toLowerCase()}
+              disabled={busy}
+              onChange={(event) => queueColor(store.id, event.target.value)}
+              className="size-10 shrink-0 cursor-pointer rounded-lg border border-neutral-300 bg-white p-1"
+            />
+            {store.protected ? (
+              <span className="w-16 shrink-0" />
+            ) : confirmId === store.id ? (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void removeStore(store.id)}
+                className="w-16 shrink-0 rounded-lg bg-red-50 py-2 text-sm text-red-700"
+              >
+                אישור
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => setConfirmId(store.id)}
+                className="w-16 shrink-0 rounded-lg py-2 text-sm text-red-600"
+              >
+                מחיקה
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+      <div className="mt-3 flex items-center gap-2">
+        <input
+          aria-label="שם חנות חדשה"
+          value={adding}
+          placeholder="חנות חדשה"
+          disabled={busy}
+          onChange={(event) => setAdding(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              void createStore();
+            }
+          }}
+          className="min-w-0 flex-1 rounded-lg border border-neutral-300 bg-white px-3 py-2 outline-none focus:border-[var(--teal)]"
+        />
+        <input
+          type="color"
+          aria-label="צבע חנות חדשה"
+          value={addColor.toLowerCase()}
+          disabled={busy}
+          onChange={(event) => setAddColor(event.target.value)}
+          className="size-10 shrink-0 cursor-pointer rounded-lg border border-neutral-300 bg-white p-1"
+        />
+        <button
+          type="button"
+          disabled={busy || !adding.trim()}
+          onClick={() => void createStore()}
+          className="w-16 shrink-0 rounded-lg bg-[var(--teal)] py-2 text-sm font-medium text-white disabled:opacity-60"
+        >
+          הוספה
+        </button>
+      </div>
+      {message ? <p className="mt-2 text-sm text-red-600">{message}</p> : null}
     </div>
   );
 }

@@ -28,6 +28,7 @@ export type ImportedCategory = {
   name: string;
   color: string;
   sortOrder: number;
+  store: string | null;
   image: ImportedPhoto | null;
   items: ImportedItem[];
 };
@@ -96,6 +97,7 @@ function readCategory(value: unknown, index: number, files: Map<string, Uint8Arr
     name,
     color: colorHex(typeof category.color === "string" ? category.color : ""),
     sortOrder: order(category.sortOrder, index),
+    store: typeof category.store === "string" && category.store.trim() ? category.store.trim() : null,
     image: photo(category.image, files),
     items: category.items.map((item, itemIndex) => readItem(item, itemIndex, files)),
   };

@@ -1,5 +1,6 @@
 import { normalizeChecklist } from "@/lib/checklist";
 import { colorHex } from "@/lib/colors";
+import { normalizeStore, sortStores } from "@/lib/stores";
 import { createClient } from "@/lib/supabase/server";
 import type { Category, GroceryLine, Item, ListsData } from "@/lib/types";
 import { isUnitId } from "@/lib/units";
@@ -12,11 +13,12 @@ export async function loadLists(userId: string): Promise<ListsData | null> {
   ]);
   if (!profile || !account) return null;
 
-  const [{ data: categories }, { data: items }, { data: grocery }, checklistResult] = await Promise.all([
+  const [{ data: categories }, { data: items }, { data: grocery }, checklistResult, storesResult] = await Promise.all([
     supabase.from("categories").select("*").eq("account_id", account.id).order("sort_order"),
     supabase.from("items").select("*").eq("account_id", account.id).order("sort_order"),
     supabase.from("grocery_items").select("*").eq("account_id", account.id),
     supabase.from("checklist_rows").select("*").eq("account_id", account.id).order("sort_order"),
+    supabase.from("stores").select("*").eq("account_id", account.id).order("sort_order"),
   ]);
 
   return {
@@ -26,6 +28,8 @@ export async function loadLists(userId: string): Promise<ListsData | null> {
     items: (items ?? []).map(normalizeItem),
     grocery: (grocery ?? []).map(normalizeGrocery),
     checklist: checklistResult.error ? [] : (checklistResult.data ?? []).map(normalizeChecklist),
+    stores: storesResult.error ? [] : sortStores((storesResult.data ?? []).map(normalizeStore)),
+    storesReady: !storesResult.error,
   };
 }
 
@@ -36,6 +40,7 @@ function normalizeCategory(row: {
   color: string;
   image_path: string | null;
   sort_order: number;
+  store_id?: string | null;
 }): Category {
   return {
     id: row.id,
@@ -44,6 +49,7 @@ function normalizeCategory(row: {
     color: colorHex(row.color),
     image_path: row.image_path,
     sort_order: row.sort_order,
+    store_id: row.store_id ?? "",
   };
 }
 
