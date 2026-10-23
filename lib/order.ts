@@ -4,6 +4,15 @@ export function mergeVisibleOrder(fullIds: string[], nextVisibleIds: string[]) {
   return fullIds.map((id) => (visible.has(id) ? (nextVisibleIds[index++] ?? id) : id));
 }
 
+export function compareNames(a: string, b: string) {
+  return a.localeCompare(b, "he", { sensitivity: "base" });
+}
+
+export function nameInsertIndex(orderedNames: string[], name: string) {
+  const index = orderedNames.findIndex((current) => compareNames(name, current) < 0);
+  return index < 0 ? orderedNames.length : index;
+}
+
 export function sortByOrder<T extends { sort_order: number }>(rows: T[]) {
   return [...rows].sort((a, b) => a.sort_order - b.sort_order);
 }

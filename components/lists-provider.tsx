@@ -27,7 +27,7 @@ import { forgetPendingGrocery, isOfflineError, mergePendingGrocery, readPendingG
 import { pruneImageCache, readCachedImage, writeCachedImage } from "@/lib/image-cache";
 import { replaceInventory } from "@/lib/import-inventory";
 import { compressImage } from "@/lib/images";
-import { applyOrder, moveVisible, sortByOrder } from "@/lib/order";
+import { applyOrder, compareNames, moveVisible, nameInsertIndex, sortByOrder } from "@/lib/order";
 import { defaultStore, normalizeStore, sortStores } from "@/lib/stores";
 import { createClient } from "@/lib/supabase/client";
 import type { Category, ChecklistRow, GroceryLine, Item, ListsData, Store } from "@/lib/types";
@@ -582,7 +582,7 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
         setError(null);
         reorderRef.current = false;
         setReorderMode(false);
-        const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name, "he", { sensitivity: "base" });
+        const byName = (a: { name: string }, b: { name: string }) => compareNames(a.name, b.name);
         const nextCategories = [...categories].sort(byName);
         const supabase = supabaseRef.current;
         const { error: categoryError } = await supabase.rpc("reorder_categories", {
@@ -637,7 +637,12 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
         }
         setSaving(true);
         setError(null);
-        const sortOrder = categories.reduce((max, category) => Math.max(max, category.sort_order), -1) + 1;
+        reorderRef.current = true;
+        const ordered = sortByOrder(categories);
+        const index = nameInsertIndex(
+          ordered.map((category) => category.name),
+          trimmed,
+        );
         const color = nextCategoryColor(categories.map((category) => category.color));
         const chosenStore = storeId || defaultStore(stores)?.id;
         const { data, error: insertError } = await supabaseRef.current
@@ -646,18 +651,24 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
             account_id: initial.accountId,
             name: trimmed,
             color,
-            sort_order: sortOrder,
+            sort_order: index,
             ...(chosenStore ? { store_id: chosenStore } : {}),
           })
           .select("*")
           .single();
         if (insertError || !data) {
+          reorderRef.current = false;
           setSaving(false);
           fail("לא ניתן להוסיף קטגוריה");
           return null;
         }
         const category = normalizeCategory(data);
-        setCategories((current) => [...current, category]);
+        const ids = ordered.map((row) => row.id);
+        ids.splice(index, 0, category.id);
+        setCategories((current) => applyOrder([...current, category], ids));
+        const { error: orderError } = await supabaseRef.current.rpc("reorder_categories", { ids });
+        reorderRef.current = false;
+        if (orderError) fail("לא ניתן למיין");
         if (imageFile) {
           const uploaded = await upload(supabaseRef.current, initial.accountId, "category", category.id, imageFile, setPreviews, setCategories, setItems);
           setSaving(false);
@@ -817,9 +828,12 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
           }
           return true;
         }
-        const sortOrder = items
-          .filter((item) => item.category_id === input.categoryId)
-          .reduce((max, item) => Math.max(max, item.sort_order), -1) + 1;
+        reorderRef.current = true;
+        const siblings = sortByOrder(items.filter((item) => item.category_id === input.categoryId));
+        const index = nameInsertIndex(
+          siblings.map((item) => item.name),
+          name,
+        );
         const { data, error: insertError } = await supabase
           .from("items")
           .insert({
@@ -829,17 +843,26 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
             unit: input.unit,
             comments: input.comments.trim(),
             quantity,
-            sort_order: sortOrder,
+            sort_order: index,
           })
           .select("*")
           .single();
         if (insertError || !data) {
+          reorderRef.current = false;
           setSaving(false);
           fail("לא ניתן להוסיף מוצר");
           return false;
         }
         const item = normalizeItem(data);
-        setItems((current) => [...current, item]);
+        const ids = siblings.map((row) => row.id);
+        ids.splice(index, 0, item.id);
+        setItems((current) => {
+          const others = current.filter((row) => row.category_id !== input.categoryId);
+          return [...others, ...applyOrder([...siblings, item], ids)];
+        });
+        const { error: orderError } = await supabase.rpc("reorder_items", { target_category: input.categoryId, ids });
+        reorderRef.current = false;
+        if (orderError) fail("לא ניתן למיין");
         if (input.imageFile) {
           const uploaded = await upload(supabase, initial.accountId, "item", item.id, input.imageFile, setPreviews, setCategories, setItems);
           setSaving(false);

@@ -186,7 +186,7 @@ export function ChecklistPage({ active = true }: { active?: boolean }) {
           >
             {done.map((entry, index) =>
               entry.kind === "parentCopy" ? (
-                <div key={`copy-${entry.row.id}`} className={rowGap(done, index)}>
+                <div key={`copy-${entry.row.id}`} style={{ marginTop: rowGap(done, index) }}>
                   <ChecklistLine entry={entry} gap="" {...lineProps} />
                 </div>
               ) : (
@@ -201,9 +201,9 @@ export function ChecklistPage({ active = true }: { active?: boolean }) {
 }
 
 function rowGap(entries: ChecklistEntry[], index: number) {
-  if (index === 0) return "";
+  if (index === 0) return 0;
   const entry = entries[index];
-  return entry.kind === "parentCopy" || entry.row.indent === 0 ? "mt-3" : "mt-2";
+  return entry.kind === "parentCopy" || entry.row.indent === 0 ? 4 : 2;
 }
 
 function SortableChecklistLine({
@@ -211,7 +211,7 @@ function SortableChecklistLine({
   ...props
 }: {
   entry: ChecklistEntry;
-  gap: string;
+  gap: number;
   selectedId: string | null;
   draft: string;
   inputRef: RefObject<HTMLTextAreaElement | null>;
@@ -229,8 +229,7 @@ function SortableChecklistLine({
   return (
     <div
       ref={setNodeRef}
-      className={gap}
-      style={{ transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.75 : 1, position: "relative", zIndex: isDragging ? 2 : undefined }}
+      style={{ marginTop: gap, transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.75 : 1, position: "relative", zIndex: isDragging ? 2 : undefined }}
     >
       <ChecklistLine {...props} gap="" dragHandle={{ ...attributes, ...listeners }} />
     </div>
@@ -314,7 +313,8 @@ function ChecklistLine({
         }}
       >
         <div
-          className={`flex items-center gap-1 rounded-lg px-1 ${gray ? "bg-neutral-200 text-neutral-500" : "bg-white"} ${indent ? "" : "border border-neutral-300"} ${copy ? "pointer-events-none" : ""}`}
+          className={`flex items-center gap-1 rounded-lg px-1 ${gray ? "bg-neutral-200 text-neutral-500" : "bg-white"} ${indent ? "" : "border"} ${copy ? "pointer-events-none" : ""}`}
+          style={indent ? undefined : { borderColor: "#000" }}
           aria-disabled={copy || undefined}
         >
           <CheckBox

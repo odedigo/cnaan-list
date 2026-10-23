@@ -266,6 +266,7 @@ function AccountCard({
   onChange: (userId: string) => void;
   onAction: () => void;
 }) {
+  const singleAccount = accounts.length < 2;
   return (
     <div className="rounded-xl border border-neutral-200 bg-white px-6 py-6">
       <div className="flex items-center gap-3">
@@ -274,9 +275,9 @@ function AccountCard({
           <select
             aria-label="חשבון"
             value={value}
-            disabled={pending || accounts.length === 0}
+            disabled={pending || singleAccount}
             onChange={(event) => onChange(event.target.value)}
-            className="w-full appearance-none rounded-lg border border-neutral-300 bg-white outline-none focus:border-[var(--teal)]"
+            className="w-full appearance-none rounded-lg border border-neutral-300 bg-white outline-none focus:border-[var(--teal)] disabled:bg-neutral-100 disabled:text-neutral-500"
             style={{
               appearance: "none",
               WebkitAppearance: "none",
@@ -295,7 +296,7 @@ function AccountCard({
             ))}
           </select>
           <ChevronIcon
-            className="pointer-events-none absolute top-1/2 size-4 -translate-y-1/2 rotate-180 text-neutral-600"
+            className={`pointer-events-none absolute top-1/2 size-4 -translate-y-1/2 rotate-180 ${singleAccount || pending ? "text-neutral-400" : "text-neutral-600"}`}
             style={{ insetInlineEnd: "0.75rem" }}
           />
         </div>
