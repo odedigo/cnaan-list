@@ -7,7 +7,7 @@ import Link from "next/link";
 
 import { login, logout } from "@/app/actions/auth";
 import { AppHeader } from "@/components/app-header";
-import { ChevronIcon, UserIcon } from "@/components/icons";
+import { UserIcon } from "@/components/icons";
 import { useLists } from "@/components/lists-provider";
 import { colorHex } from "@/lib/colors";
 import { readKeepAwake, writeKeepAwake } from "@/lib/keep-awake";
@@ -285,7 +285,7 @@ function AccountCard({
               WebkitAppearance: "none",
               height: "3rem",
               paddingInlineStart: "1rem",
-              paddingInlineEnd: "2.5rem",
+              paddingInlineEnd: "2.75rem",
             }}
           >
             {accounts.map((account) => (
@@ -297,10 +297,6 @@ function AccountCard({
               </option>
             ))}
           </select>
-          <ChevronIcon
-            className={`pointer-events-none absolute top-1/2 size-4 -translate-y-1/2 rotate-180 ${singleAccount || pending ? "text-neutral-400" : "text-neutral-600"}`}
-            style={{ insetInlineEnd: "0.75rem" }}
-          />
         </div>
         <span className="grid size-12 shrink-0 place-items-center rounded-full bg-neutral-200 text-neutral-500">
           <UserIcon className="size-7" />

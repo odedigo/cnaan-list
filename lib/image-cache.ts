@@ -17,6 +17,12 @@ export async function readCachedImage(path: string) {
   return match.blob();
 }
 
+export async function forgetCachedImage(path: string) {
+  const cache = await openImageCache();
+  if (!cache) return;
+  await cache.delete(cacheRequest(path));
+}
+
 export async function writeCachedImage(path: string, blob: Blob) {
   const cache = await openImageCache();
   if (!cache) return;

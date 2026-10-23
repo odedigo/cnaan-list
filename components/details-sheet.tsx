@@ -19,12 +19,16 @@ export type Editor =
 export function DetailsSheet({
   editor,
   allowRemove,
+  allowDelete = false,
   onClose,
+  onCategoryAdded,
   onEnlarge,
 }: {
   editor: Editor;
   allowRemove: boolean;
+  allowDelete?: boolean;
   onClose: () => void;
+  onCategoryAdded?: (id: string) => void;
   onEnlarge: (src: string | null, label: string, onReplace: (file: File) => void, onRemove?: () => void) => void;
 }) {
   const lists = useLists();
@@ -84,8 +88,10 @@ export function DetailsSheet({
     setFormError(null);
     if (editor.kind === "new-category") {
       const id = await lists.addCategory(name, imageFile, storeId || undefined);
-      if (id) onClose();
-      else setFormError("לא ניתן לשמור");
+      if (id) {
+        onCategoryAdded?.(id);
+        onClose();
+      } else setFormError("לא ניתן לשמור");
       return;
     }
     const ok =
@@ -118,7 +124,7 @@ export function DetailsSheet({
                   aria-label="חנות"
                   value={storeId}
                   onChange={(event) => setStoreId(event.target.value)}
-                  className="w-full rounded-xl border border-neutral-200 bg-white px-3 py-3"
+                  className="w-full rounded-xl border border-neutral-200 bg-white py-3 ps-3"
                 >
                   {stores.map((store) => (
                     <option key={store.id} value={store.id}>
@@ -200,7 +206,7 @@ export function DetailsSheet({
                 aria-label="יחידה"
                 value={unit}
                 onChange={(event) => setUnit(event.target.value as UnitId)}
-                className="rounded-xl border border-neutral-200 bg-white px-3"
+                className="rounded-xl border border-neutral-200 bg-white ps-3"
               >
                 {UNITS.map((entry) => (
                   <option key={entry.id} value={entry.id}>
@@ -214,7 +220,7 @@ export function DetailsSheet({
                 aria-label="קטגוריה"
                 value={categoryId}
                 onChange={(event) => setCategoryId(event.target.value)}
-                className="rounded-xl border border-neutral-200 bg-white px-3 py-3"
+                className="rounded-xl border border-neutral-200 bg-white py-3 ps-3"
               >
                 {lists.categories.map((entry) => (
                   <option key={entry.id} value={entry.id}>
@@ -251,6 +257,23 @@ export function DetailsSheet({
               >
                 הסר מרשימת הקניות
               </button>
+            ) : null}
+            {allowDelete && editor.kind === "item" ? (
+              confirmDelete ? (
+                <button
+                  type="button"
+                  className="w-full rounded-xl bg-red-50 py-3 text-red-700"
+                  onClick={() => {
+                    void lists.deleteItem(editor.id).then(onClose);
+                  }}
+                >
+                  אישור מחיקה
+                </button>
+              ) : (
+                <button type="button" className="w-full rounded-xl py-3 text-red-600" onClick={() => setConfirmDelete(true)}>
+                  מחיקת מוצר
+                </button>
+              )
             ) : null}
           </div>
         )}

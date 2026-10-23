@@ -26,7 +26,7 @@ import {
 } from "@/lib/checklist";
 import { colorHex, nextCategoryColor, uniqueCategoryColors } from "@/lib/colors";
 import { forgetPendingGrocery, isOfflineError, mergePendingGrocery, readPendingGrocery, rememberPendingGrocery } from "@/lib/grocery-sync";
-import { pruneImageCache, readCachedImage, writeCachedImage } from "@/lib/image-cache";
+import { forgetCachedImage, pruneImageCache, readCachedImage, writeCachedImage } from "@/lib/image-cache";
 import { replaceInventory } from "@/lib/import-inventory";
 import { compressImage } from "@/lib/images";
 import { applyOrder, compareNames, moveVisible, nameInsertIndex, sortByOrder } from "@/lib/order";
@@ -54,6 +54,7 @@ type ListsContextValue = {
   addCategory: (name: string, imageFile?: File | null, storeId?: string) => Promise<string | null>;
   saveCategory: (input: { id: string; name: string; imageFile?: File | null; storeId?: string }) => Promise<boolean>;
   deleteCategory: (id: string) => Promise<void>;
+  deleteItem: (id: string) => Promise<void>;
   saveStore: (input: { id: string; name?: string; color?: string }) => Promise<string | null>;
   addStore: (name: string, color: string) => Promise<string | null>;
   deleteStore: (id: string) => Promise<string | null>;
@@ -731,6 +732,54 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
         setCategories((current) => current.filter((category) => category.id !== id));
         setItems((current) => current.filter((item) => item.category_id !== id));
         setGrocery((current) => current.filter((line) => !removedItems.has(line.item_id)));
+      },
+      async deleteItem(id) {
+        setError(null);
+        const item = items.find((entry) => entry.id === id);
+        const folder = `${initial.accountId}/items/${id}`;
+        const paths = new Set<string>();
+        if (item?.image_path) paths.add(item.image_path);
+        const { data: listed } = await supabaseRef.current.storage.from("item-images").list(folder);
+        for (const entry of listed ?? []) {
+          if (!entry.name || entry.metadata == null) continue;
+          paths.add(`${folder}/${entry.name}`);
+        }
+        const { error: deleteError } = await supabaseRef.current.from("items").delete().eq("id", id);
+        if (deleteError) {
+          fail("לא ניתן למחוק את המוצר");
+          return;
+        }
+        const imagePaths = [...paths];
+        if (imagePaths.length > 0) {
+          const { error: removeError } = await supabaseRef.current.storage.from("item-images").remove(imagePaths);
+          await Promise.all(imagePaths.map((path) => forgetCachedImage(path)));
+          setImageSrcs((current) => {
+            let changed = false;
+            const next = { ...current };
+            for (const path of imagePaths) {
+              const url = next[path];
+              if (!url) continue;
+              URL.revokeObjectURL(url);
+              delete next[path];
+              changed = true;
+            }
+            return changed ? next : current;
+          });
+          if (removeError) setError("המוצר נמחק, אבל התמונה לא");
+        }
+        const pending = readPendingGrocery(initial.accountId).find((entry) => entry.itemId === id);
+        if (pending) forgetPendingGrocery(initial.accountId, id, pending.revision);
+        setPreviews((current) => {
+          const key = `item:${id}`;
+          const url = current[key];
+          if (!url) return current;
+          if (url.startsWith("blob:")) URL.revokeObjectURL(url);
+          const next = { ...current };
+          delete next[key];
+          return next;
+        });
+        setItems((current) => current.filter((entry) => entry.id !== id));
+        setGrocery((current) => current.filter((line) => line.item_id !== id));
       },
       async saveStore(input) {
         const current = stores.find((store) => store.id === input.id);

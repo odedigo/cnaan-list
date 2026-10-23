@@ -298,16 +298,28 @@ export function AppHeader({
           >
             <CloseIcon className="size-5" />
           </button>
-          <input
-            ref={searchInputRef}
-            autoFocus
-            dir="rtl"
-            value={searchValue}
-            onChange={(event) => onSearchChange?.(event.target.value)}
-            placeholder={searchPlaceholder}
-            className="min-w-0 flex-1 rounded-xl border border-neutral-200 bg-white px-3 py-2 outline-none focus:border-[var(--teal)]"
-            aria-label={searchPlaceholder}
-          />
+          <div dir="rtl" className="relative min-w-0 flex-1">
+            <input
+              ref={searchInputRef}
+              autoFocus
+              value={searchValue}
+              onChange={(event) => onSearchChange?.(event.target.value)}
+              placeholder={searchPlaceholder}
+              className={`w-full rounded-xl border border-neutral-200 bg-white py-2 outline-none focus:border-[var(--teal)] ${searchValue ? "ps-3 pe-10" : "px-3"}`}
+              aria-label={searchPlaceholder}
+            />
+            {searchValue ? (
+              <button
+                type="button"
+                className="absolute end-1 top-1/2 grid size-8 -translate-y-1/2 place-items-center text-neutral-400"
+                aria-label="ניקוי החיפוש"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => onSearchChange?.("")}
+              >
+                <CloseIcon className="size-4" />
+              </button>
+            ) : null}
+          </div>
         </div>
       ) : null}
       {reloading ? <ReloadNotice /> : null}
