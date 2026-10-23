@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useState, type ReactNode, Ref } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+  Ref,
+} from "react";
 
 import {
   ChevronIcon,
@@ -15,6 +22,7 @@ import {
   SortIcon,
   TrashIcon,
 } from "@/components/icons";
+import { closeInstalledApp, isInstalledApp } from "@/lib/installed-app";
 
 export function AppHeader({
   title,
@@ -64,18 +72,25 @@ export function AppHeader({
   onPlus?: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [reloading, setReloading] = useState(false);
   const [installed, setInstalled] = useState(false);
-  const showMenu = Boolean(onAdd || onSort || onReorder || onExport || onImport);
+  const showMenu = Boolean(
+    onAdd || onSort || onReorder || onExport || onImport,
+  );
   useEffect(() => {
     const media = window.matchMedia("(display-mode: standalone)");
-    const sync = () => {
-      const nav = navigator as Navigator & { standalone?: boolean };
-      setInstalled(media.matches || nav.standalone === true);
-    };
+    const sync = () => setInstalled(isInstalledApp());
     sync();
     media.addEventListener("change", sync);
     return () => media.removeEventListener("change", sync);
   }, []);
+  useEffect(() => {
+    if (!reloading) return;
+    const timer = window.setTimeout(() => {
+      window.location.reload();
+    }, 60000);
+    return () => window.clearTimeout(timer);
+  }, [reloading]);
   const searchButton = onSearchToggle ? (
     <button
       type="button"
@@ -119,8 +134,15 @@ export function AppHeader({
           ) : null}
           {searchSide === "start" ? searchButton : null}
         </div>
-        <h1 dir="rtl" className="flex min-w-0 items-center justify-center gap-1.5 px-1 text-lg font-semibold">
-          <img src="/header-logo.png" alt="" className="h-[1.2em] w-auto shrink-0" />
+        <h1
+          dir="rtl"
+          className="flex min-w-0 items-center justify-center gap-1.5 px-1 text-lg font-semibold"
+        >
+          <img
+            src="/header-logo.png"
+            alt=""
+            className="h-[1.2em] w-auto shrink-0"
+          />
           <span className="min-w-0 truncate">{title}</span>
         </h1>
         <div className="relative flex shrink-0 items-center justify-self-end">
@@ -135,7 +157,11 @@ export function AppHeader({
             </HeaderButton>
           ) : null}
           {onPlus ? (
-            <HeaderButton label="הוספת שורה" disabled={!actionsEnabled} onClick={onPlus}>
+            <HeaderButton
+              label="הוספת שורה"
+              disabled={!actionsEnabled}
+              onClick={onPlus}
+            >
               <PlusIcon className="size-7" />
             </HeaderButton>
           ) : null}
@@ -164,7 +190,7 @@ export function AppHeader({
                   <PlusIcon className="size-5" />
                 </MenuItem>
                 <MenuItem
-                  label={reorderActive ? "שמירת הסדר" : "שינוי סדר"}
+                  label={reorderActive ? "שמירת הסדר" : "גרירה לשינוי סדר"}
                   pressed={reorderActive}
                   disabled={!actionsEnabled || !onReorder}
                   onClick={() => {
@@ -186,19 +212,29 @@ export function AppHeader({
                 >
                   <SortIcon className="size-5" />
                 </MenuItem>
-                <div role="separator" className="mx-3 my-1 h-px bg-neutral-200" />
+                <div
+                  role="separator"
+                  className="mx-3 my-1 h-px bg-neutral-200"
+                />
                 <MenuItem
-                  label="רענון האפליקציה"
+                  label={reloading ? "מרענן…" : "רענון האפליקציה"}
+                  disabled={reloading}
                   onClick={() => {
-                    window.location.reload();
+                    setMenuOpen(false);
+                    setReloading(true);
                   }}
                 >
                   <ReloadIcon className="size-5" />
                 </MenuItem>
-                <div role="separator" className="mx-3 my-1 h-px bg-neutral-200" />
+                <div
+                  role="separator"
+                  className="mx-3 my-1 h-px bg-neutral-200"
+                />
                 <MenuItem
                   label={exporting ? "מייצא…" : "ייצוא כל הנתונים"}
-                  disabled={!actionsEnabled || !onExport || exporting || importing}
+                  disabled={
+                    !actionsEnabled || !onExport || exporting || importing
+                  }
                   onClick={() => {
                     setMenuOpen(false);
                     onExport?.();
@@ -208,7 +244,9 @@ export function AppHeader({
                 </MenuItem>
                 <MenuItem
                   label={importing ? "מייבא…" : "ייבוא נתונים"}
-                  disabled={!actionsEnabled || !onImport || importing || exporting}
+                  disabled={
+                    !actionsEnabled || !onImport || importing || exporting
+                  }
                   onClick={() => {
                     setMenuOpen(false);
                     onImport?.();
@@ -218,12 +256,15 @@ export function AppHeader({
                 </MenuItem>
                 {installed ? (
                   <>
-                    <div role="separator" className="mx-3 my-1 h-px bg-neutral-200" />
+                    <div
+                      role="separator"
+                      className="mx-3 my-1 h-px bg-neutral-200"
+                    />
                     <MenuItem
                       label="סגירת האפליקציה"
                       onClick={() => {
                         setMenuOpen(false);
-                        window.close();
+                        closeInstalledApp();
                       }}
                     >
                       <CloseIcon className="size-5" />
@@ -257,7 +298,79 @@ export function AppHeader({
           />
         </div>
       ) : null}
+      {reloading ? <ReloadNotice /> : null}
     </header>
+  );
+}
+
+function ReloadNotice() {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  useLayoutEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog || dialog.open) return;
+    dialog.showModal();
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      if (dialog.open) dialog.close();
+    };
+  }, []);
+  return (
+    <dialog
+      ref={dialogRef}
+      aria-label="מרענן את האפליקציה"
+      onCancel={(event) => event.preventDefault()}
+      style={{
+        position: "fixed",
+        inset: 0,
+        width: "100vw",
+        height: "100vh",
+        maxWidth: "none",
+        maxHeight: "none",
+        margin: 0,
+        padding: 24,
+        border: "none",
+        background: "rgba(0, 0, 0, 0.55)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <div
+        style={{
+          width: "100%",
+          maxWidth: 360,
+          borderRadius: 16,
+          background: "#fff",
+          textAlign: "center",
+          padding: "2rem 1.5rem",
+          boxShadow: "0 12px 40px rgba(0, 0, 0, 0.28)",
+        }}
+      >
+        <style>
+          {"@keyframes cnaanlist-spin { to { transform: rotate(360deg); } }"}
+        </style>
+        <div
+          aria-hidden
+          style={{
+            width: 52,
+            height: 52,
+            margin: "0 auto 20px",
+            borderRadius: "50%",
+            border: "4px solid #e5e5e5",
+            borderTopColor: "var(--teal)",
+            animation: "cnaanlist-spin 0.8s linear infinite",
+          }}
+        />
+        <p
+          className="font-semibold"
+          style={{ fontSize: "1.5rem", lineHeight: 1.35 }}
+        >
+          מרענן את האפליקציה…
+        </p>
+      </div>
+    </dialog>
   );
 }
 

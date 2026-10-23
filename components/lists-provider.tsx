@@ -23,6 +23,7 @@ import {
   withoutChecklistRow,
 } from "@/lib/checklist";
 import { colorHex, nextCategoryColor, uniqueCategoryColors } from "@/lib/colors";
+import { forgetPendingGrocery, isOfflineError, mergePendingGrocery, readPendingGrocery, rememberPendingGrocery } from "@/lib/grocery-sync";
 import { pruneImageCache, readCachedImage, writeCachedImage } from "@/lib/image-cache";
 import { replaceInventory } from "@/lib/import-inventory";
 import { compressImage } from "@/lib/images";
@@ -42,7 +43,7 @@ type ListsContextValue = {
   error: string | null;
   imageSrc: (kind: "item" | "category", id: string, path: string | null) => string | null;
   toggleReorder: () => Promise<void>;
-  sortAlphabetically: () => Promise<void>;
+  sortAlphabetically: () => Promise<boolean>;
   moveCategories: (activeId: string, overId: string, visibleIds: string[]) => void;
   moveItems: (categoryId: string, activeId: string, overId: string, visibleIds: string[]) => void;
   addCategory: (name: string, imageFile?: File | null) => Promise<string | null>;
@@ -111,7 +112,7 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
     if (reorderRef.current || importingRef.current) return;
     if (categoryRows) setCategories(categoryRows.map(normalizeCategory));
     if (itemRows) setItems(itemRows.map(normalizeItem));
-    if (groceryRows) setGrocery(groceryRows as GroceryLine[]);
+    if (groceryRows) setGrocery(mergePendingGrocery(initial.accountId, groceryRows as GroceryLine[]));
     if (checklistResult.error) {
       setChecklistError("לא ניתן לטעון את הרשימות");
     } else if (checklistResult.data) {
@@ -427,6 +428,89 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
     [commitChecklist],
   );
 
+  const syncingGrocery = useRef({ running: false, again: false });
+  const syncPendingGrocery = useCallback(async () => {
+    if (syncingGrocery.current.running) {
+      syncingGrocery.current.again = true;
+      return;
+    }
+    if (typeof navigator !== "undefined" && navigator.onLine === false) return;
+    syncingGrocery.current.running = true;
+    let paused = false;
+    const supabase = supabaseRef.current;
+    try {
+      for (;;) {
+        const entry = readPendingGrocery(initial.accountId)[0];
+        if (!entry) break;
+        let outcome: "ok" | "offline" | "rejected" = "ok";
+        try {
+          const { data, error } = await supabase
+            .from("grocery_items")
+            .select("id")
+            .eq("account_id", initial.accountId)
+            .eq("item_id", entry.itemId)
+            .maybeSingle();
+          if (error) outcome = isOfflineError(error) ? "offline" : "rejected";
+          else if (data) {
+            const { error: updateError } = await supabase.from("grocery_items").update({ checked: entry.checked }).eq("id", data.id);
+            if (updateError) outcome = isOfflineError(updateError) ? "offline" : "rejected";
+          } else {
+            const { error: insertError } = await supabase.from("grocery_items").insert({
+              id: entry.localId,
+              account_id: initial.accountId,
+              item_id: entry.itemId,
+              checked: entry.checked,
+            });
+            if (insertError) {
+              if (isOfflineError(insertError)) outcome = "offline";
+              else if (insertError.code === "23505") {
+                const { error: updateError } = await supabase
+                  .from("grocery_items")
+                  .update({ checked: entry.checked })
+                  .eq("account_id", initial.accountId)
+                  .eq("item_id", entry.itemId);
+                if (updateError) outcome = isOfflineError(updateError) ? "offline" : "rejected";
+              } else outcome = "rejected";
+            }
+          }
+        } catch (error) {
+          outcome = isOfflineError(error instanceof Error ? error : null) ? "offline" : "rejected";
+        }
+        if (outcome === "offline") {
+          paused = true;
+          break;
+        }
+        const cleared = forgetPendingGrocery(initial.accountId, entry.itemId, entry.revision);
+        if (outcome === "rejected" && cleared) {
+          paused = true;
+          setError("לא ניתן לעדכן את רשימת הקניות");
+          void refetch();
+          break;
+        }
+      }
+    } finally {
+      syncingGrocery.current.running = false;
+      const again = syncingGrocery.current.again;
+      syncingGrocery.current.again = false;
+      if (!paused && again && navigator.onLine) void syncPendingGrocery();
+    }
+  }, [initial.accountId, refetch]);
+
+  useEffect(() => {
+    setGrocery((current) => mergePendingGrocery(initial.accountId, current));
+  }, [initial.accountId]);
+
+  useEffect(() => {
+    const sync = () => {
+      void syncPendingGrocery().then(() => {
+        if (readPendingGrocery(initial.accountId).length === 0) void refetch();
+      });
+    };
+    window.addEventListener("online", sync);
+    if (readPendingGrocery(initial.accountId).length > 0) sync();
+    return () => window.removeEventListener("online", sync);
+  }, [initial.accountId, refetch, syncPendingGrocery]);
+
   const value = useMemo<ListsContextValue>(() => {
     return {
       accountId: initial.accountId,
@@ -486,7 +570,7 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
         if (categoryError) {
           setSaving(false);
           fail("לא ניתן למיין");
-          return;
+          return false;
         }
         const results = await Promise.all(
           nextCategories.map((category) => {
@@ -501,9 +585,10 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
         setSaving(false);
         if (results.some((result) => result.error)) {
           fail("לא ניתן למיין");
-          return;
+          return false;
         }
         await refetch();
+        return true;
       },
       moveCategories(activeId, overId, visibleIds) {
         setCategories((current) => {
@@ -686,36 +771,29 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
       },
       async addToGrocery(itemId) {
         const existing = grocery.find((line) => line.item_id === itemId);
-        const supabase = supabaseRef.current;
+        const localId = existing?.id ?? crypto.randomUUID();
         if (!existing) {
           const optimistic: GroceryLine = {
-            id: crypto.randomUUID(),
+            id: localId,
             account_id: initial.accountId,
             item_id: itemId,
             checked: false,
           };
           setGrocery((current) => [...current, optimistic]);
-          const { error: insertError } = await supabase.from("grocery_items").insert({
-            account_id: initial.accountId,
-            item_id: itemId,
-            checked: false,
-          });
-          if (insertError) fail("לא ניתן להוסיף לרשימת הקניות");
-          else void refetch();
-          return;
-        }
-        if (existing.checked) {
+        } else if (existing.checked) {
           setGrocery((current) => current.map((line) => (line.item_id === itemId ? { ...line, checked: false } : line)));
-          const { error: updateError } = await supabase.from("grocery_items").update({ checked: false }).eq("id", existing.id);
-          if (updateError) fail("לא ניתן לעדכן את רשימת הקניות");
-        }
+        } else return;
+        rememberPendingGrocery(initial.accountId, itemId, false, localId);
+        await syncPendingGrocery();
+        if (!readPendingGrocery(initial.accountId).some((entry) => entry.itemId === itemId)) void refetch();
       },
       async setChecked(itemId, checked) {
         const existing = grocery.find((line) => line.item_id === itemId);
         if (!existing || existing.checked === checked) return;
         setGrocery((current) => current.map((line) => (line.item_id === itemId ? { ...line, checked } : line)));
-        const { error: updateError } = await supabaseRef.current.from("grocery_items").update({ checked }).eq("id", existing.id);
-        if (updateError) fail("לא ניתן לעדכן את רשימת הקניות");
+        rememberPendingGrocery(initial.accountId, itemId, checked, existing.id);
+        await syncPendingGrocery();
+        if (!readPendingGrocery(initial.accountId).some((entry) => entry.itemId === itemId)) void refetch();
       },
       async removeFromGrocery(itemId) {
         const existing = grocery.find((line) => line.item_id === itemId);
@@ -818,6 +896,7 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
     items,
     refetch,
     reorderMode,
+    syncPendingGrocery,
     saving,
     setChecklistBody,
     setChecklistChecked,

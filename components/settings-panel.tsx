@@ -51,6 +51,7 @@ export function SignedOutSettings({
   return (
     <div>
       <AppHeader title="הגדרות" actionsEnabled={false} />
+      <DevBanner />
       <AppTitle />
       {accounts.length > 0 ? (
         <div className="px-4 pt-4">
@@ -194,6 +195,7 @@ export function SignedInSettings({
   }
   return (
     <div>
+      <DevBanner />
       <div className="px-4 pt-4">
         <AccountCard
           accounts={options}
@@ -321,6 +323,15 @@ function AccountCard({
       {error ? (
         <p className="mt-3 text-center text-sm text-red-600">{error}</p>
       ) : null}
+    </div>
+  );
+}
+
+function DevBanner() {
+  if (isProduction()) return null;
+  return (
+    <div role="status" className="px-4 py-4 text-center text-xl font-bold" style={{ background: "#f59e0b", color: "#1c1917" }}>
+      סביבת פיתוח
     </div>
   );
 }

@@ -9,6 +9,7 @@ import { BottomNav } from "@/components/bottom-nav";
 import { ChecklistPage } from "@/components/checklist-page";
 import { ListPage } from "@/components/list-page";
 import { useLists, useListsOptional } from "@/components/lists-provider";
+import { isInstalledApp } from "@/lib/installed-app";
 import { bindKeepAwake } from "@/lib/keep-awake";
 import { bindSavedSession } from "@/lib/saved-accounts";
 import { SignedInSettings } from "@/components/settings-panel";
@@ -28,12 +29,14 @@ export function AppShell({
   const scrolls = useRef<Record<string, number>>({});
   const restoreRef = useRef<string | null>(null);
   const nativePushState = useRef<History["pushState"] | null>(null);
+  const nativeReplaceState = useRef<History["replaceState"] | null>(null);
   const [warm, setWarm] = useState(false);
   const lists = useListsOptional();
 
   useLayoutEffect(() => {
-    // Keep the browser's own pushState. Next.js patches it and would refetch these pages from the server.
+    // Keep the browser's own history methods. Next.js patches them and would refetch these pages from the server.
     nativePushState.current = window.history.pushState.bind(window.history);
+    nativeReplaceState.current = window.history.replaceState.bind(window.history);
   }, []);
 
   useEffect(() => {
@@ -69,8 +72,14 @@ export function AppShell({
     pathRef.current = href;
     if (href === "/grocery" || href === "/inventory" || href === "/lists") restoreRef.current = href;
     if (window.location.pathname !== href) {
-      const push = nativePushState.current ?? window.history.pushState.bind(window.history);
-      push(null, "", href);
+      // An installed app must stay on one history entry, or the browser ignores close().
+      if (isInstalledApp()) {
+        const replace = nativeReplaceState.current ?? window.history.replaceState.bind(window.history);
+        replace(null, "", href);
+      } else {
+        const push = nativePushState.current ?? window.history.pushState.bind(window.history);
+        push(null, "", href);
+      }
     }
     setPath(href);
     if (href === "/settings") window.scrollTo(0, 0);

@@ -58,6 +58,7 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importing, setImporting] = useState(false);
   const [importProgress, setImportProgress] = useState(0);
+  const [sorting, setSorting] = useState(false);
   const importInputRef = useRef<HTMLInputElement>(null);
   const [lightbox, setLightbox] = useState<{
     src: string | null;
@@ -246,7 +247,14 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
           });
         }}
         onAdd={mode === "inventory" ? () => setEditor({ kind: "new-category" }) : undefined}
-        onSort={mode === "inventory" ? () => void lists.sortAlphabetically() : undefined}
+        onSort={
+          mode === "inventory"
+            ? () => {
+                setSorting(true);
+                void lists.sortAlphabetically().finally(() => setSorting(false));
+              }
+            : undefined
+        }
         onReorder={mode === "inventory" ? () => void lists.toggleReorder() : undefined}
         onExport={mode === "inventory" ? () => setConfirmExport(true) : undefined}
         exporting={exporting}
@@ -273,6 +281,7 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
       {lists.reorderMode ? <p className="px-4 pb-2 text-center text-sm text-[var(--teal)]">גררו לסידור, ולחצו שוב על כפתור הסידור לשמירה</p> : null}
       {exporting ? <p className="px-4 pb-2 text-center text-sm text-neutral-500">מייצא את הנתונים…</p> : null}
       {importing ? <ImportProgress progress={importProgress} /> : null}
+      {sorting ? <SortProgress /> : null}
       <input
         ref={importInputRef}
         type="file"
@@ -328,6 +337,8 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
               const open = isExpanded(category.id);
               const categoryItems = itemsFor(category);
               const productCount = lists.items.filter((item) => item.category_id === category.id).length;
+              const shadedCategory = category.name.includes("----");
+              const categoryLabel = shadedCategory ? category.name.replaceAll("----", " ").replace(/\s+/g, " ").trim() : category.name;
               return (
                 <SortableBlock key={category.id} id={category.id}>
                   {(handle) => (
@@ -335,6 +346,7 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
                       {mode === "grocery" && !lists.reorderMode ? (
                         <div
                           className="mb-1 grid cursor-pointer grid-cols-[4.75rem_minmax(0,1fr)_4.75rem] items-center rounded-md bg-[var(--bar)] py-1"
+                          style={shadedCategory ? { background: "#b5b5b5" } : undefined}
                           onClick={() => toggleCategory(category.id)}
                         >
                           <div className="flex items-center ps-2">
@@ -342,7 +354,7 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
                               {categoryItems.length}
                             </span>
                           </div>
-                          <div className="min-w-0 truncate px-1 text-center text-base font-medium">{category.name}</div>
+                          <div className="min-w-0 truncate px-1 text-center text-base font-medium">{categoryLabel}</div>
                           <div className="flex items-center justify-end pe-1">
                             <button
                               type="button"
@@ -692,7 +704,7 @@ function EntityCard({
             {onAdd ? (
               <button
                 type="button"
-                className="grid size-8 place-items-center text-[var(--orange)]"
+                className="grid size-8 place-items-center text-black"
                 aria-label="הוספת מוצר חדש"
                 onClick={(event) => {
                   event.stopPropagation();
@@ -735,6 +747,72 @@ function Stepper({ quantity, unitShort, onChange }: { quantity: number; unitShor
         +
       </button>
     </div>
+  );
+}
+
+function SortProgress() {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  useLayoutEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog || dialog.open) return;
+    dialog.showModal();
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      if (dialog.open) dialog.close();
+    };
+  }, []);
+  return (
+    <dialog
+      ref={dialogRef}
+      aria-label="ממיין את הרשימה"
+      onCancel={(event) => event.preventDefault()}
+      style={{
+        position: "fixed",
+        inset: 0,
+        width: "100vw",
+        height: "100vh",
+        maxWidth: "none",
+        maxHeight: "none",
+        margin: 0,
+        padding: 24,
+        border: "none",
+        background: "rgba(0, 0, 0, 0.55)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <div
+        style={{
+          width: "100%",
+          maxWidth: 360,
+          borderRadius: 16,
+          background: "#fff",
+          textAlign: "center",
+          padding: "2rem 1.5rem",
+          boxShadow: "0 12px 40px rgba(0, 0, 0, 0.28)",
+        }}
+      >
+        <style>{"@keyframes cnaanlist-spin { to { transform: rotate(360deg); } }"}</style>
+        <div
+          aria-hidden
+          style={{
+            width: 52,
+            height: 52,
+            margin: "0 auto 20px",
+            borderRadius: "50%",
+            border: "4px solid #e5e5e5",
+            borderTopColor: "var(--teal)",
+            animation: "cnaanlist-spin 0.8s linear infinite",
+          }}
+        />
+        <p className="font-semibold" style={{ fontSize: "1.5rem", lineHeight: 1.35 }}>
+          ממיין את הרשימה…
+        </p>
+      </div>
+    </dialog>
   );
 }
 
