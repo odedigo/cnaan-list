@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useRef, useState } from "react";
+import { useActionState, useEffect, useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
 
 import { login, logout } from "@/app/actions/auth";
@@ -327,6 +327,7 @@ function StoresEditor() {
   const [addColor, setAddColor] = useState("#2563EB");
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [colors, setColors] = useState<Record<string, string>>({});
+  const [colorEdit, setColorEdit] = useState<{ id: string | null; name: string; color: string } | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const colorTimers = useRef<Record<string, number>>({});
@@ -426,13 +427,19 @@ function StoresEditor() {
               }}
               className="min-w-0 flex-1 rounded-lg border border-neutral-300 bg-white px-3 py-2 outline-none focus:border-[var(--teal)]"
             />
-            <input
-              type="color"
+            <button
+              type="button"
               aria-label={`צבע ${store.name}`}
-              value={colorHex(colors[store.id] ?? store.color).toLowerCase()}
               disabled={busy}
-              onChange={(event) => queueColor(store.id, event.target.value)}
-              className="size-10 shrink-0 cursor-pointer rounded-lg border border-neutral-300 bg-white p-1"
+              onClick={() =>
+                setColorEdit({
+                  id: store.id,
+                  name: store.name,
+                  color: colorHex(colors[store.id] ?? store.color),
+                })
+              }
+              className="size-10 shrink-0 rounded-lg border border-neutral-300 disabled:opacity-60"
+              style={{ background: colorHex(colors[store.id] ?? store.color) }}
             />
             {store.protected ? (
               <span className="w-16 shrink-0" />
@@ -473,13 +480,13 @@ function StoresEditor() {
           }}
           className="min-w-0 flex-1 rounded-lg border border-neutral-300 bg-white px-3 py-2 outline-none focus:border-[var(--teal)]"
         />
-        <input
-          type="color"
+        <button
+          type="button"
           aria-label="צבע חנות חדשה"
-          value={addColor.toLowerCase()}
           disabled={busy}
-          onChange={(event) => setAddColor(event.target.value)}
-          className="size-10 shrink-0 cursor-pointer rounded-lg border border-neutral-300 bg-white p-1"
+          onClick={() => setColorEdit({ id: null, name: "חנות חדשה", color: colorHex(addColor) })}
+          className="size-10 shrink-0 rounded-lg border border-neutral-300 disabled:opacity-60"
+          style={{ background: colorHex(addColor) }}
         />
         <button
           type="button"
@@ -491,8 +498,302 @@ function StoresEditor() {
         </button>
       </div>
       {message ? <p className="mt-2 text-sm text-red-600">{message}</p> : null}
+      {colorEdit ? (
+        <StoreColorDialog
+          color={colorEdit.color}
+          name={colorEdit.name}
+          onClose={() => setColorEdit(null)}
+          onSave={(color) => {
+            if (colorEdit.id) queueColor(colorEdit.id, color);
+            else setAddColor(color);
+            setColorEdit(null);
+          }}
+        />
+      ) : null}
     </div>
   );
+}
+
+function StoreColorDialog({
+  color,
+  name,
+  onClose,
+  onSave,
+}: {
+  color: string;
+  name: string;
+  onClose: () => void;
+  onSave: (color: string) => void;
+}) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const initial = colorHex(color);
+  const [hex, setHex] = useState(initial);
+  const [draft, setDraft] = useState(initial);
+  const hsv = hexToHsv(hex);
+  useLayoutEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog || dialog.open) return;
+    dialog.showModal();
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      if (dialog.open) dialog.close();
+    };
+  }, []);
+
+  function choose(next: string) {
+    const normalized = colorHex(next);
+    setHex(normalized);
+    setDraft(normalized);
+  }
+
+  return (
+    <dialog
+      ref={dialogRef}
+      aria-label={`צבע ${name}`}
+      onCancel={(event) => {
+        event.preventDefault();
+        onClose();
+      }}
+      onClick={(event) => {
+        if (event.target === dialogRef.current) onClose();
+      }}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 100,
+        width: "100%",
+        height: "100dvh",
+        maxWidth: "none",
+        maxHeight: "none",
+        margin: 0,
+        boxSizing: "border-box",
+        paddingTop: "max(16px, env(safe-area-inset-top))",
+        paddingRight: "max(16px, env(safe-area-inset-right))",
+        paddingBottom: "max(16px, env(safe-area-inset-bottom))",
+        paddingLeft: "max(16px, env(safe-area-inset-left))",
+        border: "none",
+        background: "rgba(0, 0, 0, 0.55)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <div
+        dir="rtl"
+        style={{
+          width: "100%",
+          maxWidth: 340,
+          maxHeight: "100%",
+          overflowY: "auto",
+          borderRadius: 16,
+          background: "#fff",
+          padding: "1.25rem",
+          boxShadow: "0 12px 40px rgba(0, 0, 0, 0.28)",
+        }}
+      >
+        <p className="text-base font-semibold">צבע {name}</p>
+        <div dir="ltr" style={{ display: "flex", gap: 10, height: 196, marginTop: 12 }}>
+          <SaturationField hsv={hsv} onChange={(next) => choose(hsvToHex(next.h, next.s, next.v))} />
+          <HueField hue={hsv.h} onChange={(hue) => choose(hsvToHex(hue, hsv.s, hsv.v))} />
+        </div>
+        <div dir="ltr" style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12 }}>
+          <span style={{ width: 40, height: 40, flexShrink: 0, borderRadius: 8, border: "1px solid #d4d4d4", background: hex }} />
+          <input
+            aria-label="קוד צבע"
+            dir="ltr"
+            value={draft}
+            spellCheck={false}
+            onChange={(event) => {
+              const text = event.target.value.toUpperCase();
+              setDraft(text);
+              if (/^#[0-9A-F]{6}$/.test(text)) setHex(text);
+            }}
+            onBlur={() => setDraft(hex)}
+            style={{
+              minWidth: 0,
+              flex: 1,
+              borderRadius: 8,
+              border: "1px solid #d4d4d4",
+              padding: "8px 12px",
+              fontFamily: "ui-monospace, monospace",
+              fontSize: 16,
+              textTransform: "uppercase",
+            }}
+          />
+        </div>
+        <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{ flex: 1, borderRadius: 12, background: "#f5f5f5", padding: "12px 0", fontWeight: 500, color: "#404040" }}
+          >
+            ביטול
+          </button>
+          <button
+            type="button"
+            onClick={() => onSave(hex)}
+            style={{ flex: 1, borderRadius: 12, background: "var(--teal)", padding: "12px 0", fontWeight: 500, color: "#fff" }}
+          >
+            שמירה
+          </button>
+        </div>
+      </div>
+    </dialog>
+  );
+}
+
+function SaturationField({ hsv, onChange }: { hsv: Hsv; onChange: (hsv: Hsv) => void }) {
+  function pick(event: React.PointerEvent<HTMLDivElement>) {
+    const rect = event.currentTarget.getBoundingClientRect();
+    onChange({
+      h: hsv.h,
+      s: clamp((event.clientX - rect.left) / rect.width),
+      v: 1 - clamp((event.clientY - rect.top) / rect.height),
+    });
+  }
+  return (
+    <div
+      role="application"
+      aria-label="רוויה ובהירות"
+      onPointerDown={(event) => {
+        event.currentTarget.setPointerCapture(event.pointerId);
+        pick(event);
+      }}
+      onPointerMove={(event) => {
+        if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
+        pick(event);
+      }}
+      style={{
+        position: "relative",
+        flex: 1,
+        borderRadius: 2,
+        touchAction: "none",
+        background: `hsl(${hsv.h} 100% 50%)`,
+        boxShadow: "inset 0 0 0 1px rgba(0,0,0,0.12)",
+      }}
+    >
+      <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to right, #fff, transparent)" }} />
+      <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to bottom, transparent, #000)" }} />
+      <span
+        aria-hidden
+        style={{
+          position: "absolute",
+          left: `${hsv.s * 100}%`,
+          top: `${(1 - hsv.v) * 100}%`,
+          width: 14,
+          height: 14,
+          borderRadius: "50%",
+          transform: "translate(-50%, -50%)",
+          border: "2px solid #fff",
+          boxShadow: "0 0 0 1px rgba(0,0,0,0.55)",
+        }}
+      />
+    </div>
+  );
+}
+
+function HueField({ hue, onChange }: { hue: number; onChange: (hue: number) => void }) {
+  function pick(event: React.PointerEvent<HTMLDivElement>) {
+    const rect = event.currentTarget.getBoundingClientRect();
+    onChange(clamp((event.clientY - rect.top) / rect.height) * 360);
+  }
+  return (
+    <div
+      role="slider"
+      aria-label="גוון"
+      aria-valuemin={0}
+      aria-valuemax={360}
+      aria-valuenow={Math.round(hue)}
+      tabIndex={0}
+      onPointerDown={(event) => {
+        event.currentTarget.setPointerCapture(event.pointerId);
+        pick(event);
+      }}
+      onPointerMove={(event) => {
+        if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
+        pick(event);
+      }}
+      onKeyDown={(event) => {
+        if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+        event.preventDefault();
+        const delta = event.key === "ArrowDown" ? 4 : -4;
+        onChange((hue + delta + 360) % 360);
+      }}
+      style={{
+        position: "relative",
+        width: 18,
+        flexShrink: 0,
+        borderRadius: 2,
+        touchAction: "none",
+        background: "linear-gradient(to bottom, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)",
+      }}
+    >
+      <span
+        aria-hidden
+        style={{
+          position: "absolute",
+          left: "50%",
+          top: `${(hue / 360) * 100}%`,
+          width: 22,
+          height: 8,
+          borderRadius: 2,
+          transform: "translate(-50%, -50%)",
+          background: `hsl(${hue} 100% 50%)`,
+          border: "2px solid #fff",
+          boxShadow: "0 0 0 1px rgba(0,0,0,0.55)",
+        }}
+      />
+    </div>
+  );
+}
+
+type Hsv = { h: number; s: number; v: number };
+
+function hexToHsv(hex: string): Hsv {
+  const value = Number.parseInt(colorHex(hex).slice(1), 16);
+  const red = ((value >> 16) & 255) / 255;
+  const green = ((value >> 8) & 255) / 255;
+  const blue = (value & 255) / 255;
+  const max = Math.max(red, green, blue);
+  const min = Math.min(red, green, blue);
+  const delta = max - min;
+  let hue = 0;
+  if (delta !== 0) {
+    if (max === red) hue = ((green - blue) / delta) % 6;
+    else if (max === green) hue = (blue - red) / delta + 2;
+    else hue = (red - green) / delta + 4;
+    hue = (hue * 60 + 360) % 360;
+  }
+  return { h: hue, s: max === 0 ? 0 : delta / max, v: max };
+}
+
+function hsvToHex(hue: number, saturation: number, value: number) {
+  const chroma = value * saturation;
+  const match = chroma * (1 - Math.abs(((hue / 60) % 2) - 1));
+  const base = value - chroma;
+  const channels =
+    hue < 60
+      ? [chroma, match, 0]
+      : hue < 120
+        ? [match, chroma, 0]
+        : hue < 180
+          ? [0, chroma, match]
+          : hue < 240
+            ? [0, match, chroma]
+            : hue < 300
+              ? [match, 0, chroma]
+              : [chroma, 0, match];
+  const part = (channel: number) =>
+    Math.round((channel + base) * 255)
+      .toString(16)
+      .padStart(2, "0");
+  return `#${part(channels[0])}${part(channels[1])}${part(channels[2])}`.toUpperCase();
+}
+
+function clamp(value: number) {
+  return Math.min(1, Math.max(0, value));
 }
 
 function DevBanner() {

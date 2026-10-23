@@ -93,7 +93,7 @@ export function AppHeader({
     if (!reloading) return;
     const timer = window.setTimeout(() => {
       window.location.reload();
-    }, 60000);
+    }, 80);
     return () => window.clearTimeout(timer);
   }, [reloading]);
   const searchButton = onSearchToggle ? (
