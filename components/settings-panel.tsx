@@ -1,5 +1,7 @@
 "use client";
 
+/** Settings: signed-out login, account switch, stores with the color picker, and app options. */
+
 import { useActionState, useEffect, useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
 

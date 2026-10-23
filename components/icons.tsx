@@ -1,3 +1,5 @@
+/** Shared SVG icons for navigation, headers, and editors. */
+
 import type { SVGProps } from "react";
 
 type IconProps = SVGProps<SVGSVGElement>;

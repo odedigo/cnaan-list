@@ -1,5 +1,7 @@
 "use client";
 
+/** Product and category image thumbnail, lightbox, and picker. */
+
 import { useEffect, useRef, useState, type DragEvent } from "react";
 import { createPortal } from "react-dom";
 

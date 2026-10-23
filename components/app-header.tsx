@@ -1,5 +1,7 @@
 "use client";
 
+/** Sticky page header with the action menu, search, about dialog, and refresh notice. */
+
 import {
   useEffect,
   useLayoutEffect,

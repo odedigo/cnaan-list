@@ -1,5 +1,7 @@
 "use client";
 
+/** Editor sheet for creating and editing a category or a product. */
+
 import { useState, type ReactNode } from "react";
 
 import { CloseIcon, PenIcon } from "@/components/icons";

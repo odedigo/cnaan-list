@@ -1,5 +1,7 @@
 "use client";
 
+/** On the first load of a signed-in session, open the grocery page. */
+
 import { useEffect } from "react";
 
 const startedKey = "cnaanlist-session-started";

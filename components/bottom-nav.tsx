@@ -1,5 +1,7 @@
 "use client";
 
+/** Fixed bottom navigation between products, grocery, lists, and settings. */
+
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 

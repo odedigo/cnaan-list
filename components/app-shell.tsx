@@ -1,5 +1,7 @@
 "use client";
 
+/** Signed-in layout that keeps the main pages mounted and switches them without a server refetch. */
+
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { usePathname } from "next/navigation";
 

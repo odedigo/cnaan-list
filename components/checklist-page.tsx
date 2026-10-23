@@ -1,5 +1,7 @@
 "use client";
 
+/** Free-form lists page: indented lines, drag reorder, check-off, and a done section. */
+
 import {
   closestCenter,
   DndContext,

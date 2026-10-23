@@ -1,5 +1,7 @@
 "use client";
 
+/** Inventory and grocery screens: categories, products, reorder, and the shopping cart. */
+
 import {
   closestCenter,
   DndContext,

@@ -1,5 +1,7 @@
 "use client";
 
+/** Shared client state for inventory, grocery, stores, and checklists, including Supabase sync. */
+
 import {
   createContext,
   useCallback,
