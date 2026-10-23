@@ -678,43 +678,45 @@ function EntityCard({
       <span className="absolute inset-y-0 start-0 w-1.5" style={{ background: color }} />
       <ImageBubble src={src} label={name} onOpen={onOpenImage} size="size-10" />
       <div className="min-w-0 flex-1 text-start text-base leading-tight">
-        <div className="flex min-w-0 items-baseline gap-1">
-          <span className="truncate">{name}</span>
-          {count != null ? (
-            <span className="shrink-0 min-w-4 rounded-full bg-neutral-200 px-1 text-center text-[10px] font-semibold leading-4 text-neutral-600">
-              {count}
-            </span>
-          ) : null}
+        <div className="flex min-w-0 items-center gap-1">
+          <div className="flex min-w-0 flex-1 items-baseline gap-1">
+            <span className="truncate">{name}</span>
+            {count != null ? (
+              <span className="shrink-0 min-w-4 rounded-full bg-neutral-200 px-1 text-center text-[10px] font-semibold leading-4 text-neutral-600">
+                {count}
+              </span>
+            ) : null}
+          </div>
+          {extra}
+          <div className="flex shrink-0 items-center">
+            {onAdd ? (
+              <button
+                type="button"
+                className="grid size-8 place-items-center text-[var(--orange)]"
+                aria-label="הוספת מוצר חדש"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onAdd();
+                }}
+              >
+                <PlusIcon className="size-4" />
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className={`grid size-8 place-items-center text-neutral-400 ${handle ? "cursor-grab touch-none text-neutral-500 active:cursor-grabbing" : ""}`}
+              aria-label={handle ? "גרירה" : "פרטים"}
+              {...handle}
+              onClick={(event) => {
+                event.stopPropagation();
+                if (!handle) onDots?.();
+              }}
+            >
+              {handle ? <GripIcon className="size-5" /> : <DotsIcon className="size-4" />}
+            </button>
+          </div>
         </div>
         {comment ? <div className="truncate text-sm text-neutral-500">{comment}</div> : null}
-      </div>
-      {extra}
-      <div className="flex shrink-0 items-center gap-2">
-        {onAdd ? (
-          <button
-            type="button"
-            className="grid size-8 place-items-center text-[var(--orange)]"
-            aria-label="הוספת מוצר חדש"
-            onClick={(event) => {
-              event.stopPropagation();
-              onAdd();
-            }}
-          >
-            <PlusIcon className="size-4" />
-          </button>
-        ) : null}
-        <button
-          type="button"
-          className={`grid size-8 place-items-center text-neutral-400 ${handle ? "cursor-grab touch-none text-neutral-500 active:cursor-grabbing" : ""}`}
-          aria-label={handle ? "גרירה" : "פרטים"}
-          {...handle}
-          onClick={(event) => {
-            event.stopPropagation();
-            if (!handle) onDots?.();
-          }}
-        >
-          {handle ? <GripIcon className="size-5" /> : <DotsIcon className="size-4" />}
-        </button>
       </div>
     </div>
   );
@@ -722,14 +724,14 @@ function EntityCard({
 
 function Stepper({ quantity, unitShort, onChange }: { quantity: number; unitShort: string; onChange: (quantity: number) => void }) {
   return (
-    <div dir="ltr" className="flex items-center gap-1 text-base" onClick={(event) => event.stopPropagation()}>
-      <button type="button" aria-label="הפחתה" className="grid size-7 place-items-center rounded-full border border-neutral-300" onClick={() => onChange(stepQuantity(quantity, -1))}>
+    <div dir="ltr" className="flex shrink-0 items-center gap-2 text-sm" onClick={(event) => event.stopPropagation()}>
+      <button type="button" aria-label="הפחתה" className="grid size-6 place-items-center rounded-full border border-neutral-300" onClick={() => onChange(stepQuantity(quantity, -1))}>
         −
       </button>
-      <span dir="rtl" className="min-w-12 text-center">
+      <span dir="rtl" className="min-w-8 px-0.5 text-center">
         <bdi>{formatQuantity(quantity)}</bdi> <bdi>{unitShort}</bdi>
       </span>
-      <button type="button" aria-label="הוספה" className="grid size-7 place-items-center rounded-full border border-neutral-300" onClick={() => onChange(stepQuantity(quantity, 1))}>
+      <button type="button" aria-label="הוספה" className="grid size-6 place-items-center rounded-full border border-neutral-300" onClick={() => onChange(stepQuantity(quantity, 1))}>
         +
       </button>
     </div>
