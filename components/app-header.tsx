@@ -47,6 +47,8 @@ export function AppHeader({
   onClearGrocery,
   clearGroceryEnabled = false,
   onPlus,
+  showCredit = false,
+  creditVersion = "",
 }: {
   title: string;
   actionsEnabled: boolean;
@@ -70,8 +72,11 @@ export function AppHeader({
   onClearGrocery?: () => void;
   clearGroceryEnabled?: boolean;
   onPlus?: () => void;
+  showCredit?: boolean;
+  creditVersion?: string;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [creditOpen, setCreditOpen] = useState(false);
   const [reloading, setReloading] = useState(false);
   const [installed, setInstalled] = useState(false);
   const showMenu = Boolean(
@@ -146,6 +151,11 @@ export function AppHeader({
           <span className="min-w-0 truncate">{title}</span>
         </h1>
         <div className="relative flex shrink-0 items-center justify-self-end">
+          {showCredit ? (
+            <HeaderButton label="אודות" onClick={() => setCreditOpen(true)}>
+              <span className="text-xl font-semibold leading-none">@</span>
+            </HeaderButton>
+          ) : null}
           {showMenu ? (
             <HeaderButton
               label="תפריט"
@@ -299,7 +309,72 @@ export function AppHeader({
         </div>
       ) : null}
       {reloading ? <ReloadNotice /> : null}
+      {creditOpen ? <CreditDialog version={creditVersion} onClose={() => setCreditOpen(false)} /> : null}
     </header>
+  );
+}
+
+function CreditDialog({ version, onClose }: { version: string; onClose: () => void }) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  useLayoutEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog || dialog.open) return;
+    dialog.showModal();
+    return () => {
+      if (dialog.open) dialog.close();
+    };
+  }, []);
+  return (
+    <dialog
+      ref={dialogRef}
+      aria-label="אודות"
+      onCancel={(event) => {
+        event.preventDefault();
+        onClose();
+      }}
+      onClick={(event) => {
+        if (event.target === dialogRef.current) onClose();
+      }}
+      style={{
+        position: "fixed",
+        inset: 0,
+        width: "100vw",
+        height: "100vh",
+        maxWidth: "none",
+        maxHeight: "none",
+        margin: 0,
+        padding: 24,
+        border: "none",
+        background: "rgba(0, 0, 0, 0.55)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <div
+        dir="rtl"
+        className="text-center text-neutral-700"
+        style={{
+          width: "100%",
+          maxWidth: 320,
+          borderRadius: 16,
+          background: "#fff",
+          padding: "1.75rem 1.5rem 1.25rem",
+          boxShadow: "0 12px 40px rgba(0, 0, 0, 0.28)",
+        }}
+      >
+        <p className="text-base font-medium">פותח על ידי עודד כנען</p>
+        <p className="mt-1 text-sm">כל הזכויות שמורות</p>
+        {version ? <p className="mt-1 text-sm">גרסה {version}</p> : null}
+        <button
+          type="button"
+          onClick={onClose}
+          className="mt-5 w-full rounded-xl bg-neutral-100 py-3 font-medium text-neutral-700"
+        >
+          סגירה
+        </button>
+      </div>
+    </dialog>
   );
 }
 

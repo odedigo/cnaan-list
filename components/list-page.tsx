@@ -341,6 +341,7 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
               const shadedCategory = category.name.includes("----");
               const categoryLabel = shadedCategory ? category.name.replaceAll("----", " ").replace(/\s+/g, " ").trim() : category.name;
               const store = lists.stores.find((entry) => entry.id === category.store_id);
+              const storeLabel = store && !store.protected ? store.name : null;
               const categoryBackground = shadedCategory ? "#b5b5b5" : (store?.color ?? DEFAULT_STORE_COLOR);
               const categoryInk = inkFor(categoryBackground);
               return (
@@ -358,8 +359,21 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
                               {categoryItems.length}
                             </span>
                           </div>
-                          <div className="min-w-0 truncate px-1 text-center text-base font-medium">{categoryLabel}</div>
-                          <div className="flex items-center justify-end pe-1">
+                          <div
+                            className="min-w-0 truncate px-1 text-center text-base font-medium"
+                            style={storeLabel ? { paddingInlineEnd: "4.75rem" } : undefined}
+                          >
+                            {categoryLabel}
+                          </div>
+                          <div className="relative flex items-center justify-end pe-1">
+                            {storeLabel ? (
+                              <span
+                                className="pointer-events-none absolute top-1/2 max-w-24 -translate-y-1/2 truncate rounded-full px-1.5 text-xs font-semibold leading-4 text-neutral-800"
+                                style={{ insetInlineEnd: "2rem", background: "rgba(255,255,255,0.85)" }}
+                              >
+                                {storeLabel}
+                              </span>
+                            ) : null}
                             <button
                               type="button"
                               className="grid size-8 place-items-center text-inherit"
@@ -376,6 +390,7 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
                       ) : (
                         <EntityCard
                           name={category.name}
+                          storeLabel={storeLabel}
                           count={mode === "inventory" ? productCount : undefined}
                           color={colorHex(category.color)}
                           src={lists.imageSrc("category", category.id, category.image_path)}
@@ -656,6 +671,7 @@ function ItemRow({
 
 function EntityCard({
   name,
+  storeLabel,
   count,
   comment,
   color,
@@ -671,6 +687,7 @@ function EntityCard({
   onClick,
 }: {
   name: string;
+  storeLabel?: string | null;
   count?: number;
   comment?: string;
   color: string;
@@ -705,6 +722,9 @@ function EntityCard({
           </div>
           {extra}
           <div className="flex shrink-0 items-center">
+            {storeLabel ? (
+              <span className="max-w-24 min-w-0 truncate rounded-full bg-neutral-100 px-1.5 text-xs font-medium leading-4 text-neutral-600">{storeLabel}</span>
+            ) : null}
             {onAdd ? (
               <button
                 type="button"

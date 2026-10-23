@@ -52,7 +52,7 @@ export function SignedOutSettings({
   }, []);
   return (
     <div>
-      <AppHeader title="הגדרות" actionsEnabled={false} />
+      <AppHeader title="הגדרות" actionsEnabled={false} showCredit creditVersion={version} />
       <DevBanner />
       <AppTitle />
       {accounts.length > 0 ? (
@@ -132,20 +132,11 @@ export function SignedOutSettings({
           <Link href="/forgot-password">שכחתי סיסמה</Link>
         </div>
       </form>
-      <div className="px-6">
-        <CreditBox version={version} />
-      </div>
     </div>
   );
 }
 
-export function SignedInSettings({
-  username,
-  version = "",
-}: {
-  username: string;
-  version?: string;
-}) {
+export function SignedInSettings({ username }: { username: string }) {
   const [pending, setPending] = useState(false);
   const [switching, setSwitching] = useState(false);
   const [switchError, setSwitchError] = useState("");
@@ -198,7 +189,7 @@ export function SignedInSettings({
   return (
     <div>
       <DevBanner />
-      <div className="px-4 pt-4" style={{ paddingBottom: "9rem" }}>
+      <div className="px-4 pt-4 pb-8">
         <AccountCard
           accounts={options}
           value={currentValue}
@@ -249,7 +240,6 @@ export function SignedInSettings({
           </label>
         </div>
         <StoresEditor />
-        <CreditBox version={version} />
       </div>
     </div>
   );
@@ -522,14 +512,3 @@ function AppTitle() {
   );
 }
 
-function CreditBox({ version }: { version: string }) {
-  return (
-    <div className="fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] left-1/2 z-40 w-full max-w-[480px] -translate-x-1/2 px-6">
-      <div className="rounded-xl border border-neutral-200 bg-white px-4 py-3 text-center text-sm text-neutral-600">
-        <p>פותח על ידי עודד כנען</p>
-        <p className="mt-1">כל הזכויות שמורות</p>
-        {version ? <p className="mt-1">גרסה {version}</p> : null}
-      </div>
-    </div>
-  );
-}

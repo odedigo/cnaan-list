@@ -181,8 +181,8 @@ function SignedInSettingsView({ version }: { version: string }) {
   const lists = useLists();
   return (
     <>
-      <AppHeader title="הגדרות" actionsEnabled={false} />
-      <SignedInSettings username={lists.username} version={version} />
+      <AppHeader title="הגדרות" actionsEnabled={false} showCredit creditVersion={version} />
+      <SignedInSettings username={lists.username} />
     </>
   );
 }
