@@ -43,9 +43,8 @@ export async function login(_state: AuthState, formData: FormData): Promise<Auth
 }
 
 export async function logout() {
-  const supabase = await createClient();
-  // Local scope ends this browser only. Other devices on the same account stay signed in.
-  await supabase.auth.signOut({ scope: "local" });
+  // Drop this browser's session cookies without revoking the refresh token.
+  // Other devices stay signed in, and this device can switch back to the account.
   const cookieStore = await cookies();
   for (const cookie of cookieStore.getAll()) {
     if (cookie.name.startsWith("sb-")) cookieStore.delete(cookie.name);

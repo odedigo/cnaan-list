@@ -24,6 +24,7 @@ import {
 } from "@/lib/checklist";
 import { colorHex, nextCategoryColor, uniqueCategoryColors } from "@/lib/colors";
 import { pruneImageCache, readCachedImage, writeCachedImage } from "@/lib/image-cache";
+import { replaceInventory } from "@/lib/import-inventory";
 import { compressImage } from "@/lib/images";
 import { applyOrder, moveVisible, sortByOrder } from "@/lib/order";
 import { createClient } from "@/lib/supabase/client";
@@ -62,6 +63,7 @@ type ListsContextValue = {
   removeFromGrocery: (itemId: string) => Promise<void>;
   clearPurchased: () => Promise<void>;
   clearGrocery: () => Promise<void>;
+  importInventory: (file: File, onProgress?: (ratio: number) => void) => Promise<void>;
   checklist: ChecklistRow[];
   checklistError: string | null;
   addChecklistRow: (where: { at: "start" } | { afterId: string }) => string | null;
@@ -88,6 +90,7 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
   const [imageSrcs, setImageSrcs] = useState<Record<string, string>>({});
   const [previews, setPreviews] = useState<Record<string, string>>({});
   const reorderRef = useRef(false);
+  const importingRef = useRef(false);
   const supabaseRef = useRef(createClient());
   const checklistRef = useRef(initial.checklist);
   const writeChain = useRef(Promise.resolve());
@@ -97,7 +100,7 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
   checklistRef.current = checklist;
 
   const refetch = useCallback(async () => {
-    if (reorderRef.current) return;
+    if (reorderRef.current || importingRef.current) return;
     const supabase = supabaseRef.current;
     const [{ data: categoryRows }, { data: itemRows }, { data: groceryRows }, checklistResult] = await Promise.all([
       supabase.from("categories").select("*").eq("account_id", initial.accountId).order("sort_order"),
@@ -105,7 +108,7 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
       supabase.from("grocery_items").select("*").eq("account_id", initial.accountId),
       supabase.from("checklist_rows").select("*").eq("account_id", initial.accountId).order("sort_order"),
     ]);
-    if (reorderRef.current) return;
+    if (reorderRef.current || importingRef.current) return;
     if (categoryRows) setCategories(categoryRows.map(normalizeCategory));
     if (itemRows) setItems(itemRows.map(normalizeItem));
     if (groceryRows) setGrocery(groceryRows as GroceryLine[]);
@@ -727,6 +730,34 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
         setGrocery((current) => current.filter((line) => !line.checked));
         const { error: deleteError } = await supabaseRef.current.from("grocery_items").delete().in("id", ids);
         if (deleteError) fail("לא ניתן לנקות את הפריטים שנקנו");
+      },
+      async importInventory(file: File, onProgress?: (ratio: number) => void) {
+        importingRef.current = true;
+        reorderRef.current = false;
+        setReorderMode(false);
+        setSaving(true);
+        setError(null);
+        try {
+          const imported = await replaceInventory(supabaseRef.current, initial.accountId, file, onProgress);
+          setCategories(imported.categories);
+          setItems(imported.items);
+          setGrocery([]);
+          setPreviews({});
+          if (imported.checklist) {
+            pendingIds.current.clear();
+            pendingDeletes.current.clear();
+            dirtyBody.current.clear();
+            checklistRef.current = imported.checklist;
+            setChecklist(imported.checklist);
+            setChecklistError(null);
+          }
+        } catch (error) {
+          setError(error instanceof Error && error.message ? error.message : "לא ניתן לייבא את הרשימה");
+        } finally {
+          importingRef.current = false;
+          setSaving(false);
+          void refetch();
+        }
       },
       async clearGrocery() {
         if (grocery.length === 0) return;

@@ -1,0 +1,272 @@
+import { readInventoryArchive, type ImportedPhoto } from "@/lib/inventory-file";
+import { writeCachedImage } from "@/lib/image-cache";
+import { compressImage } from "@/lib/images";
+import { createClient } from "@/lib/supabase/client";
+import type { Category, ChecklistRow, Item } from "@/lib/types";
+
+type Supabase = ReturnType<typeof createClient>;
+
+const imageLimit = 5 * 1024 * 1024;
+
+export async function replaceInventory(
+  supabase: Supabase,
+  accountId: string,
+  file: File,
+  onProgress?: (ratio: number) => void,
+): Promise<{ categories: Category[]; items: Item[]; checklist: ChecklistRow[] | null }> {
+  onProgress?.(0);
+  const inventory = await readInventoryArchive(new Uint8Array(await file.arrayBuffer()));
+  const plan = inventory.categories
+    .map((category, index) => ({ category, index }))
+    .sort((a, b) => a.category.sortOrder - b.category.sortOrder || a.index - b.index)
+    .map(({ category }) => {
+      const id = crypto.randomUUID();
+      const items = [...category.items]
+        .map((item, index) => ({ item, index }))
+        .sort((a, b) => a.item.sortOrder - b.item.sortOrder || a.index - b.index)
+        .map(({ item }) => ({
+          id: crypto.randomUUID(),
+          categoryId: id,
+          name: item.name,
+          unit: item.unit,
+          comments: item.comments,
+          quantity: item.quantity,
+          sortOrder: item.sortOrder,
+          image: item.image,
+          imagePath: null as string | null,
+        }));
+      return {
+        id,
+        name: category.name,
+        color: category.color,
+        sortOrder: category.sortOrder,
+        image: category.image,
+        imagePath: null as string | null,
+        items,
+      };
+    });
+  const photos = plan.flatMap((category) => [
+    ...(category.image ? [{ owner: category, photo: category.image, folder: "categories" as const }] : []),
+    ...category.items.flatMap((item) => (item.image ? [{ owner: item, photo: item.image, folder: "items" as const }] : [])),
+  ]);
+  const checklist =
+    inventory.lists?.map((row) => ({
+      id: crypto.randomUUID(),
+      account_id: accountId,
+      body: row.body,
+      indent: row.indent,
+      checked: row.checked,
+      sort_order: row.sortOrder,
+    })) ?? null;
+  const steps = Math.max(
+    1,
+    photos.length +
+      chunkCount(plan.length) +
+      chunkCount(plan.reduce((sum, category) => sum + category.items.length, 0)) +
+      (checklist ? chunkCount(checklist.length) + 1 : 0) +
+      2,
+  );
+  let completed = 0;
+  const tick = (count = 1) => {
+    completed += count;
+    onProgress?.(Math.min(1, completed / steps));
+  };
+  const uploaded: string[] = [];
+  let categories: Category[] = [];
+  let items: Item[] = [];
+  try {
+    await mapPool(photos, 4, async (job) => {
+      const prepared = await imageBody(job.photo);
+      const path = `${accountId}/${job.folder}/${job.owner.id}/${crypto.randomUUID()}.${extensionFor(prepared.contentType)}`;
+      const { error } = await supabase.storage.from("item-images").upload(path, prepared.body, {
+        contentType: prepared.contentType,
+        upsert: false,
+      });
+      if (error) throw new Error("upload");
+      uploaded.push(path);
+      job.owner.imagePath = path;
+      await writeCachedImage(path, prepared.body).catch(() => undefined);
+      tick();
+    });
+    categories = plan.map((category) => ({
+      id: category.id,
+      account_id: accountId,
+      name: category.name,
+      color: category.color,
+      image_path: category.imagePath,
+      sort_order: category.sortOrder,
+    }));
+    items = plan.flatMap((category) =>
+      category.items.map((item) => ({
+        id: item.id,
+        account_id: accountId,
+        category_id: category.id,
+        name: item.name,
+        unit: item.unit,
+        comments: item.comments,
+        image_path: item.imagePath,
+        quantity: item.quantity,
+        sort_order: item.sortOrder,
+      })),
+    );
+    for (const group of chunks(categories, 100)) {
+      const { error } = await supabase.from("categories").insert(group);
+      if (error) throw new Error("insert");
+      tick();
+    }
+    for (const group of chunks(items, 100)) {
+      const { error } = await supabase.from("items").insert(group);
+      if (error) throw new Error("insert");
+      tick();
+    }
+    for (const group of chunks(checklist ?? [], 100)) {
+      const { error } = await supabase.from("checklist_rows").insert(group);
+      if (error) throw new Error("insert");
+      tick();
+    }
+  } catch {
+    for (const group of chunks(
+      plan.map((category) => category.id),
+      100,
+    )) {
+      await supabase
+        .from("categories")
+        .delete()
+        .in("id", group)
+        .then(() => undefined, () => undefined);
+    }
+    for (const group of chunks((checklist ?? []).map((row) => row.id), 100)) {
+      await supabase
+        .from("checklist_rows")
+        .delete()
+        .in("id", group)
+        .then(() => undefined, () => undefined);
+    }
+    for (const group of chunks(uploaded, 100)) {
+      await supabase.storage
+        .from("item-images")
+        .remove(group)
+        .then(() => undefined, () => undefined);
+    }
+    throw new Error("לא ניתן לייבא את הרשימה");
+  }
+  const keep = new Set(plan.map((category) => category.id));
+  const { data: existing, error: listError } = await supabase.from("categories").select("id").eq("account_id", accountId);
+  if (listError) throw new Error("לא ניתן לייבא את הרשימה");
+  const remove = (existing ?? []).map((row) => row.id).filter((id) => !keep.has(id));
+  await removeRows(supabase, remove);
+  tick();
+  if (checklist) {
+    const keepLists = new Set(checklist.map((row) => row.id));
+    const { data: existingLists, error: checklistError } = await supabase.from("checklist_rows").select("id").eq("account_id", accountId);
+    if (checklistError) throw new Error("לא ניתן לייבא את הרשימה");
+    const staleLists = (existingLists ?? []).map((row) => row.id).filter((id) => !keepLists.has(id));
+    for (const group of chunks(staleLists, 100)) {
+      const { error } = await supabase.from("checklist_rows").delete().in("id", group);
+      if (error) throw new Error("לא ניתן לייבא את הרשימה");
+    }
+    tick();
+  }
+  void removeReplacedImages(
+    supabase,
+    accountId,
+    plan.flatMap((category) => [category.imagePath, ...category.items.map((item) => item.imagePath)]).filter((path): path is string => Boolean(path)),
+  );
+  tick();
+  onProgress?.(1);
+  return { categories, items, checklist };
+}
+
+function chunkCount(count: number) {
+  return count === 0 ? 0 : Math.ceil(count / 100);
+}
+
+async function removeRows(supabase: Supabase, ids: string[]) {
+  for (const group of chunks(ids, 100)) {
+    const { error } = await supabase.from("categories").delete().in("id", group);
+    if (error) throw new Error("לא ניתן לייבא את הרשימה");
+  }
+}
+
+async function imageBody(photo: ImportedPhoto): Promise<{ body: Blob; contentType: string }> {
+  const contentType = photo.contentType;
+  if (contentType && photo.bytes.byteLength <= imageLimit) {
+    const copy = new Uint8Array(photo.bytes.byteLength);
+    copy.set(photo.bytes);
+    return { body: new Blob([copy], { type: contentType }), contentType };
+  }
+  const copy = new Uint8Array(photo.bytes.byteLength);
+  copy.set(photo.bytes);
+  const compressed = await compressImage(new File([copy], "image", { type: contentType ?? "image/jpeg" }));
+  if (compressed.contentType !== "image/webp" && compressed.contentType !== "image/jpeg" && compressed.contentType !== "image/png") {
+    throw new Error("image");
+  }
+  return { body: compressed.blob, contentType: compressed.contentType };
+}
+
+function extensionFor(contentType: string) {
+  if (contentType === "image/webp") return "webp";
+  if (contentType === "image/png") return "png";
+  return "jpg";
+}
+
+async function removeReplacedImages(supabase: Supabase, accountId: string, keepPaths: string[]) {
+  const keep = new Set(keepPaths);
+  let paths: string[] = [];
+  try {
+    paths = await listFiles(supabase, accountId);
+  } catch {
+    return;
+  }
+  const doomed = paths.filter((path) => !keep.has(path));
+  for (const group of chunks(doomed, 100)) {
+    await supabase.storage
+      .from("item-images")
+      .remove(group)
+      .then(() => undefined, () => undefined);
+  }
+}
+
+async function listFiles(supabase: Supabase, root: string) {
+  const files: string[] = [];
+  const queue = [root];
+  const seen = new Set<string>();
+  while (queue.length > 0 && files.length < 5000) {
+    const folder = queue.shift() ?? "";
+    if (seen.has(folder)) continue;
+    seen.add(folder);
+    let offset = 0;
+    for (let page = 0; page < 50; page += 1) {
+      const { data, error } = await supabase.storage.from("item-images").list(folder, { limit: 100, offset });
+      if (error) throw error;
+      const batch = data ?? [];
+      for (const entry of batch) {
+        if (!entry.name) continue;
+        const path = `${folder}/${entry.name}`;
+        if (entry.metadata == null) queue.push(path);
+        else files.push(path);
+      }
+      if (batch.length < 100) break;
+      offset += batch.length;
+    }
+  }
+  return files;
+}
+
+function chunks<T>(values: T[], size: number) {
+  const groups: T[][] = [];
+  for (let index = 0; index < values.length; index += size) groups.push(values.slice(index, index + size));
+  return groups;
+}
+
+async function mapPool<T>(values: T[], limit: number, task: (value: T) => Promise<void>) {
+  let index = 0;
+  async function worker() {
+    while (index < values.length) {
+      const current = index;
+      index += 1;
+      await task(values[current]);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, values.length) }, () => worker()));
+}

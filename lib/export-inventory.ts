@@ -1,7 +1,7 @@
 import { readCachedImage, writeCachedImage } from "@/lib/image-cache";
 import { createClient } from "@/lib/supabase/client";
 import { zipStore } from "@/lib/zip";
-import type { Category, Item } from "@/lib/types";
+import type { Category, ChecklistRow, Item } from "@/lib/types";
 
 type Supabase = ReturnType<typeof createClient>;
 
@@ -55,7 +55,7 @@ async function mapPool<T, R>(items: T[], limit: number, task: (item: T) => Promi
   return results;
 }
 
-export async function downloadInventoryZip(supabase: Supabase, categories: Category[], items: Item[]) {
+export async function downloadInventoryZip(supabase: Supabase, categories: Category[], items: Item[], checklist: ChecklistRow[]) {
   const jobs: { key: string; path: string; fileName: string }[] = [];
   for (const category of categories) {
     if (category.image_path) {
@@ -107,6 +107,14 @@ export async function downloadInventoryZip(supabase: Supabase, categories: Categ
   const document = {
     exportedAt: new Date().toISOString(),
     categories: exportedCategories,
+    lists: [...checklist]
+      .sort((a, b) => a.sort_order - b.sort_order)
+      .map((row) => ({
+        body: row.body,
+        indent: row.indent,
+        checked: row.checked,
+        sortOrder: row.sort_order,
+      })),
   };
   const json = new TextEncoder().encode(JSON.stringify(document, null, 2));
   const zip = zipStore([{ name: "inventory.json", data: json }, ...files]);

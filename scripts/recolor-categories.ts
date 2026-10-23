@@ -9,10 +9,11 @@ const usernameArg = process.argv.find((arg) => arg.startsWith("--username="))?.s
 
 loadEnv(resolve(".env.local"));
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const production = process.env.PRODUCTION === "true";
+const url = production ? process.env.NEXT_PUBLIC_SUPABASE_URL : process.env.NEXT_PUBLIC_SUPABASE_URL_DEV;
+const serviceKey = production ? process.env.SUPABASE_SERVICE_ROLE_KEY : process.env.SUPABASE_SERVICE_ROLE_KEY_DEV;
 if (!url || !serviceKey) {
-  console.error("Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in .env.local");
+  console.error("Missing the Supabase URL or service role key for this PRODUCTION setting in .env.local");
   process.exit(1);
 }
 

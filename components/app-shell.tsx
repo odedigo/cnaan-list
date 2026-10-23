@@ -10,6 +10,7 @@ import { ChecklistPage } from "@/components/checklist-page";
 import { ListPage } from "@/components/list-page";
 import { useLists, useListsOptional } from "@/components/lists-provider";
 import { bindKeepAwake } from "@/lib/keep-awake";
+import { bindSavedSession } from "@/lib/saved-accounts";
 import { SignedInSettings } from "@/components/settings-panel";
 
 export function AppShell({
@@ -44,6 +45,11 @@ export function AppShell({
     if (!signedIn) return;
     return bindKeepAwake();
   }, [signedIn]);
+
+  useEffect(() => {
+    if (!signedIn || !lists?.username) return;
+    return bindSavedSession(lists.username);
+  }, [signedIn, lists?.username]);
 
   useEffect(() => {
     const onPop = () => {

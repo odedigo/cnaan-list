@@ -1,8 +1,10 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+import { supabaseAnonKey, supabaseUrl } from "@/lib/supabase/env";
+
 function hasPublicEnv() {
-  return Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
+  return Boolean(supabaseUrl() && supabaseAnonKey());
 }
 
 export async function updateSession(request: NextRequest) {
@@ -20,8 +22,8 @@ export async function updateSession(request: NextRequest) {
   }
 
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL ?? "",
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "",
+    supabaseUrl(),
+    supabaseAnonKey(),
     {
       cookies: {
         getAll() {

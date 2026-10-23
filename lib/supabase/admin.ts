@@ -2,18 +2,20 @@ import "server-only";
 
 import { createClient } from "@supabase/supabase-js";
 
+import { isProduction, supabaseAnonKey, supabaseUrl } from "@/lib/supabase/env";
+
+function supabaseServiceRoleKey() {
+  return (isProduction() ? process.env.SUPABASE_SERVICE_ROLE_KEY : process.env.SUPABASE_SERVICE_ROLE_KEY_DEV) ?? "";
+}
+
 export function hasServiceEnv() {
-  return Boolean(
-    process.env.NEXT_PUBLIC_SUPABASE_URL &&
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY &&
-      process.env.SUPABASE_SERVICE_ROLE_KEY,
-  );
+  return Boolean(supabaseUrl() && supabaseAnonKey() && supabaseServiceRoleKey());
 }
 
 export function createAdminClient() {
   return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL ?? "",
-    process.env.SUPABASE_SERVICE_ROLE_KEY ?? "",
+    supabaseUrl(),
+    supabaseServiceRoleKey(),
     {
       auth: {
         persistSession: false,

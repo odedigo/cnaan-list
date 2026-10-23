@@ -7,6 +7,7 @@ import {
   CloseIcon,
   DownloadIcon,
   MenuIcon,
+  UploadIcon,
   ReloadIcon,
   PlusIcon,
   ReorderIcon,
@@ -31,6 +32,8 @@ export function AppHeader({
   onReorder,
   onExport,
   exporting = false,
+  onImport,
+  importing = false,
   categoriesExpanded,
   onToggleCategories,
   onClearGrocery,
@@ -52,6 +55,8 @@ export function AppHeader({
   onReorder?: () => void;
   onExport?: () => void;
   exporting?: boolean;
+  onImport?: () => void;
+  importing?: boolean;
   categoriesExpanded?: boolean;
   onToggleCategories?: () => void;
   onClearGrocery?: () => void;
@@ -60,7 +65,7 @@ export function AppHeader({
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [installed, setInstalled] = useState(false);
-  const showMenu = Boolean(onAdd || onSort || onReorder || onExport);
+  const showMenu = Boolean(onAdd || onSort || onReorder || onExport || onImport);
   useEffect(() => {
     const media = window.matchMedia("(display-mode: standalone)");
     const sync = () => {
@@ -192,14 +197,24 @@ export function AppHeader({
                 </MenuItem>
                 <div role="separator" className="mx-3 my-1 h-px bg-neutral-200" />
                 <MenuItem
-                  label={exporting ? "מייצא…" : "ייצוא כל המוצרים"}
-                  disabled={!actionsEnabled || !onExport || exporting}
+                  label={exporting ? "מייצא…" : "ייצוא כל הנתונים"}
+                  disabled={!actionsEnabled || !onExport || exporting || importing}
                   onClick={() => {
                     setMenuOpen(false);
                     onExport?.();
                   }}
                 >
                   <DownloadIcon className="size-5" />
+                </MenuItem>
+                <MenuItem
+                  label={importing ? "מייבא…" : "ייבוא נתונים"}
+                  disabled={!actionsEnabled || !onImport || importing || exporting}
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onImport?.();
+                  }}
+                >
+                  <UploadIcon className="size-5" />
                 </MenuItem>
                 {installed ? (
                   <>

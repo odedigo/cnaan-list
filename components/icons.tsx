@@ -203,6 +203,16 @@ export function ReloadIcon(props: IconProps) {
   );
 }
 
+export function UploadIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true" {...props}>
+      <path d="M12 15V5" strokeLinecap="round" />
+      <path d="M8.5 8.5 12 5l3.5 3.5" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M5 19h14" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export function DownloadIcon(props: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true" {...props}>
@@ -217,6 +227,15 @@ export function CloseIcon(props: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true" {...props}>
       <path d="M7 7l10 10M17 7 7 17" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+export function UserIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" {...props}>
+      <circle cx="12" cy="8" r="3.2" fill="currentColor" />
+      <path fill="currentColor" d="M6.2 19.4c.7-3.3 2.8-4.9 5.8-4.9s5.1 1.6 5.8 4.9c.1.4-.2.8-.6.8H6.8c-.4 0-.7-.4-.6-.8Z" />
     </svg>
   );
 }

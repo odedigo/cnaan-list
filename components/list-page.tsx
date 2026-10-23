@@ -12,7 +12,7 @@ import {
 } from "@dnd-kit/core";
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { AppHeader } from "@/components/app-header";
 import { DetailsSheet, type Editor } from "@/components/details-sheet";
@@ -55,6 +55,10 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
   const [confirmExport, setConfirmExport] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState(0);
+  const importInputRef = useRef<HTMLInputElement>(null);
   const [lightbox, setLightbox] = useState<{
     src: string | null;
     label: string;
@@ -206,7 +210,7 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
     <div>
       <AppHeader
         title={title}
-        actionsEnabled
+        actionsEnabled={!importing}
         reorderActive={lists.reorderMode}
         searchOpen={searchOpen}
         searchValue={query}
@@ -246,6 +250,8 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
         onReorder={mode === "inventory" ? () => void lists.toggleReorder() : undefined}
         onExport={mode === "inventory" ? () => setConfirmExport(true) : undefined}
         exporting={exporting}
+        onImport={mode === "inventory" ? () => importInputRef.current?.click() : undefined}
+        importing={importing}
         categoriesExpanded={categoriesOpen()}
         onClearGrocery={mode === "grocery" ? () => setConfirmClearGrocery(true) : undefined}
         clearGroceryEnabled={lists.grocery.length > 0}
@@ -265,7 +271,21 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
         }
       />
       {lists.reorderMode ? <p className="px-4 pb-2 text-center text-sm text-[var(--teal)]">גררו לסידור, ולחצו שוב על כפתור הסידור לשמירה</p> : null}
-      {exporting ? <p className="px-4 pb-2 text-center text-sm text-neutral-500">מייצא את רשימת המוצרים…</p> : null}
+      {exporting ? <p className="px-4 pb-2 text-center text-sm text-neutral-500">מייצא את הנתונים…</p> : null}
+      {importing ? <ImportProgress progress={importProgress} /> : null}
+      <input
+        ref={importInputRef}
+        type="file"
+        accept=".zip,application/zip"
+        tabIndex={-1}
+        aria-hidden
+        style={{ position: "absolute", width: 1, height: 1, opacity: 0 }}
+        onChange={(event) => {
+          const file = event.target.files?.[0] ?? null;
+          event.target.value = "";
+          if (file) setImportFile(file);
+        }}
+      />
       {lists.error ? <p className="mx-4 mb-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{lists.error}</p> : null}
       {exportError ? <p className="mx-4 mb-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{exportError}</p> : null}
       {mode === "grocery" && searchOpen && needle ? (
@@ -436,10 +456,39 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
           onEnlarge={(src, label, onReplace, onRemove) => setLightbox({ src, label, onReplace, onRemove })}
         />
       ) : null}
+      {importFile ? (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true" aria-label="אישור ייבוא המלאי">
+          <div className="w-full max-w-xs rounded-2xl bg-white p-4 text-center">
+            <p className="text-sm font-medium">ייבוא יחליף את כל הקטגוריות, המוצרים והתמונות בחשבון זה, וגם ירוקן את רשימת הקניות. רשימות שבקובץ מחליפות את הרשימות בחשבון.</p>
+            <button
+              type="button"
+              className="mt-4 w-full rounded-xl bg-[var(--teal)] py-3 font-medium text-white"
+              onClick={() => {
+                const file = importFile;
+                setImportFile(null);
+                setImportProgress(0);
+                setImporting(true);
+                setExportError(null);
+                void lists
+                  .importInventory(file, (ratio) => {
+                    setImportProgress(ratio);
+                    if (ratio >= 1) setImporting(false);
+                  })
+                  .finally(() => setImporting(false));
+              }}
+            >
+              ייבוא
+            </button>
+            <button type="button" className="mt-2 w-full rounded-xl bg-neutral-100 py-3 font-medium text-neutral-700" onClick={() => setImportFile(null)}>
+              ביטול
+            </button>
+          </div>
+        </div>
+      ) : null}
       {confirmExport ? (
         <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true" aria-label="אישור ייצוא המלאי">
           <div className="w-full max-w-xs rounded-2xl bg-white p-4 text-center">
-            <p className="text-sm font-medium">לייצא את רשימת המוצרים לקובץ?</p>
+            <p className="text-sm font-medium">לייצא את המוצרים והרשימות לקובץ?</p>
             <button
               type="button"
               className="mt-4 w-full rounded-xl bg-[var(--teal)] py-3 font-medium text-white"
@@ -447,7 +496,7 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
                 setConfirmExport(false);
                 setExporting(true);
                 setExportError(null);
-                void downloadInventoryZip(createClient(), lists.categories, lists.items)
+                void downloadInventoryZip(createClient(), lists.categories, lists.items, lists.checklist)
                   .catch(() => setExportError("לא ניתן לייצא את הרשימה"))
                   .finally(() => setExporting(false));
               }}
@@ -684,6 +733,73 @@ function Stepper({ quantity, unitShort, onChange }: { quantity: number; unitShor
         +
       </button>
     </div>
+  );
+}
+
+function ImportProgress({ progress }: { progress: number }) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const percent = Math.round(progress * 100);
+  useLayoutEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog || dialog.open) return;
+    dialog.showModal();
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      if (dialog.open) dialog.close();
+    };
+  }, []);
+  return (
+    <dialog
+      ref={dialogRef}
+      aria-label="מייבא את הנתונים"
+      onCancel={(event) => event.preventDefault()}
+      style={{
+        position: "fixed",
+        inset: 0,
+        width: "100vw",
+        height: "100vh",
+        maxWidth: "none",
+        maxHeight: "none",
+        margin: 0,
+        padding: 24,
+        border: "none",
+        background: "rgba(0, 0, 0, 0.55)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <div
+        style={{
+          width: "100%",
+          maxWidth: 360,
+          borderRadius: 16,
+          background: "#fff",
+          textAlign: "center",
+          padding: "2rem 1.5rem",
+          boxShadow: "0 12px 40px rgba(0, 0, 0, 0.28)",
+        }}
+      >
+        <p className="font-semibold" style={{ fontSize: "1.5rem", lineHeight: 1.35 }}>
+          מייבא את הנתונים…
+        </p>
+        <div
+          role="progressbar"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={percent}
+          aria-label="התקדמות הייבוא"
+          style={{ height: 16, marginTop: 28, overflow: "hidden", borderRadius: 999, background: "#e5e5e5" }}
+        >
+          <div style={{ width: `${percent}%`, height: "100%", borderRadius: 999, background: "var(--teal)", transition: "width 200ms ease" }} />
+        </div>
+        <p className="font-medium" style={{ fontSize: "1.35rem", marginTop: 16, color: "#404040" }}>
+          {percent}%
+        </p>
+      </div>
+    </dialog>
   );
 }
 
