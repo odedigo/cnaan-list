@@ -18,6 +18,7 @@ import { AppHeader } from "@/components/app-header";
 import { DetailsSheet, type Editor } from "@/components/details-sheet";
 import { DotsIcon, GripIcon, PlusIcon, TrashIcon } from "@/components/icons";
 import { ImageBubble, Lightbox } from "@/components/images";
+import { readSingleOpenCategory, singleOpenCategoryEvent } from "@/lib/single-category";
 import { useLists, useListsOptional } from "@/components/lists-provider";
 import { colorHex } from "@/lib/colors";
 import type { Category, Item } from "@/lib/types";
@@ -68,7 +69,15 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
 
   useEffect(() => {
     if (!collapseKey) return;
-    setCollapsed(readCollapsed(collapseKey));
+    const stored = readCollapsed(collapseKey);
+    if (readSingleOpenCategory()) {
+      const openId = lists.categories.find((category) => stored[category.id] === false)?.id ?? null;
+      const next: Record<string, boolean> = {};
+      for (const category of lists.categories) next[category.id] = category.id !== openId;
+      setCollapsed(next);
+    } else {
+      setCollapsed(stored);
+    }
     setCollapseReady(true);
   }, [collapseKey]);
 
@@ -83,11 +92,35 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
   }
 
   function toggleCategory(id: string) {
-    setCollapsed((current) => ({
-      ...current,
-      [id]: isExpanded(id, current),
-    }));
+    setCollapsed((current) => {
+      const opening = !isExpanded(id, current);
+      if (mode === "inventory" && opening && readSingleOpenCategory()) {
+        const next: Record<string, boolean> = {};
+        for (const category of lists.categories) next[category.id] = true;
+        next[id] = false;
+        return next;
+      }
+      return {
+        ...current,
+        [id]: isExpanded(id, current),
+      };
+    });
   }
+
+  useEffect(() => {
+    if (mode !== "inventory") return;
+    function onSingleCategory() {
+      if (!readSingleOpenCategory()) return;
+      setCollapsed((current) => {
+        const openId = lists.categories.find((category) => current[category.id] === false)?.id ?? null;
+        const next: Record<string, boolean> = {};
+        for (const category of lists.categories) next[category.id] = category.id !== openId;
+        return next;
+      });
+    }
+    window.addEventListener(singleOpenCategoryEvent, onSingleCategory);
+    return () => window.removeEventListener(singleOpenCategoryEvent, onSingleCategory);
+  }, [lists.categories, mode]);
 
   const needle = query.trim().toLocaleLowerCase("he");
   const groceryByItem = useMemo(() => new Map(lists.grocery.map((line) => [line.item_id, line])), [lists.grocery]);
@@ -189,14 +222,22 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
           const nextNeedle = value.trim().toLocaleLowerCase("he");
           if (!nextNeedle || mode !== "inventory") return;
           setCollapsed((current) => {
-            const next = { ...current };
-            for (const category of lists.categories) {
+            const matches = lists.categories.filter((category) => {
               const matchesName = category.name.toLocaleLowerCase("he").includes(nextNeedle);
               const matchesItem = lists.items.some(
                 (item) => item.category_id === category.id && item.name.toLocaleLowerCase("he").includes(nextNeedle),
               );
-              if (matchesName || matchesItem) next[category.id] = false;
+              return matchesName || matchesItem;
+            });
+            if (readSingleOpenCategory()) {
+              const openId = matches[0]?.id;
+              if (!openId) return current;
+              const next: Record<string, boolean> = {};
+              for (const category of lists.categories) next[category.id] = category.id !== openId;
+              return next;
             }
+            const next = { ...current };
+            for (const category of matches) next[category.id] = false;
             return next;
           });
         }}
@@ -248,7 +289,7 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
                 <ImageBubble src={lists.imageSrc("item", item.id, item.image_path)} label={item.name} size="size-9" />
                 <span className="min-w-0 flex-1 text-start">
                   <span className="block truncate">{item.name}</span>
-                  {item.comments ? <span className="block truncate text-xs text-neutral-500">{item.comments}</span> : null}
+                  {item.comments ? <span className="block truncate text-sm text-neutral-500">{item.comments}</span> : null}
                 </span>
               </div>
             </li>
@@ -281,7 +322,7 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
                               {categoryItems.length}
                             </span>
                           </div>
-                          <div className="min-w-0 truncate px-1 text-center text-sm font-medium">{category.name}</div>
+                          <div className="min-w-0 truncate px-1 text-center text-base font-medium">{category.name}</div>
                           <div className="flex items-center justify-end pe-1">
                             <button
                               type="button"
@@ -350,7 +391,7 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
                       {cartItems.length}
                     </span>
                   </div>
-                  <div className="min-w-0 truncate px-1 text-center text-sm font-medium">בעגלת הקניות</div>
+                  <div className="min-w-0 truncate px-1 text-center text-base font-medium">בעגלת הקניות</div>
                   <div className="flex items-center justify-end pe-1">
                     <button
                       type="button"
@@ -587,7 +628,7 @@ function EntityCard({
     >
       <span className="absolute inset-y-0 start-0 w-1.5" style={{ background: color }} />
       <ImageBubble src={src} label={name} onOpen={onOpenImage} size="size-10" />
-      <div className="min-w-0 flex-1 text-start text-sm leading-tight">
+      <div className="min-w-0 flex-1 text-start text-base leading-tight">
         <div className="flex min-w-0 items-baseline gap-1">
           <span className="truncate">{name}</span>
           {count != null ? (
@@ -596,7 +637,7 @@ function EntityCard({
             </span>
           ) : null}
         </div>
-        {comment ? <div className="truncate text-xs text-neutral-500">{comment}</div> : null}
+        {comment ? <div className="truncate text-sm text-neutral-500">{comment}</div> : null}
       </div>
       {extra}
       <div className="flex shrink-0 items-center gap-2">
@@ -632,7 +673,7 @@ function EntityCard({
 
 function Stepper({ quantity, unitShort, onChange }: { quantity: number; unitShort: string; onChange: (quantity: number) => void }) {
   return (
-    <div dir="ltr" className="flex items-center gap-1 text-sm" onClick={(event) => event.stopPropagation()}>
+    <div dir="ltr" className="flex items-center gap-1 text-base" onClick={(event) => event.stopPropagation()}>
       <button type="button" aria-label="הפחתה" className="grid size-7 place-items-center rounded-full border border-neutral-300" onClick={() => onChange(stepQuantity(quantity, -1))}>
         −
       </button>

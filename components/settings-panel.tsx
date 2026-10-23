@@ -6,6 +6,7 @@ import Link from "next/link";
 import { login, logout } from "@/app/actions/auth";
 import { AppHeader } from "@/components/app-header";
 import { readKeepAwake, writeKeepAwake } from "@/lib/keep-awake";
+import { readSingleOpenCategory, writeSingleOpenCategory } from "@/lib/single-category";
 import { createClient } from "@/lib/supabase/client";
 
 export function SignedOutSettings({ configured, authError, version = "" }: { configured: boolean; authError?: string; version?: string }) {
@@ -48,8 +49,10 @@ export function SignedOutSettings({ configured, authError, version = "" }: { con
 export function SignedInSettings({ username, version = "" }: { username: string; version?: string }) {
   const [pending, setPending] = useState(false);
   const [keepAwake, setKeepAwake] = useState(false);
+  const [singleCategory, setSingleCategory] = useState(true);
   useEffect(() => {
     setKeepAwake(readKeepAwake());
+    setSingleCategory(readSingleOpenCategory());
   }, []);
   async function handleLogout() {
     setPending(true);
@@ -84,6 +87,19 @@ export function SignedInSettings({ username, version = "" }: { username: string;
               className="size-5 accent-[var(--teal)]"
             />
             <span>מניעת כיבוי המסך</span>
+          </label>
+          <label className="mt-3 flex items-center gap-3 text-sm">
+            <input
+              type="checkbox"
+              checked={singleCategory}
+              onChange={(event) => {
+                const enabled = event.target.checked;
+                setSingleCategory(enabled);
+                writeSingleOpenCategory(enabled);
+              }}
+              className="size-5 accent-[var(--teal)]"
+            />
+            <span>קטגוריה אחת פתוחה ברשימת המוצרים</span>
           </label>
         </div>
         <CreditBox version={version} />

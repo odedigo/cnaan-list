@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode, Ref } from "react";
+import { useEffect, useState, type ReactNode, Ref } from "react";
 
 import {
   ChevronIcon,
@@ -59,7 +59,18 @@ export function AppHeader({
   onPlus?: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [installed, setInstalled] = useState(false);
   const showMenu = Boolean(onAdd || onSort || onReorder || onExport);
+  useEffect(() => {
+    const media = window.matchMedia("(display-mode: standalone)");
+    const sync = () => {
+      const nav = navigator as Navigator & { standalone?: boolean };
+      setInstalled(media.matches || nav.standalone === true);
+    };
+    sync();
+    media.addEventListener("change", sync);
+    return () => media.removeEventListener("change", sync);
+  }, []);
   const searchButton = onSearchToggle ? (
     <button
       type="button"
@@ -190,6 +201,20 @@ export function AppHeader({
                 >
                   <DownloadIcon className="size-5" />
                 </MenuItem>
+                {installed ? (
+                  <>
+                    <div role="separator" className="mx-3 my-1 h-px bg-neutral-200" />
+                    <MenuItem
+                      label="סגירת האפליקציה"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        window.close();
+                      }}
+                    >
+                      <CloseIcon className="size-5" />
+                    </MenuItem>
+                  </>
+                ) : null}
               </div>
             </>
           ) : null}

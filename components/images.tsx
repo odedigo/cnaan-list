@@ -20,8 +20,8 @@ export function ImageBubble({
   onOpen?: () => void;
   size?: string;
 }) {
-  const picture = src ? <img src={src} alt="" className="size-full object-cover" /> : <ImageIcon className="size-1/2" />;
-  const className = `grid ${size} shrink-0 place-items-center overflow-hidden rounded-full bg-neutral-100 text-neutral-400`;
+  const picture = src ? <img src={src} alt="" className="absolute inset-0 size-full object-contain" /> : <ImageIcon className="size-1/2" />;
+  const className = `relative grid ${size} shrink-0 place-items-center overflow-hidden rounded-full bg-neutral-100 text-neutral-400`;
   if (!onOpen) return <span className={className}>{picture}</span>;
   return (
     <button
@@ -95,33 +95,33 @@ export function Lightbox({
   }
 
   return (
-    <div
-      className="fixed inset-0 z-[70] flex flex-col bg-black/85 p-4"
-      role="dialog"
-      aria-modal="true"
-      aria-label={label}
-      onDragEnter={onDragEnter}
-      onDragOver={onDragOver}
-      onDragLeave={onDragLeave}
-      onDrop={onDrop}
-    >
-      <button type="button" className="ms-auto grid size-10 place-items-center text-white" onClick={onClose} aria-label="סגירה">
-        <CloseIcon className="size-6" />
-      </button>
-      {src ? (
-        <img src={src} alt={label} className="mx-auto my-auto max-h-[70vh] max-w-full rounded-lg object-contain" />
-      ) : (
-        <div className="mx-auto my-auto grid size-48 place-items-center rounded-full bg-white/10 text-white">
-          <ImageIcon className="size-16" />
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-6" role="dialog" aria-modal="true" aria-label={label} onClick={onClose}>
+      <div
+        className="relative flex w-full max-w-sm flex-col items-center rounded-2xl bg-white p-4 shadow-xl"
+        onClick={(event) => event.stopPropagation()}
+        onDragEnter={onDragEnter}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
+      >
+        <button type="button" className="ms-auto grid size-9 place-items-center text-neutral-700" onClick={onClose} aria-label="סגירה">
+          <CloseIcon className="size-5" />
+        </button>
+        {src ? (
+          <img src={src} alt={label} className="max-h-[45vh] w-full rounded-lg object-contain" />
+        ) : (
+          <div className="grid size-32 place-items-center rounded-full bg-neutral-100 text-neutral-400">
+            <ImageIcon className="size-12" />
+          </div>
+        )}
+        {dragOver ? (
+          <div className="pointer-events-none absolute inset-3 grid place-items-center rounded-2xl border-2 border-dashed border-neutral-400 bg-white/80 text-lg text-neutral-800">
+            שחררו להעלאת תמונה
+          </div>
+        ) : null}
+        <div className="mt-4">
+          <ImagePicker hasImage={Boolean(src)} variant="light" searchName={label} onFile={onReplace} onRemove={onRemove} />
         </div>
-      )}
-      {dragOver ? (
-        <div className="pointer-events-none absolute inset-6 grid place-items-center rounded-2xl border-2 border-dashed border-white bg-black/40 text-lg text-white">
-          שחררו להעלאת תמונה
-        </div>
-      ) : null}
-      <div className="mx-auto mt-4">
-        <ImagePicker hasImage={Boolean(src)} variant="dark" searchName={label} onFile={onReplace} onRemove={onRemove} />
       </div>
     </div>
   );
