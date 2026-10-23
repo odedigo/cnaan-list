@@ -23,7 +23,7 @@ export async function createClient() {
               cookieStore.set(name, value, options);
             });
           } catch {
-            // Server Components cannot set cookies. The middleware refresh keeps the session.
+            // Server Components cannot set cookies. The proxy refresh keeps the session.
           }
         },
       },

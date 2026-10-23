@@ -7,7 +7,7 @@ import Link from "next/link";
 
 import { login, logout } from "@/app/actions/auth";
 import { AppHeader } from "@/components/app-header";
-import { UserIcon } from "@/components/icons";
+import { ChevronIcon, UserIcon } from "@/components/icons";
 import { useLists } from "@/components/lists-provider";
 import { colorHex } from "@/lib/colors";
 import { readKeepAwake, writeKeepAwake } from "@/lib/keep-awake";
@@ -328,14 +328,36 @@ function StoresEditor() {
   const [colors, setColors] = useState<Record<string, string>>({});
   const [colorEdit, setColorEdit] = useState<{ id: string | null; name: string; color: string } | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false);
   const colorTimers = useRef<Record<string, number>>({});
+  const savedTimer = useRef<number | null>(null);
   useEffect(() => {
     const timers = colorTimers.current;
     return () => {
       for (const timer of Object.values(timers)) window.clearTimeout(timer);
+      if (savedTimer.current) window.clearTimeout(savedTimer.current);
     };
   }, []);
+
+  function hideSaved() {
+    setSaved(false);
+    if (savedTimer.current) {
+      window.clearTimeout(savedTimer.current);
+      savedTimer.current = null;
+    }
+  }
+
+  function showSaved() {
+    setMessage(null);
+    setSaved(true);
+    if (savedTimer.current) window.clearTimeout(savedTimer.current);
+    savedTimer.current = window.setTimeout(() => {
+      savedTimer.current = null;
+      setSaved(false);
+    }, 2000);
+  }
 
   function clearDraft(id: string) {
     setDrafts((current) => {
@@ -356,6 +378,7 @@ function StoresEditor() {
     }
     setBusy(true);
     setMessage(null);
+    hideSaved();
     const error = await lists.saveStore({ id, name });
     setBusy(false);
     if (error) {
@@ -363,6 +386,7 @@ function StoresEditor() {
       return;
     }
     clearDraft(id);
+    showSaved();
   }
 
   function queueColor(id: string, color: string) {
@@ -371,14 +395,18 @@ function StoresEditor() {
     colorTimers.current[id] = window.setTimeout(() => {
       void (async () => {
         setMessage(null);
+        hideSaved();
         const error = await lists.saveStore({ id, color });
         if (error) setMessage(error);
-        else setColors((current) => {
-          if (current[id] !== color) return current;
-          const next = { ...current };
-          delete next[id];
-          return next;
-        });
+        else {
+          setColors((current) => {
+            if (current[id] !== color) return current;
+            const next = { ...current };
+            delete next[id];
+            return next;
+          });
+          showSaved();
+        }
       })();
     }, 300);
   }
@@ -386,6 +414,7 @@ function StoresEditor() {
   async function createStore() {
     setBusy(true);
     setMessage(null);
+    hideSaved();
     const error = await lists.addStore(adding, addColor);
     setBusy(false);
     if (error) {
@@ -399,6 +428,7 @@ function StoresEditor() {
   async function removeStore(id: string) {
     setBusy(true);
     setMessage(null);
+    hideSaved();
     const error = await lists.deleteStore(id);
     setBusy(false);
     setConfirmId(null);
@@ -407,8 +437,23 @@ function StoresEditor() {
 
   return (
     <div className="mt-4 rounded-xl border border-neutral-200 bg-white px-4 py-4 text-start">
-      <h2 className="text-base font-semibold">חנויות</h2>
+      <button
+        type="button"
+        className="flex w-full items-center justify-between"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <h2 className="text-base font-semibold">חנויות</h2>
+        <ChevronIcon className={`size-5 ${open ? "" : "rotate-180"}`} />
+      </button>
+      {open ? (
+      <>
       {lists.storesError ? <p className="mt-2 text-sm text-red-600">{lists.storesError}</p> : null}
+      {message ? (
+        <p className="mt-2 text-sm text-red-600" role="status">{message}</p>
+      ) : saved ? (
+        <p className="mt-2 text-sm text-[var(--teal)]" role="status">נשמר</p>
+      ) : null}
       <div className="mt-3 space-y-2">
         {lists.stores.map((store) => (
           <div key={store.id} className="flex items-center gap-2">
@@ -496,7 +541,8 @@ function StoresEditor() {
           הוספה
         </button>
       </div>
-      {message ? <p className="mt-2 text-sm text-red-600">{message}</p> : null}
+      </>
+      ) : null}
       {colorEdit ? (
         <StoreColorDialog
           color={colorEdit.color}

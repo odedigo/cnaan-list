@@ -524,7 +524,10 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
               const store = lists.stores.find(
                 (entry) => entry.id === category.store_id,
               );
-              const storeLabel = store && !store.protected ? store.name : null;
+              const storeLabel =
+                store && (mode === "inventory" || !store.protected)
+                  ? store.name
+                  : null;
               const categoryBackground = shadedCategory
                 ? "#b5b5b5"
                 : (store?.color ?? DEFAULT_STORE_COLOR);
