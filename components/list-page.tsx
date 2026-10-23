@@ -184,12 +184,11 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
   }
 
   useEffect(() => {
-    if (mode !== "inventory") return;
     const syncBadge = () => setShowStoreBadge(readShowStoreBadge());
     syncBadge();
     window.addEventListener(showStoreBadgeEvent, syncBadge);
     return () => window.removeEventListener(showStoreBadgeEvent, syncBadge);
-  }, [mode]);
+  }, []);
 
   useEffect(() => {
     if (mode !== "inventory") return;
@@ -534,11 +533,7 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
               const store = lists.stores.find(
                 (entry) => entry.id === category.store_id,
               );
-              const storeLabel =
-                store &&
-                (mode === "inventory" ? showStoreBadge : !store.protected)
-                  ? store.name
-                  : null;
+              const storeLabel = showStoreBadge && store ? store.name : null;
               const categoryBackground = shadedCategory
                 ? "#b5b5b5"
                 : (store?.color ?? DEFAULT_STORE_COLOR);

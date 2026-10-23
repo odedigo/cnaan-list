@@ -254,7 +254,7 @@ export function SignedInSettings({ username }: { username: string }) {
               }}
               className="size-5 accent-[var(--teal)]"
             />
-            <span>הצגת תג החנות ברשימת המוצרים</span>
+            <span>הצגת תג החנות</span>
           </label>
         </div>
         <StoresEditor />
