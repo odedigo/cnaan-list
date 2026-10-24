@@ -42,6 +42,11 @@ export function rememberPendingGrocery(accountId: string, itemId: string, checke
   return next.revision;
 }
 
+export function clearPendingGrocery(accountId: string) {
+  if (typeof window === "undefined") return;
+  localStorage.removeItem(storageKey(accountId));
+}
+
 export function forgetPendingGrocery(accountId: string, itemId: string, revision: number) {
   const entries = readPendingGrocery(accountId);
   const current = entries.find((entry) => entry.itemId === itemId);

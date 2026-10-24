@@ -16,6 +16,7 @@ export type ImportedPhoto = {
 };
 
 export type ImportedItem = {
+  sourceId: string | null;
   name: string;
   unit: UnitId;
   quantity: number;
@@ -41,15 +42,30 @@ export type ImportedChecklistRow = {
   sortOrder: number;
 };
 
+export type ImportedGroceryLine = {
+  itemId: string | null;
+  category: string;
+  item: string;
+  checked: boolean;
+};
+
 export type ImportedInventory = {
-  categories: ImportedCategory[];
+  categories: ImportedCategory[] | null;
+  grocery: ImportedGroceryLine[] | null;
   lists: ImportedChecklistRow[] | null;
 };
 
-export async function readInventoryArchive(bytes: Uint8Array): Promise<ImportedInventory> {
+export type ArchiveFlags = {
+  inventory: boolean;
+  grocery: boolean;
+  lists: boolean;
+  recipes: boolean;
+};
+
+export async function openZip(bytes: Uint8Array, onProgress?: (ratio: number) => void) {
   let entries: { name: string; data: Uint8Array }[];
   try {
-    entries = await unzip(bytes);
+    entries = await unzip(bytes, onProgress);
   } catch {
     throw new InventoryFileError();
   }
@@ -59,22 +75,68 @@ export async function readInventoryArchive(bytes: Uint8Array): Promise<ImportedI
     if (!name || name.split("/").includes("..")) continue;
     files.set(name, entry.data);
   }
+  return files;
+}
+
+export async function inspectArchive(bytes: Uint8Array): Promise<ArchiveFlags> {
+  const files = await openZip(bytes);
+  const recipes = files.has("recipes.json");
   const documentBytes = files.get("inventory.json");
-  if (!documentBytes) throw new InventoryFileError();
+  if (!documentBytes) {
+    if (!recipes) throw new InventoryFileError();
+    return { inventory: false, grocery: false, lists: false, recipes: true };
+  }
+  const record = parseDocument(documentBytes);
+  return {
+    inventory: Array.isArray(record.categories),
+    grocery: Array.isArray(record.grocery),
+    lists: Array.isArray(record.lists),
+    recipes,
+  };
+}
+
+export async function readInventoryArchive(bytes: Uint8Array): Promise<ImportedInventory> {
+  return readInventoryFiles(await openZip(bytes));
+}
+
+export function readInventoryFiles(files: Map<string, Uint8Array>): ImportedInventory {
+  const documentBytes = files.get("inventory.json");
+  if (!documentBytes) {
+    if (!files.has("recipes.json")) throw new InventoryFileError();
+    return { categories: null, grocery: null, lists: null };
+  }
+  const record = parseDocument(documentBytes);
+  const categories = Array.isArray(record.categories)
+    ? record.categories.map((category, categoryIndex) => readCategory(category, categoryIndex, files))
+    : null;
+  const grocery = Array.isArray(record.grocery) ? record.grocery.map(readGroceryLine) : null;
+  if (record.lists == null) return { categories, grocery, lists: null };
+  if (!Array.isArray(record.lists)) throw new InventoryFileError();
+  return { categories, grocery, lists: record.lists.map((row, index) => readChecklistRow(row, index)) };
+}
+
+function parseDocument(bytes: Uint8Array) {
   let document: unknown;
   try {
-    document = JSON.parse(new TextDecoder().decode(documentBytes));
+    document = JSON.parse(new TextDecoder().decode(bytes));
   } catch {
     throw new InventoryFileError();
   }
-  if (!document || typeof document !== "object" || !Array.isArray((document as { categories?: unknown }).categories)) {
-    throw new InventoryFileError();
-  }
-  const record = document as { categories: unknown[]; lists?: unknown };
-  const categories = record.categories.map((category, categoryIndex) => readCategory(category, categoryIndex, files));
-  if (record.lists == null) return { categories, lists: null };
-  if (!Array.isArray(record.lists)) throw new InventoryFileError();
-  return { categories, lists: record.lists.map((row, index) => readChecklistRow(row, index)) };
+  if (!document || typeof document !== "object") throw new InventoryFileError();
+  return document as { categories?: unknown; grocery?: unknown; lists?: unknown };
+}
+
+function readGroceryLine(value: unknown): ImportedGroceryLine {
+  if (!value || typeof value !== "object") throw new InventoryFileError();
+  const row = value as Record<string, unknown>;
+  const item = text(row.item);
+  if (!item) throw new InventoryFileError();
+  return {
+    itemId: typeof row.itemId === "string" && row.itemId.trim() ? row.itemId.trim() : null,
+    category: text(row.category),
+    item,
+    checked: row.checked === true,
+  };
 }
 
 function readChecklistRow(value: unknown, index: number): ImportedChecklistRow {
@@ -112,6 +174,7 @@ function readItem(value: unknown, index: number, files: Map<string, Uint8Array>)
   if (!name) throw new InventoryFileError();
   const unit = typeof item.unit === "string" && isUnitId(item.unit) ? item.unit : "unit";
   return {
+    sourceId: typeof item.id === "string" && item.id.trim() ? item.id.trim() : null,
     name,
     unit,
     quantity: parseQuantity(typeof item.quantity === "number" || typeof item.quantity === "string" ? String(item.quantity) : ""),
@@ -125,7 +188,9 @@ function photo(value: unknown, files: Map<string, Uint8Array>): ImportedPhoto | 
   if (value == null || value === "") return null;
   if (typeof value !== "string") throw new InventoryFileError();
   const name = zipName(value);
-  if (!name || name.split("/").includes("..")) throw new InventoryFileError();
+  if (!name || name.split("/").includes("..") || !name.startsWith("images/")) {
+    throw new InventoryFileError();
+  }
   const bytes = files.get(name);
   if (!bytes || bytes.byteLength === 0) throw new InventoryFileError();
   return { name, bytes, contentType: contentTypeFor(name) };

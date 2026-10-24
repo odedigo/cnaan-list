@@ -15,6 +15,7 @@ import {
   ChevronIcon,
   CloseIcon,
   DownloadIcon,
+  ExportIcon,
   MenuIcon,
   UploadIcon,
   ReloadIcon,
@@ -49,6 +50,10 @@ export function AppHeader({
   onClearGrocery,
   clearGroceryEnabled = false,
   onPlus,
+  plusLabel = "הוספת שורה",
+  plusAfterSearch = false,
+  onExportFile,
+  exportFileEnabled = true,
   showCredit = false,
   creditVersion = "",
 }: {
@@ -74,6 +79,10 @@ export function AppHeader({
   onClearGrocery?: () => void;
   clearGroceryEnabled?: boolean;
   onPlus?: () => void;
+  plusLabel?: string;
+  plusAfterSearch?: boolean;
+  onExportFile?: () => void;
+  exportFileEnabled?: boolean;
   showCredit?: boolean;
   creditVersion?: string;
 }) {
@@ -118,6 +127,15 @@ export function AppHeader({
         className="grid h-14 grid-cols-[minmax(max-content,1fr)_minmax(0,max-content)_minmax(max-content,1fr)] items-center px-1"
       >
         <div className="flex items-center justify-self-start">
+          {onExportFile ? (
+            <HeaderButton
+              label="ייצוא מתכון"
+              disabled={!actionsEnabled || !exportFileEnabled}
+              onClick={onExportFile}
+            >
+              <ExportIcon className="size-6" />
+            </HeaderButton>
+          ) : null}
           {onToggleCategories ? (
             <HeaderButton
               label={categoriesExpanded ? "כווץ הכל" : "הרחב הכל"}
@@ -168,9 +186,9 @@ export function AppHeader({
               <MenuIcon className="size-6" />
             </HeaderButton>
           ) : null}
-          {onPlus ? (
+          {onPlus && !plusAfterSearch ? (
             <HeaderButton
-              label="הוספת שורה"
+              label={plusLabel}
               disabled={!actionsEnabled}
               onClick={onPlus}
             >
@@ -178,6 +196,15 @@ export function AppHeader({
             </HeaderButton>
           ) : null}
           {searchSide === "end" ? searchButton : null}
+          {onPlus && plusAfterSearch ? (
+            <HeaderButton
+              label={plusLabel}
+              disabled={!actionsEnabled}
+              onClick={onPlus}
+            >
+              <PlusIcon className="size-7" />
+            </HeaderButton>
+          ) : null}
           {menuOpen && showMenu ? (
             <>
               <button
@@ -243,7 +270,7 @@ export function AppHeader({
                   className="mx-3 my-1 h-px bg-neutral-200"
                 />
                 <MenuItem
-                  label={exporting ? "מייצא…" : "ייצוא כל הנתונים"}
+                  label={exporting ? "מייצא…" : "ייצוא נתונים"}
                   disabled={
                     !actionsEnabled || !onExport || exporting || importing
                   }

@@ -48,7 +48,7 @@ export async function updateSession(request: NextRequest) {
     return response;
   }
 
-  if (!user && (path === "/" || path === "/inventory" || path === "/grocery" || path === "/lists")) {
+  if (!user && (path === "/" || path === "/inventory" || path === "/grocery" || path === "/lists" || path === "/recipes")) {
     return redirectWithSession(request, response, "/settings");
   }
 
@@ -64,7 +64,7 @@ export async function updateSession(request: NextRequest) {
 }
 
 function redirectAnonymous(request: NextRequest, path: string, response: NextResponse) {
-  if (path === "/" || path === "/inventory" || path === "/grocery" || path === "/lists") {
+  if (path === "/" || path === "/inventory" || path === "/grocery" || path === "/lists" || path === "/recipes") {
     return redirectWithSession(request, response, "/settings");
   }
   return response;

@@ -174,6 +174,31 @@ export function GroceryIcon(props: IconProps) {
   );
 }
 
+export function RecipesIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" {...props}>
+      <path
+        fillRule="evenodd"
+        d="M3.55 2.05h.95v5.15h-.95zm1.45 0h.95v5.15h-.95zm1.45 0h.95v5.15H6.45zm1.45 0h.95v5.15H7.9zM3.4 6.35h6.15v.9c0 .9-.7 1.55-1.65 1.75v7.4c.55.25.85.7.85 1.2v.5c0 .6-.5 1.1-1.1 1.1H6.5c-.6 0-1.1-.5-1.1-1.1v-.5c0-.5.3-.95.85-1.2v-7.4c-.95-.2-1.65-.85-1.65-1.75v-.9zm2.55 12.2a.55.72 0 1 0 0 1.44.55.72 0 1 0 0-1.44z"
+      />
+      <path
+        fillRule="evenodd"
+        d="M14.05 2.1h2.55c.4 0 .7.28.7.65v8.7c0 .45-.32.8-.78.9l-.22.06v5.35c.52.24.85.68.85 1.2v.45c0 .6-.5 1.1-1.12 1.1h-.62c-.62 0-1.12-.5-1.12-1.1v-.45c0-.52.33-.96.85-1.2v-5.35l-.22-.06c-.46-.1-.78-.45-.78-.9V2.75c0-.37.3-.65.7-.65zm1.15 16.4a.58.75 0 1 0 0 1.5.58.75 0 1 0 0-1.5z"
+      />
+    </svg>
+  );
+}
+
+export function ExportIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true" {...props}>
+      <path d="M12 16V5" strokeLinecap="round" />
+      <path d="M8.5 8.5 12 5l3.5 3.5" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M5 14.5V18a1.5 1.5 0 0 0 1.5 1.5h11A1.5 1.5 0 0 0 19 18v-3.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export function ListsIcon(props: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" {...props}>

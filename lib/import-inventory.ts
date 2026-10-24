@@ -1,8 +1,9 @@
-import { readInventoryArchive, type ImportedPhoto } from "@/lib/inventory-file";
+import { openZip, readInventoryFiles, type ImportedGroceryLine, type ImportedPhoto } from "@/lib/inventory-file";
 import { writeCachedImage } from "@/lib/image-cache";
 import { compressImage } from "@/lib/images";
+import { importRecipes } from "@/lib/recipe-transfer";
 import { createClient } from "@/lib/supabase/client";
-import type { Category, ChecklistRow, Item } from "@/lib/types";
+import type { Category, ChecklistRow, GroceryLine, Item } from "@/lib/types";
 
 type Supabase = ReturnType<typeof createClient>;
 
@@ -13,10 +14,22 @@ export async function replaceInventory(
   accountId: string,
   file: File,
   onProgress?: (ratio: number) => void,
-): Promise<{ categories: Category[]; items: Item[]; checklist: ChecklistRow[] | null }> {
-  onProgress?.(0);
-  const inventory = await readInventoryArchive(new Uint8Array(await file.arrayBuffer()));
-  const plan = inventory.categories
+  options?: { recipes?: "replace" | "append" },
+): Promise<{ categories: Category[] | null; items: Item[] | null; grocery: GroceryLine[] | null; checklist: ChecklistRow[] | null; recipes: boolean }> {
+  let reported = 0;
+  const report = (ratio: number) => {
+    const next = Math.max(reported, Math.min(1, ratio));
+    if (next === reported) return;
+    reported = next;
+    onProgress?.(next);
+  };
+  report(0);
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  report(0.01);
+  const files = await openZip(bytes, (ratio) => report(0.01 + ratio * 0.07));
+  const inventory = readInventoryFiles(files);
+  const hasCategories = inventory.categories !== null;
+  const plan = (inventory.categories ?? [])
     .map((category, index) => ({ category, index }))
     .sort((a, b) => a.category.sortOrder - b.category.sortOrder || a.index - b.index)
     .map(({ category }) => {
@@ -32,6 +45,7 @@ export async function replaceInventory(
           comments: item.comments,
           quantity: item.quantity,
           sortOrder: item.sortOrder,
+          sourceId: item.sourceId,
           image: item.image,
           imagePath: null as string | null,
         }));
@@ -69,9 +83,11 @@ export async function replaceInventory(
       2,
   );
   let completed = 0;
+  const sharesImport = Boolean(options?.recipes && files.has("recipes.json") && (hasCategories || inventory.grocery || inventory.lists));
+  const scale = sharesImport ? 0.5 : 1;
   const tick = (count = 1) => {
     completed += count;
-    onProgress?.(Math.min(1, completed / steps));
+    report(Math.min(scale, (completed / steps) * scale));
   };
   const uploaded: string[] = [];
   let categories: Category[] = [];
@@ -171,12 +187,14 @@ export async function replaceInventory(
     }
     throw new Error("לא ניתן לייבא את הרשימה");
   }
-  const keep = new Set(plan.map((category) => category.id));
-  const { data: existing, error: listError } = await supabase.from("categories").select("id").eq("account_id", accountId);
-  if (listError) throw new Error("לא ניתן לייבא את הרשימה");
-  const remove = (existing ?? []).map((row) => row.id).filter((id) => !keep.has(id));
-  await removeRows(supabase, remove);
-  tick();
+  if (hasCategories) {
+    const keep = new Set(plan.map((category) => category.id));
+    const { data: existing, error: listError } = await supabase.from("categories").select("id").eq("account_id", accountId);
+    if (listError) throw new Error("לא ניתן לייבא את הרשימה");
+    const remove = (existing ?? []).map((row) => row.id).filter((id) => !keep.has(id));
+    await removeRows(supabase, remove);
+    tick();
+  }
   if (checklist) {
     const keepLists = new Set(checklist.map((row) => row.id));
     const { data: existingLists, error: checklistError } = await supabase.from("checklist_rows").select("id").eq("account_id", accountId);
@@ -188,14 +206,76 @@ export async function replaceInventory(
     }
     tick();
   }
-  void removeReplacedImages(
-    supabase,
-    accountId,
-    plan.flatMap((category) => [category.imagePath, ...category.items.map((item) => item.imagePath)]).filter((path): path is string => Boolean(path)),
-  );
-  tick();
-  onProgress?.(1);
-  return { categories, items, checklist };
+  if (hasCategories) {
+    void removeReplacedImages(
+      supabase,
+      accountId,
+      plan.flatMap((category) => [category.imagePath, ...category.items.map((item) => item.imagePath)]).filter((path): path is string => Boolean(path)),
+    );
+    tick();
+  }
+  const itemIds = new Map(plan.flatMap((category) => category.items.flatMap((item) => (item.sourceId ? [[item.sourceId, item.id] as const] : []))));
+  const grocery = inventory.grocery ? await replaceGrocery(supabase, accountId, inventory.grocery, hasCategories ? categories : null, hasCategories ? items : null, itemIds) : hasCategories ? [] : null;
+  const importRecipeMode = options?.recipes;
+  if (importRecipeMode && files.has("recipes.json")) {
+    await importRecipes(supabase, accountId, files, importRecipeMode, (ratio) => report(sharesImport ? 0.5 + ratio / 2 : ratio));
+  }
+  report(1);
+  return {
+    categories: hasCategories ? categories : null,
+    items: hasCategories ? items : null,
+    grocery,
+    checklist,
+    recipes: Boolean(importRecipeMode && files.has("recipes.json")),
+  };
+}
+
+async function replaceGrocery(
+  supabase: Supabase,
+  accountId: string,
+  lines: ImportedGroceryLine[],
+  categories: Category[] | null,
+  items: Item[] | null,
+  itemIds: Map<string, string>,
+) {
+  let knownCategories = categories;
+  let knownItems = items;
+  if (!knownCategories || !knownItems) {
+    const [{ data: categoryRows, error: categoryError }, { data: itemRows, error: itemError }] = await Promise.all([
+      supabase.from("categories").select("id, name").eq("account_id", accountId),
+      supabase.from("items").select("id, name, category_id").eq("account_id", accountId),
+    ]);
+    if (categoryError || itemError) throw new Error("לא ניתן לייבא את הרשימה");
+    knownCategories = (categoryRows ?? []) as Category[];
+    knownItems = (itemRows ?? []) as Item[];
+  }
+  const chosen = new Map<string, boolean>();
+  for (const line of lines) {
+    const mapped = line.itemId ? itemIds.get(line.itemId) : undefined;
+    const itemId = mapped ?? matchItem(line, knownCategories, knownItems);
+    if (itemId) chosen.set(itemId, line.checked);
+  }
+  const { error: deleteError } = await supabase.from("grocery_items").delete().eq("account_id", accountId);
+  if (deleteError) throw new Error("לא ניתן לייבא את הרשימה");
+  const rows: GroceryLine[] = [...chosen].map(([itemId, checked]) => ({
+    id: crypto.randomUUID(),
+    account_id: accountId,
+    item_id: itemId,
+    checked,
+  }));
+  for (const group of chunks(rows, 100)) {
+    const { error } = await supabase.from("grocery_items").insert(group);
+    if (error) throw new Error("לא ניתן לייבא את הרשימה");
+  }
+  return rows;
+}
+
+function matchItem(line: ImportedGroceryLine, categories: Category[], items: Item[]) {
+  const categoryName = line.category.toLocaleLowerCase("he");
+  const itemName = line.item.toLocaleLowerCase("he");
+  const categoryIds = new Set(categories.filter((category) => category.name.toLocaleLowerCase("he") === categoryName).map((category) => category.id));
+  if (categoryName && categoryIds.size === 0) return null;
+  return items.find((item) => item.name.toLocaleLowerCase("he") === itemName && (!categoryName || categoryIds.has(item.category_id)))?.id ?? null;
 }
 
 function chunkCount(count: number) {

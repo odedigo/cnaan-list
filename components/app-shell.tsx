@@ -10,6 +10,7 @@ import { AppHeader } from "@/components/app-header";
 import { BottomNav } from "@/components/bottom-nav";
 import { ChecklistPage } from "@/components/checklist-page";
 import { ListPage } from "@/components/list-page";
+import { RecipesPage } from "@/components/recipes-page";
 import { useLists, useListsOptional } from "@/components/lists-provider";
 import { isInstalledApp } from "@/lib/installed-app";
 import { bindKeepAwake } from "@/lib/keep-awake";
@@ -59,7 +60,7 @@ export function AppShell({
   useEffect(() => {
     const onPop = () => {
       const next = window.location.pathname;
-      if (next === "/grocery" || next === "/inventory" || next === "/lists") restoreRef.current = next;
+      if (next === "/grocery" || next === "/inventory" || next === "/lists" || next === "/recipes") restoreRef.current = next;
       pathRef.current = next;
       setPath(next);
     };
@@ -72,7 +73,7 @@ export function AppShell({
     if (current === href) return;
     scrolls.current[current] = window.scrollY;
     pathRef.current = href;
-    if (href === "/grocery" || href === "/inventory" || href === "/lists") restoreRef.current = href;
+    if (href === "/grocery" || href === "/inventory" || href === "/lists" || href === "/recipes") restoreRef.current = href;
     if (window.location.pathname !== href) {
       // An installed app must stay on one history entry, or the browser ignores close().
       if (isInstalledApp()) {
@@ -134,6 +135,7 @@ export function AppShell({
       <LazyList mode="grocery" active={path === "/grocery"} warm={warm} scrolls={scrolls} restoreRef={restoreRef} />
       <LazyList mode="inventory" active={path === "/inventory"} warm={warm} scrolls={scrolls} restoreRef={restoreRef} />
       <LazyChecklist active={path === "/lists"} warm={warm} scrolls={scrolls} restoreRef={restoreRef} />
+      <LazyRecipes active={path === "/recipes"} warm={warm} scrolls={scrolls} restoreRef={restoreRef} />
       {path === "/settings" ? <SignedInSettingsView version={version} /> : null}
     </>
   ) : (
@@ -175,6 +177,37 @@ function LazyChecklist({
   return (
     <div hidden={!active}>
       <ChecklistPage active={active} />
+    </div>
+  );
+}
+
+function LazyRecipes({
+  active,
+  warm,
+  scrolls,
+  restoreRef,
+}: {
+  active: boolean;
+  warm: boolean;
+  scrolls: RefObject<Record<string, number>>;
+  restoreRef: RefObject<string | null>;
+}) {
+  const [mounted, setMounted] = useState(active);
+
+  useEffect(() => {
+    if (active || warm) setMounted(true);
+  }, [active, warm]);
+
+  useLayoutEffect(() => {
+    if (!active || restoreRef.current !== "/recipes") return;
+    restoreRef.current = null;
+    window.scrollTo(0, scrolls.current?.["/recipes"] ?? 0);
+  }, [active, restoreRef, scrolls]);
+
+  if (!mounted) return null;
+  return (
+    <div hidden={!active}>
+      <RecipesPage active={active} />
     </div>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-/** Fixed bottom navigation between products, grocery, lists, and settings. */
+/** Fixed bottom navigation between products, grocery, lists, recipes, and settings. */
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -10,6 +10,7 @@ import {
   GroceryIcon,
   ListsIcon,
   ProductsIcon,
+  RecipesIcon,
   SettingsIcon,
 } from "@/components/icons";
 import { useListsOptional } from "@/components/lists-provider";
@@ -18,6 +19,7 @@ const tabs = [
   { href: "/inventory", label: "רשימת מוצרים", icon: ProductsIcon },
   { href: "/grocery", label: "עגלת קניות", icon: GroceryIcon },
   { href: "/lists", label: "רשימות", icon: ListsIcon },
+  { href: "/recipes", label: "מתכונים", icon: RecipesIcon },
   { href: "/settings", label: "הגדרות", icon: SettingsIcon },
 ] as const;
 

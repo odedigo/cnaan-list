@@ -11,7 +11,7 @@ function crc32(data: Uint8Array) {
   return (crc ^ 0xffffffff) >>> 0;
 }
 
-export function zipStore(files: { name: string; data: Uint8Array }[]) {
+export function zipStore(files: { name: string; data: Uint8Array<ArrayBuffer> }[]) {
   const encoder = new TextEncoder();
   const parts: Uint8Array[] = [];
   const central: Uint8Array[] = [];
@@ -79,7 +79,7 @@ export function zipStore(files: { name: string; data: Uint8Array }[]) {
   return output;
 }
 
-export async function unzip(buffer: Uint8Array) {
+export async function unzip(buffer: Uint8Array, onProgress?: (ratio: number) => void) {
   if (buffer.byteLength < 22) throw new Error("invalid zip");
   const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
   const end = findEocd(view);
@@ -111,6 +111,10 @@ export async function unzip(buffer: Uint8Array) {
     const data = method === 0 ? compressed : method === 8 ? await inflateRaw(compressed) : null;
     if (!data || crc32(data) !== checksum) throw new Error("invalid zip");
     entries.push({ name: name.replaceAll("\\", "/"), data });
+    if (onProgress && (index % 8 === 7 || index === count - 1)) {
+      onProgress((index + 1) / count);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
   }
   return entries;
 }

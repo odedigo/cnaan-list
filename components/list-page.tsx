@@ -41,7 +41,8 @@ import { useLists, useListsOptional } from "@/components/lists-provider";
 import { colorHex } from "@/lib/colors";
 import { DEFAULT_STORE_COLOR, inkFor } from "@/lib/stores";
 import type { Category, Item } from "@/lib/types";
-import { downloadInventoryZip } from "@/lib/export-inventory";
+import { downloadInventoryZip, type ExportSelection } from "@/lib/export-inventory";
+import { inspectArchive } from "@/lib/inventory-file";
 import { createClient } from "@/lib/supabase/client";
 import { formatQuantity, stepQuantity, unitById } from "@/lib/units";
 
@@ -83,9 +84,11 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
   const [confirmClearPurchased, setConfirmClearPurchased] = useState(false);
   const [confirmClearGrocery, setConfirmClearGrocery] = useState(false);
   const [confirmExport, setConfirmExport] = useState(false);
+  const [exportChoice, setExportChoice] = useState<ExportSelection>({ inventory: true, grocery: true, lists: true, recipes: true });
   const [exporting, setExporting] = useState(false);
+  const [exportProgress, setExportProgress] = useState(0);
   const [exportError, setExportError] = useState<string | null>(null);
-  const [importFile, setImportFile] = useState<File | null>(null);
+  const [pendingImport, setPendingImport] = useState<{ file: File; inventory: boolean; grocery: boolean; lists: boolean; recipes: boolean } | null>(null);
   const [importing, setImporting] = useState(false);
   const [importProgress, setImportProgress] = useState(0);
   const [sorting, setSorting] = useState(false);
@@ -325,6 +328,21 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
     });
   }
 
+  function beginImport(recipes?: "replace" | "append") {
+    if (!pendingImport) return;
+    const file = pendingImport.file;
+    setPendingImport(null);
+    setImportProgress(0);
+    setImporting(true);
+    setExportError(null);
+    void lists
+      .importInventory(file, recipes ? { recipes } : undefined, (ratio) => {
+        setImportProgress(ratio);
+        if (ratio >= 1) setImporting(false);
+      })
+      .finally(() => setImporting(false));
+  }
+
   const title = mode === "inventory" ? "רשימת המוצרים" : "עגלת קניות";
 
   return (
@@ -392,7 +410,12 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
           mode === "inventory" ? () => void lists.toggleReorder() : undefined
         }
         onExport={
-          mode === "inventory" ? () => setConfirmExport(true) : undefined
+          mode === "inventory"
+            ? () => {
+                setExportChoice({ inventory: true, grocery: true, lists: true, recipes: true });
+                setConfirmExport(true);
+              }
+            : undefined
         }
         exporting={exporting}
         onImport={
@@ -430,12 +453,8 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
           גררו לסידור, ולחצו שוב על כפתור הסידור לשמירה
         </p>
       ) : null}
-      {exporting ? (
-        <p className="px-4 pb-2 text-center text-sm text-neutral-500">
-          מייצא את הנתונים…
-        </p>
-      ) : null}
-      {importing ? <ImportProgress progress={importProgress} /> : null}
+      {exporting ? <WorkOverlay label="מכין את הייצוא…" progress={exportProgress} /> : null}
+      {importing ? <WorkOverlay label="מייבא את הנתונים…" progress={importProgress} /> : null}
       {sorting ? <SortProgress /> : null}
       <input
         ref={importInputRef}
@@ -447,7 +466,19 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
         onChange={(event) => {
           const file = event.target.files?.[0] ?? null;
           event.target.value = "";
-          if (file) setImportFile(file);
+          if (!file) return;
+          void file.arrayBuffer().then(async (buffer) => {
+            try {
+              const flags = await inspectArchive(new Uint8Array(buffer));
+              if (!flags.inventory && !flags.grocery && !flags.lists && !flags.recipes) {
+                setExportError("הקובץ אינו ייצוא של הרשימה");
+                return;
+              }
+              setPendingImport({ file, ...flags });
+            } catch {
+              setExportError("הקובץ אינו ייצוא של הרשימה");
+            }
+          });
         }}
       />
       {lists.error ? (
@@ -773,41 +804,49 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
           }
         />
       ) : null}
-      {importFile ? (
+      {pendingImport ? (
         <div
           className="fixed inset-0 z-[90] flex items-center justify-center bg-black/40 p-4"
           role="dialog"
           aria-modal="true"
-          aria-label="אישור ייבוא המוצרים"
+          aria-label="אישור ייבוא הנתונים"
         >
-          <div className="w-full max-w-xs rounded-2xl bg-white p-4 text-center">
-            <p className="text-sm font-medium">
-              ייבוא יחליף את כל הקטגוריות, המוצרים והתמונות בחשבון זה, וגם ירוקן
-              את רשימת הקניות. רשימות שבקובץ מחליפות את הרשימות בחשבון.
-            </p>
-            <button
-              type="button"
-              className="mt-4 w-full rounded-xl bg-[var(--teal)] py-3 font-medium text-white"
-              onClick={() => {
-                const file = importFile;
-                setImportFile(null);
-                setImportProgress(0);
-                setImporting(true);
-                setExportError(null);
-                void lists
-                  .importInventory(file, (ratio) => {
-                    setImportProgress(ratio);
-                    if (ratio >= 1) setImporting(false);
-                  })
-                  .finally(() => setImporting(false));
-              }}
-            >
-              ייבוא
-            </button>
+          <div className="w-full max-w-xs rounded-2xl bg-white p-4 text-start">
+            {importNotes(pendingImport).map((note, index) => (
+              <p key={note} className="text-sm font-medium" style={{ marginTop: index === 0 ? 0 : "0.5rem" }}>
+                {note}
+              </p>
+            ))}
+            {pendingImport.recipes ? (
+              <>
+                <button
+                  type="button"
+                  className="mt-4 w-full rounded-xl bg-[var(--teal)] py-3 font-medium text-white"
+                  onClick={() => beginImport("replace")}
+                >
+                  {pendingImport.inventory || pendingImport.grocery || pendingImport.lists ? "ייבוא והחלפת המתכונים" : "החלפת המתכונים"}
+                </button>
+                <button
+                  type="button"
+                  className="mt-2 w-full rounded-xl bg-[var(--teal)] py-3 font-medium text-white"
+                  onClick={() => beginImport("append")}
+                >
+                  {pendingImport.inventory || pendingImport.grocery || pendingImport.lists ? "ייבוא והוספת המתכונים" : "הוספה למתכונים"}
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                className="mt-4 w-full rounded-xl bg-[var(--teal)] py-3 font-medium text-white"
+                onClick={() => beginImport()}
+              >
+                ייבוא
+              </button>
+            )}
             <button
               type="button"
               className="mt-2 w-full rounded-xl bg-neutral-100 py-3 font-medium text-neutral-700"
-              onClick={() => setImportFile(null)}
+              onClick={() => setPendingImport(null)}
             >
               ביטול
             </button>
@@ -819,27 +858,50 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
           className="fixed inset-0 z-[90] flex items-center justify-center bg-black/40 p-4"
           role="dialog"
           aria-modal="true"
-          aria-label="אישור ייצוא המוצרים"
+          aria-label="בחירת נתונים לייצוא"
         >
-          <div className="w-full max-w-xs rounded-2xl bg-white p-4 text-center">
-            <p className="text-sm font-medium">
-              לייצא את המוצרים והרשימות לקובץ?
-            </p>
+          <div className="w-full max-w-xs rounded-2xl bg-white p-4 text-start">
+            <p className="text-sm font-semibold">מה לייצא?</p>
+            {(
+              [
+                ["inventory", "רשימת מוצרים"],
+                ["grocery", "עגלת קניות"],
+                ["lists", "רשימות"],
+                ["recipes", "מתכונים"],
+              ] as const
+            ).map(([key, label]) => (
+              <label key={key} className="mt-3 flex items-center gap-3">
+                <input
+                  type="checkbox"
+                  className="size-5"
+                  checked={exportChoice[key]}
+                  onChange={(event) => setExportChoice((current) => ({ ...current, [key]: event.target.checked }))}
+                />
+                <span>{label}</span>
+              </label>
+            ))}
             <button
               type="button"
-              className="mt-4 w-full rounded-xl bg-[var(--teal)] py-3 font-medium text-white"
+              className="mt-4 w-full rounded-xl bg-[var(--teal)] py-3 font-medium text-white disabled:opacity-40"
+              disabled={!exportChoice.inventory && !exportChoice.grocery && !exportChoice.lists && !exportChoice.recipes}
               onClick={() => {
+                const selection = exportChoice;
                 setConfirmExport(false);
                 setExporting(true);
+                setExportProgress(0);
                 setExportError(null);
                 void downloadInventoryZip(
                   createClient(),
+                  lists.accountId,
                   lists.categories,
                   lists.items,
                   lists.checklist,
                   lists.stores,
+                  lists.grocery,
+                  selection,
+                  (ratio) => setExportProgress(ratio),
                 )
-                  .catch(() => setExportError("לא ניתן לייצא את הרשימה"))
+                  .catch(() => setExportError("לא ניתן לייצא את הנתונים"))
                   .finally(() => setExporting(false));
               }}
             >
@@ -1226,9 +1288,9 @@ function SortProgress() {
   );
 }
 
-function ImportProgress({ progress }: { progress: number }) {
+function WorkOverlay({ label, progress }: { label: string; progress: number }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
-  const percent = Math.round(progress * 100);
+  const percent = progress <= 0 ? 0 : progress >= 1 ? 100 : Math.min(99, Math.max(1, Math.round(progress * 100)));
   useLayoutEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog || dialog.open) return;
@@ -1243,7 +1305,7 @@ function ImportProgress({ progress }: { progress: number }) {
   return (
     <dialog
       ref={dialogRef}
-      aria-label="מייבא את הנתונים"
+      aria-label={label}
       onCancel={(event) => event.preventDefault()}
       style={{
         position: "fixed",
@@ -1272,18 +1334,30 @@ function ImportProgress({ progress }: { progress: number }) {
           boxShadow: "0 12px 40px rgba(0, 0, 0, 0.28)",
         }}
       >
-        <p
-          className="font-semibold"
-          style={{ fontSize: "1.5rem", lineHeight: 1.35 }}
-        >
-          מייבא את הנתונים…
+        <style>
+          {"@keyframes cnaanlist-spin { to { transform: rotate(360deg); } }"}
+        </style>
+        <div
+          aria-hidden
+          style={{
+            width: 52,
+            height: 52,
+            margin: "0 auto 20px",
+            borderRadius: "50%",
+            border: "4px solid #e5e5e5",
+            borderTopColor: "var(--teal)",
+            animation: "cnaanlist-spin 0.8s linear infinite",
+          }}
+        />
+        <p className="font-semibold" style={{ fontSize: "1.5rem", lineHeight: 1.35 }}>
+          {label}
         </p>
         <div
           role="progressbar"
           aria-valuemin={0}
           aria-valuemax={100}
           aria-valuenow={percent}
-          aria-label="התקדמות הייבוא"
+          aria-label={label}
           style={{
             height: 16,
             marginTop: 28,
@@ -1302,10 +1376,7 @@ function ImportProgress({ progress }: { progress: number }) {
             }}
           />
         </div>
-        <p
-          className="font-medium"
-          style={{ fontSize: "1.35rem", marginTop: 16, color: "#404040" }}
-        >
+        <p className="font-medium" style={{ fontSize: "1.35rem", marginTop: 16, color: "#404040" }}>
           {percent}%
         </p>
       </div>
@@ -1341,4 +1412,14 @@ function SortableBlock({
       {children(reorderMode ? { ...attributes, ...listeners } : undefined)}
     </div>
   );
+}
+
+function importNotes(pending: { inventory: boolean; grocery: boolean; lists: boolean; recipes: boolean }) {
+  const notes: string[] = [];
+  if (pending.inventory) notes.push("ייבוא יחליף את כל הקטגוריות, המוצרים והתמונות בחשבון זה.");
+  if (pending.inventory && !pending.grocery) notes.push("רשימת הקניות תתרוקן.");
+  if (pending.grocery) notes.push("עגלת הקניות בקובץ תחליף את העגלה בחשבון.");
+  if (pending.lists) notes.push("הרשימות בקובץ יחליפו את הרשימות בחשבון.");
+  if (pending.recipes) notes.push("הקובץ כולל מתכונים. להחליף את המתכונים בחשבון, או להוסיף אותם למתכונים הקיימים?");
+  return notes;
 }

@@ -25,7 +25,8 @@ import {
   withoutChecklistRow,
 } from "@/lib/checklist";
 import { colorHex, nextCategoryColor, uniqueCategoryColors } from "@/lib/colors";
-import { forgetPendingGrocery, isOfflineError, mergePendingGrocery, readPendingGrocery, rememberPendingGrocery } from "@/lib/grocery-sync";
+import { clearPendingGrocery, forgetPendingGrocery, isOfflineError, mergePendingGrocery, readPendingGrocery, rememberPendingGrocery } from "@/lib/grocery-sync";
+import { recipesImportedEvent } from "@/lib/recipe-transfer";
 import { forgetCachedImage, pruneImageCache, readCachedImage, writeCachedImage } from "@/lib/image-cache";
 import { replaceInventory } from "@/lib/import-inventory";
 import { compressImage } from "@/lib/images";
@@ -73,7 +74,7 @@ type ListsContextValue = {
   removeFromGrocery: (itemId: string) => Promise<void>;
   clearPurchased: () => Promise<void>;
   clearGrocery: () => Promise<void>;
-  importInventory: (file: File, onProgress?: (ratio: number) => void) => Promise<void>;
+  importInventory: (file: File, options?: { recipes?: "replace" | "append" }, onProgress?: (ratio: number) => void) => Promise<void>;
   checklist: ChecklistRow[];
   checklistError: string | null;
   addChecklistRow: (where: { at: "start" } | { afterId: string }) => string | null;
@@ -1000,18 +1001,23 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
         const { error: deleteError } = await supabaseRef.current.from("grocery_items").delete().in("id", ids);
         if (deleteError) fail("לא ניתן לנקות את הפריטים שנקנו");
       },
-      async importInventory(file: File, onProgress?: (ratio: number) => void) {
+      async importInventory(file: File, options?: { recipes?: "replace" | "append" }, onProgress?: (ratio: number) => void) {
         importingRef.current = true;
         reorderRef.current = false;
         setReorderMode(false);
         setSaving(true);
         setError(null);
         try {
-          const imported = await replaceInventory(supabaseRef.current, initial.accountId, file, onProgress);
-          setCategories(imported.categories);
-          setItems(imported.items);
-          setGrocery([]);
-          setPreviews({});
+          const imported = await replaceInventory(supabaseRef.current, initial.accountId, file, onProgress, options);
+          if (imported.categories && imported.items) {
+            setCategories(imported.categories);
+            setItems(imported.items);
+            setPreviews({});
+          }
+          if (imported.grocery !== null) {
+            clearPendingGrocery(initial.accountId);
+            setGrocery(imported.grocery);
+          }
           if (imported.checklist) {
             pendingIds.current.clear();
             pendingDeletes.current.clear();
@@ -1020,6 +1026,7 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
             setChecklist(imported.checklist);
             setChecklistError(null);
           }
+          if (imported.recipes) window.dispatchEvent(new Event(recipesImportedEvent));
         } catch (error) {
           setError(error instanceof Error && error.message ? error.message : "לא ניתן לייבא את הרשימה");
         } finally {

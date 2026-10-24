@@ -44,9 +44,9 @@ Signed-in grocery, inventory, lists, and settings are switched in `components/ap
 
 - Capture the native `pushState` and `replaceState` in `useLayoutEffect` and use those. Next.js patches the methods.
 - An installed app (`display-mode: standalone` or `navigator.standalone`) uses `replaceState` so `history.length` stays 1. Closing needs that single entry.
-- `/lists` returns null; the shell renders `ChecklistPage`. Signed-in `/settings` returns null; the shell renders `SignedInSettings`, and that screen unmounts when the path leaves `/settings`.
-- Grocery, inventory, and lists stay mounted after the 250ms warm. Swipe only between grocery and inventory.
-- Bottom nav order, visually left to right: `/inventory` רשימת מוצרים, `/grocery` עגלת קניות, `/lists` רשימות, `/settings` הגדרות. The grocery badge is `grocery.length`, including purchased lines.
+- `/lists` returns null; the shell renders `ChecklistPage`. `/recipes` returns null; the shell renders `RecipesPage`. Signed-in `/settings` returns null; the shell renders `SignedInSettings`, and that screen unmounts when the path leaves `/settings`.
+- Grocery, inventory, lists, and recipes stay mounted after the 250ms warm. Swipe only between grocery and inventory.
+- Bottom nav order, visually left to right: `/inventory` רשימת מוצרים, `/grocery` עגלת קניות, `/lists` רשימות, `/recipes` מתכונים, `/settings` הגדרות. The grocery badge is `grocery.length`, including purchased lines.
 
 ## Grocery
 
