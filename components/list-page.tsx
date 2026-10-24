@@ -671,7 +671,11 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
                                 inGrocery={lists.grocery.some(
                                   (line) => line.item_id === item.id,
                                 )}
-                                onAdd={() => void lists.addToGrocery(item.id)}
+                                onAdd={() =>
+                                  void (lists.grocery.some((line) => line.item_id === item.id)
+                                    ? lists.removeFromGrocery(item.id)
+                                    : lists.addToGrocery(item.id))
+                                }
                                 onCheck={() =>
                                   void lists.setChecked(item.id, true)
                                 }

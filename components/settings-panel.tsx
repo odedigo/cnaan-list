@@ -63,6 +63,7 @@ export function SignedOutSettings({
           <AccountCard
             accounts={accounts}
             value={selectedId}
+            email={accounts.find((account) => account.userId === selectedId)?.email ?? ""}
             pending={switching}
             actionPending={switching}
             actionLabel="כניסה"
@@ -148,6 +149,7 @@ export function SignedInSettings({ username }: { username: string }) {
   const [showStoreBadge, setShowStoreBadge] = useState(true);
   const [accounts, setAccounts] = useState<SavedAccount[]>([]);
   const [userId, setUserId] = useState("");
+  const [accountEmail, setAccountEmail] = useState("");
   useEffect(() => {
     setKeepAwake(readKeepAwake());
     setSingleCategory(readSingleOpenCategory());
@@ -156,11 +158,42 @@ export function SignedInSettings({ username }: { username: string }) {
     sync();
     window.addEventListener(savedAccountsEvent, sync);
     const supabase = createClient();
+    let cancel = false;
+    const applySession = (nextId: string) => {
+      if (!cancel) setUserId(nextId);
+    };
     void supabase.auth.getSession().then(({ data }) => {
-      if (data.session) setUserId(data.session.user.id);
+      if (data.session) applySession(data.session.user.id);
     });
-    return () => window.removeEventListener(savedAccountsEvent, sync);
+    const { data: auth } = supabase.auth.onAuthStateChange((_event, session) => {
+      applySession(session?.user.id ?? "");
+    });
+    return () => {
+      cancel = true;
+      auth.subscription.unsubscribe();
+      window.removeEventListener(savedAccountsEvent, sync);
+    };
   }, []);
+  useEffect(() => {
+    if (!userId) return;
+    let cancel = false;
+    const supabase = createClient();
+    void (async () => {
+      const [{ data: sessionData }, { data: profile }] = await Promise.all([
+        supabase.auth.getSession(),
+        supabase.from("profiles").select("email").eq("id", userId).maybeSingle(),
+      ]);
+      if (cancel) return;
+      const sessionEmail =
+        sessionData.session?.user.id === userId ? sessionData.session.user.email?.trim() ?? "" : "";
+      const profileEmail = typeof profile?.email === "string" ? profile.email.trim() : "";
+      const email = sessionEmail || profileEmail;
+      if (email) setAccountEmail(email);
+    })();
+    return () => {
+      cancel = true;
+    };
+  }, [userId]);
   const savedCurrent = accounts.find(
     (account) =>
       account.userId === userId || (!userId && account.username === username),
@@ -198,6 +231,7 @@ export function SignedInSettings({ username }: { username: string }) {
         <AccountCard
           accounts={options}
           value={currentValue}
+          email={accountEmail}
           pending={pending || switching}
           actionPending={pending}
           actionLabel="התנתקות"
@@ -205,12 +239,16 @@ export function SignedInSettings({ username }: { username: string }) {
           error={switchError}
           onChange={(nextId) => {
             if (!nextId || nextId === currentValue) return;
+            const next = options.find((account) => account.userId === nextId);
+            const previousEmail = accountEmail;
+            if (next?.email) setAccountEmail(next.email);
             setSwitching(true);
             setSwitchError("");
             void switchToSavedAccount(nextId).then((message) => {
               if (message) {
                 setSwitchError(message);
                 setSwitching(false);
+                setAccountEmail(previousEmail);
               }
             });
           }}
@@ -266,6 +304,7 @@ export function SignedInSettings({ username }: { username: string }) {
 function AccountCard({
   accounts,
   value,
+  email,
   pending,
   actionPending,
   actionLabel,
@@ -276,6 +315,7 @@ function AccountCard({
 }: {
   accounts: SavedAccount[];
   value: string;
+  email: string;
   pending: boolean;
   actionPending: boolean;
   actionLabel: string;
@@ -287,32 +327,45 @@ function AccountCard({
   const singleAccount = accounts.length < 2;
   return (
     <div className="rounded-xl border border-neutral-200 bg-white px-6 py-6">
-      <div className="flex items-center gap-3">
-        <span className="shrink-0 text-base leading-none">חשבון:</span>
-        <div className="relative min-w-0 flex-1">
-          <select
-            aria-label="חשבון"
-            value={value}
-            disabled={pending || singleAccount}
-            onChange={(event) => onChange(event.target.value)}
-            className="w-full appearance-none rounded-lg border border-neutral-300 bg-white outline-none focus:border-[var(--teal)] disabled:bg-neutral-100 disabled:text-neutral-500"
-            style={{
-              appearance: "none",
-              WebkitAppearance: "none",
-              height: "3rem",
-              paddingInlineStart: "1rem",
-              paddingInlineEnd: "2.75rem",
-            }}
-          >
-            {accounts.map((account) => (
-              <option
-                key={account.userId || account.username}
-                value={account.userId}
-              >
-                {account.username}
-              </option>
-            ))}
-          </select>
+      <div className="flex items-start gap-3">
+        <span className="shrink-0 text-base leading-none" style={{ marginTop: "0.85rem" }}>
+          חשבון:
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="relative">
+            <select
+              aria-label="חשבון"
+              value={value}
+              disabled={pending || singleAccount}
+              onChange={(event) => onChange(event.target.value)}
+              className="w-full appearance-none rounded-lg border border-neutral-300 bg-white outline-none focus:border-[var(--teal)] disabled:bg-neutral-100 disabled:text-neutral-500"
+              style={{
+                appearance: "none",
+                WebkitAppearance: "none",
+                height: "3rem",
+                paddingInlineStart: "1rem",
+                paddingInlineEnd: "2.75rem",
+              }}
+            >
+              {accounts.map((account) => (
+                <option
+                  key={account.userId || account.username}
+                  value={account.userId}
+                >
+                  {account.username}
+                </option>
+              ))}
+            </select>
+          </div>
+          {email ? (
+            <p
+              dir="ltr"
+              className="truncate text-sm text-neutral-600"
+              style={{ marginTop: "0.35rem", textAlign: "center" }}
+            >
+              {email}
+            </p>
+          ) : null}
         </div>
         <span className="grid size-12 shrink-0 place-items-center rounded-full bg-neutral-200 text-neutral-500">
           <UserIcon className="size-7" />

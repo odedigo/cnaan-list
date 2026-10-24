@@ -473,7 +473,13 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
             .eq("item_id", entry.itemId)
             .maybeSingle();
           if (error) outcome = isOfflineError(error) ? "offline" : "rejected";
-          else if (data) {
+          else if (
+            !readPendingGrocery(initial.accountId).some(
+              (row) => row.itemId === entry.itemId && row.revision === entry.revision,
+            )
+          ) {
+            // The line was removed while this change was being saved.
+          } else if (data) {
             const { error: updateError } = await supabase.from("grocery_items").update({ checked: entry.checked }).eq("id", data.id);
             if (updateError) outcome = isOfflineError(updateError) ? "offline" : "rejected";
           } else {
@@ -493,6 +499,16 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
                   .eq("item_id", entry.itemId);
                 if (updateError) outcome = isOfflineError(updateError) ? "offline" : "rejected";
               } else outcome = "rejected";
+            }
+            const stillThere = readPendingGrocery(initial.accountId).some(
+              (row) => row.itemId === entry.itemId && row.revision === entry.revision,
+            );
+            if (!insertError && !stillThere) {
+              await supabase
+                .from("grocery_items")
+                .delete()
+                .eq("account_id", initial.accountId)
+                .eq("item_id", entry.itemId);
             }
           }
         } catch (error) {
@@ -953,16 +969,25 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
       async setChecked(itemId, checked) {
         const existing = grocery.find((line) => line.item_id === itemId);
         if (!existing || existing.checked === checked) return;
-        setGrocery((current) => current.map((line) => (line.item_id === itemId ? { ...line, checked } : line)));
         rememberPendingGrocery(initial.accountId, itemId, checked, existing.id);
-        await syncPendingGrocery();
-        if (!readPendingGrocery(initial.accountId).some((entry) => entry.itemId === itemId)) void refetch();
+        flushSync(() => {
+          setGrocery((current) => current.map((line) => (line.item_id === itemId ? { ...line, checked } : line)));
+        });
+        void syncPendingGrocery().then(() => {
+          if (!readPendingGrocery(initial.accountId).some((entry) => entry.itemId === itemId)) void refetch();
+        });
       },
       async removeFromGrocery(itemId) {
         const existing = grocery.find((line) => line.item_id === itemId);
         if (!existing) return;
         setGrocery((current) => current.filter((line) => line.item_id !== itemId));
-        const { error: deleteError } = await supabaseRef.current.from("grocery_items").delete().eq("id", existing.id);
+        const pending = readPendingGrocery(initial.accountId).find((entry) => entry.itemId === itemId);
+        if (pending) forgetPendingGrocery(initial.accountId, itemId, pending.revision);
+        const { error: deleteError } = await supabaseRef.current
+          .from("grocery_items")
+          .delete()
+          .eq("account_id", initial.accountId)
+          .eq("item_id", itemId);
         if (deleteError) fail("לא ניתן להסיר מהרשימה");
       },
       async clearPurchased() {
