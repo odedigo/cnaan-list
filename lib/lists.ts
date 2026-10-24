@@ -41,6 +41,7 @@ function normalizeCategory(row: {
   image_path: string | null;
   sort_order: number;
   store_id?: string | null;
+  separator_after?: boolean | null;
 }): Category {
   return {
     id: row.id,
@@ -50,6 +51,7 @@ function normalizeCategory(row: {
     image_path: row.image_path,
     sort_order: row.sort_order,
     store_id: row.store_id ?? "",
+    separator_after: row.separator_after === true,
   };
 }
 

@@ -2,7 +2,13 @@
 
 /** Settings: signed-out login, account switch, stores with the color picker, and app options. */
 
-import { useActionState, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useActionState,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import Link from "next/link";
 
 import { login, logout } from "@/app/actions/auth";
@@ -55,7 +61,12 @@ export function SignedOutSettings({
   }, []);
   return (
     <div>
-      <AppHeader title="הגדרות" actionsEnabled={false} showCredit creditVersion={version} />
+      <AppHeader
+        title="הגדרות"
+        actionsEnabled={false}
+        showCredit
+        creditVersion={version}
+      />
       <DevBanner />
       <AppTitle />
       {accounts.length > 0 ? (
@@ -63,7 +74,10 @@ export function SignedOutSettings({
           <AccountCard
             accounts={accounts}
             value={selectedId}
-            email={accounts.find((account) => account.userId === selectedId)?.email ?? ""}
+            email={
+              accounts.find((account) => account.userId === selectedId)
+                ?.email ?? ""
+            }
             pending={switching}
             actionPending={switching}
             actionLabel="כניסה"
@@ -165,9 +179,11 @@ export function SignedInSettings({ username }: { username: string }) {
     void supabase.auth.getSession().then(({ data }) => {
       if (data.session) applySession(data.session.user.id);
     });
-    const { data: auth } = supabase.auth.onAuthStateChange((_event, session) => {
-      applySession(session?.user.id ?? "");
-    });
+    const { data: auth } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        applySession(session?.user.id ?? "");
+      },
+    );
     return () => {
       cancel = true;
       auth.subscription.unsubscribe();
@@ -181,12 +197,19 @@ export function SignedInSettings({ username }: { username: string }) {
     void (async () => {
       const [{ data: sessionData }, { data: profile }] = await Promise.all([
         supabase.auth.getSession(),
-        supabase.from("profiles").select("email").eq("id", userId).maybeSingle(),
+        supabase
+          .from("profiles")
+          .select("email")
+          .eq("id", userId)
+          .maybeSingle(),
       ]);
       if (cancel) return;
       const sessionEmail =
-        sessionData.session?.user.id === userId ? sessionData.session.user.email?.trim() ?? "" : "";
-      const profileEmail = typeof profile?.email === "string" ? profile.email.trim() : "";
+        sessionData.session?.user.id === userId
+          ? (sessionData.session.user.email?.trim() ?? "")
+          : "";
+      const profileEmail =
+        typeof profile?.email === "string" ? profile.email.trim() : "";
       const email = sessionEmail || profileEmail;
       if (email) setAccountEmail(email);
     })();
@@ -292,7 +315,7 @@ export function SignedInSettings({ username }: { username: string }) {
               }}
               className="size-5 accent-[var(--teal)]"
             />
-            <span>הצגת תג החנות</span>
+            <span>הצגת תג החנות על הקטגוריה</span>
           </label>
         </div>
         <StoresEditor />
@@ -328,7 +351,10 @@ function AccountCard({
   return (
     <div className="rounded-xl border border-neutral-200 bg-white px-6 py-6">
       <div className="flex items-start gap-3">
-        <span className="shrink-0 text-base leading-none" style={{ marginTop: "0.85rem" }}>
+        <span
+          className="shrink-0 text-base leading-none"
+          style={{ marginTop: "0.85rem" }}
+        >
           חשבון:
         </span>
         <div className="min-w-0 flex-1">
@@ -395,7 +421,11 @@ function StoresEditor() {
   const [addColor, setAddColor] = useState("#2563EB");
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [colors, setColors] = useState<Record<string, string>>({});
-  const [colorEdit, setColorEdit] = useState<{ id: string | null; name: string; color: string } | null>(null);
+  const [colorEdit, setColorEdit] = useState<{
+    id: string | null;
+    name: string;
+    color: string;
+  } | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -516,101 +546,120 @@ function StoresEditor() {
         <ChevronIcon className={`size-5 ${open ? "" : "rotate-180"}`} />
       </button>
       {open ? (
-      <>
-      {lists.storesError ? <p className="mt-2 text-sm text-red-600">{lists.storesError}</p> : null}
-      {message ? (
-        <p className="mt-2 text-sm text-red-600" role="status">{message}</p>
-      ) : saved ? (
-        <p className="mt-2 text-sm text-[var(--teal)]" role="status">נשמר</p>
-      ) : null}
-      <div className="mt-3 space-y-2">
-        {lists.stores.map((store) => (
-          <div key={store.id} className="flex items-center gap-2">
+        <>
+          {lists.storesError ? (
+            <p className="mt-2 text-sm text-red-600">{lists.storesError}</p>
+          ) : null}
+          {message ? (
+            <p className="mt-2 text-sm text-red-600" role="status">
+              {message}
+            </p>
+          ) : saved ? (
+            <p className="mt-2 text-sm text-[var(--teal)]" role="status">
+              נשמר
+            </p>
+          ) : null}
+          <div className="mt-3 space-y-2">
+            {lists.stores.map((store) => (
+              <div key={store.id} className="flex items-center gap-2">
+                <input
+                  aria-label={`שם ${store.name}`}
+                  value={drafts[store.id] ?? store.name}
+                  disabled={busy}
+                  onChange={(event) =>
+                    setDrafts((current) => ({
+                      ...current,
+                      [store.id]: event.target.value,
+                    }))
+                  }
+                  onBlur={() => void commitName(store.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      event.currentTarget.blur();
+                    }
+                  }}
+                  className="min-w-0 flex-1 rounded-lg border border-neutral-300 bg-white px-3 py-2 outline-none focus:border-[var(--teal)]"
+                />
+                <button
+                  type="button"
+                  aria-label={`צבע ${store.name}`}
+                  disabled={busy}
+                  onClick={() =>
+                    setColorEdit({
+                      id: store.id,
+                      name: store.name,
+                      color: colorHex(colors[store.id] ?? store.color),
+                    })
+                  }
+                  className="size-10 shrink-0 rounded-lg border border-neutral-300 disabled:opacity-60"
+                  style={{
+                    background: colorHex(colors[store.id] ?? store.color),
+                  }}
+                />
+                {store.protected ? (
+                  <span className="w-16 shrink-0" />
+                ) : confirmId === store.id ? (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void removeStore(store.id)}
+                    className="w-16 shrink-0 rounded-lg bg-red-50 py-2 text-sm text-red-700"
+                  >
+                    אישור
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => setConfirmId(store.id)}
+                    className="w-16 shrink-0 rounded-lg py-2 text-sm text-red-600"
+                  >
+                    מחיקה
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 flex items-center gap-2">
             <input
-              aria-label={`שם ${store.name}`}
-              value={drafts[store.id] ?? store.name}
+              aria-label="שם חנות חדשה"
+              value={adding}
+              placeholder="חנות חדשה"
               disabled={busy}
-              onChange={(event) => setDrafts((current) => ({ ...current, [store.id]: event.target.value }))}
-              onBlur={() => void commitName(store.id)}
+              onChange={(event) => setAdding(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === "Enter") {
                   event.preventDefault();
-                  event.currentTarget.blur();
+                  void createStore();
                 }
               }}
               className="min-w-0 flex-1 rounded-lg border border-neutral-300 bg-white px-3 py-2 outline-none focus:border-[var(--teal)]"
             />
             <button
               type="button"
-              aria-label={`צבע ${store.name}`}
+              aria-label="צבע חנות חדשה"
               disabled={busy}
               onClick={() =>
                 setColorEdit({
-                  id: store.id,
-                  name: store.name,
-                  color: colorHex(colors[store.id] ?? store.color),
+                  id: null,
+                  name: "חנות חדשה",
+                  color: colorHex(addColor),
                 })
               }
               className="size-10 shrink-0 rounded-lg border border-neutral-300 disabled:opacity-60"
-              style={{ background: colorHex(colors[store.id] ?? store.color) }}
+              style={{ background: colorHex(addColor) }}
             />
-            {store.protected ? (
-              <span className="w-16 shrink-0" />
-            ) : confirmId === store.id ? (
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => void removeStore(store.id)}
-                className="w-16 shrink-0 rounded-lg bg-red-50 py-2 text-sm text-red-700"
-              >
-                אישור
-              </button>
-            ) : (
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => setConfirmId(store.id)}
-                className="w-16 shrink-0 rounded-lg py-2 text-sm text-red-600"
-              >
-                מחיקה
-              </button>
-            )}
+            <button
+              type="button"
+              disabled={busy || !adding.trim()}
+              onClick={() => void createStore()}
+              className="w-16 shrink-0 rounded-lg bg-[var(--teal)] py-2 text-sm font-medium text-white disabled:opacity-60"
+            >
+              הוספה
+            </button>
           </div>
-        ))}
-      </div>
-      <div className="mt-3 flex items-center gap-2">
-        <input
-          aria-label="שם חנות חדשה"
-          value={adding}
-          placeholder="חנות חדשה"
-          disabled={busy}
-          onChange={(event) => setAdding(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              void createStore();
-            }
-          }}
-          className="min-w-0 flex-1 rounded-lg border border-neutral-300 bg-white px-3 py-2 outline-none focus:border-[var(--teal)]"
-        />
-        <button
-          type="button"
-          aria-label="צבע חנות חדשה"
-          disabled={busy}
-          onClick={() => setColorEdit({ id: null, name: "חנות חדשה", color: colorHex(addColor) })}
-          className="size-10 shrink-0 rounded-lg border border-neutral-300 disabled:opacity-60"
-          style={{ background: colorHex(addColor) }}
-        />
-        <button
-          type="button"
-          disabled={busy || !adding.trim()}
-          onClick={() => void createStore()}
-          className="w-16 shrink-0 rounded-lg bg-[var(--teal)] py-2 text-sm font-medium text-white disabled:opacity-60"
-        >
-          הוספה
-        </button>
-      </div>
-      </>
+        </>
       ) : null}
       {colorEdit ? (
         <StoreColorDialog
@@ -708,12 +757,38 @@ function StoreColorDialog({
         }}
       >
         <p className="text-base font-semibold">צבע {name}</p>
-        <div dir="ltr" style={{ display: "flex", gap: 10, height: 196, marginTop: 12 }}>
-          <SaturationField hsv={hsv} onChange={(next) => choose(hsvToHex(next.h, next.s, next.v))} />
-          <HueField hue={hsv.h} onChange={(hue) => choose(hsvToHex(hue, hsv.s, hsv.v))} />
+        <div
+          dir="ltr"
+          style={{ display: "flex", gap: 10, height: 196, marginTop: 12 }}
+        >
+          <SaturationField
+            hsv={hsv}
+            onChange={(next) => choose(hsvToHex(next.h, next.s, next.v))}
+          />
+          <HueField
+            hue={hsv.h}
+            onChange={(hue) => choose(hsvToHex(hue, hsv.s, hsv.v))}
+          />
         </div>
-        <div dir="ltr" style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12 }}>
-          <span style={{ width: 40, height: 40, flexShrink: 0, borderRadius: 8, border: "1px solid #d4d4d4", background: hex }} />
+        <div
+          dir="ltr"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            marginTop: 12,
+          }}
+        >
+          <span
+            style={{
+              width: 40,
+              height: 40,
+              flexShrink: 0,
+              borderRadius: 8,
+              border: "1px solid #d4d4d4",
+              background: hex,
+            }}
+          />
           <input
             aria-label="קוד צבע"
             dir="ltr"
@@ -741,14 +816,28 @@ function StoreColorDialog({
           <button
             type="button"
             onClick={onClose}
-            style={{ flex: 1, borderRadius: 12, background: "#f5f5f5", padding: "12px 0", fontWeight: 500, color: "#404040" }}
+            style={{
+              flex: 1,
+              borderRadius: 12,
+              background: "#f5f5f5",
+              padding: "12px 0",
+              fontWeight: 500,
+              color: "#404040",
+            }}
           >
             ביטול
           </button>
           <button
             type="button"
             onClick={() => onSave(hex)}
-            style={{ flex: 1, borderRadius: 12, background: "var(--teal)", padding: "12px 0", fontWeight: 500, color: "#fff" }}
+            style={{
+              flex: 1,
+              borderRadius: 12,
+              background: "var(--teal)",
+              padding: "12px 0",
+              fontWeight: 500,
+              color: "#fff",
+            }}
           >
             שמירה
           </button>
@@ -758,7 +847,13 @@ function StoreColorDialog({
   );
 }
 
-function SaturationField({ hsv, onChange }: { hsv: Hsv; onChange: (hsv: Hsv) => void }) {
+function SaturationField({
+  hsv,
+  onChange,
+}: {
+  hsv: Hsv;
+  onChange: (hsv: Hsv) => void;
+}) {
   function pick(event: React.PointerEvent<HTMLDivElement>) {
     const rect = event.currentTarget.getBoundingClientRect();
     onChange({
@@ -788,8 +883,20 @@ function SaturationField({ hsv, onChange }: { hsv: Hsv; onChange: (hsv: Hsv) => 
         boxShadow: "inset 0 0 0 1px rgba(0,0,0,0.12)",
       }}
     >
-      <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to right, #fff, transparent)" }} />
-      <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to bottom, transparent, #000)" }} />
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          background: "linear-gradient(to right, #fff, transparent)",
+        }}
+      />
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          background: "linear-gradient(to bottom, transparent, #000)",
+        }}
+      />
       <span
         aria-hidden
         style={{
@@ -808,7 +915,13 @@ function SaturationField({ hsv, onChange }: { hsv: Hsv; onChange: (hsv: Hsv) => 
   );
 }
 
-function HueField({ hue, onChange }: { hue: number; onChange: (hue: number) => void }) {
+function HueField({
+  hue,
+  onChange,
+}: {
+  hue: number;
+  onChange: (hue: number) => void;
+}) {
   function pick(event: React.PointerEvent<HTMLDivElement>) {
     const rect = event.currentTarget.getBoundingClientRect();
     onChange(clamp((event.clientY - rect.top) / rect.height) * 360);
@@ -841,7 +954,8 @@ function HueField({ hue, onChange }: { hue: number; onChange: (hue: number) => v
         flexShrink: 0,
         borderRadius: 2,
         touchAction: "none",
-        background: "linear-gradient(to bottom, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)",
+        background:
+          "linear-gradient(to bottom, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)",
       }}
     >
       <span
@@ -913,7 +1027,11 @@ function clamp(value: number) {
 function DevBanner() {
   if (isProduction()) return null;
   return (
-    <div role="status" className="px-4 py-4 text-center text-xl font-bold" style={{ background: "#f59e0b", color: "#1c1917" }}>
+    <div
+      role="status"
+      className="px-4 py-4 text-center text-xl font-bold"
+      style={{ background: "#f59e0b", color: "#1c1917" }}
+    >
       סביבת פיתוח
     </div>
   );
@@ -926,4 +1044,3 @@ function AppTitle() {
     </h2>
   );
 }
-

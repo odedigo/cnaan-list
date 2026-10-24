@@ -36,8 +36,15 @@ export function parseQuantity(value: string) {
   return rounded;
 }
 
-export function stepQuantity(quantity: number, delta: number) {
-  const next = Math.round((quantity + delta) * 100) / 100;
-  if (next < MIN_QUANTITY) return quantity;
-  return next;
+/** Moves the last displayed digit: 2 → 3, 2.2 → 2.3, 0.15 → 0.16. */
+export function stepQuantity(quantity: number, direction: number) {
+  const text = formatQuantity(quantity);
+  const decimals = text.includes(".") ? text.split(".")[1].length : 0;
+  const scale = 10 ** decimals;
+  const sign = direction < 0 ? -1 : 1;
+  const current = Math.round(quantity * scale);
+  const next = (current + sign) / scale;
+  const rounded = Math.round(next * 100) / 100;
+  if (rounded < MIN_QUANTITY) return Math.round(quantity * 100) / 100;
+  return rounded;
 }

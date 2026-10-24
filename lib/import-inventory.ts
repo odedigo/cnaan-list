@@ -41,6 +41,7 @@ export async function replaceInventory(
         color: category.color,
         sortOrder: category.sortOrder,
         store: category.store,
+        separatorAfter: category.separatorAfter,
         image: category.image,
         imagePath: null as string | null,
         items,
@@ -108,6 +109,7 @@ export async function replaceInventory(
         image_path: category.imagePath,
         sort_order: category.sortOrder,
         store_id: storeId,
+        separator_after: category.separatorAfter,
       };
     });
     items = plan.flatMap((category) =>

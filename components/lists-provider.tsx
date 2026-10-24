@@ -51,8 +51,8 @@ type ListsContextValue = {
   sortAlphabetically: () => Promise<boolean>;
   moveCategories: (activeId: string, overId: string, visibleIds: string[]) => void;
   moveItems: (categoryId: string, activeId: string, overId: string, visibleIds: string[]) => void;
-  addCategory: (name: string, imageFile?: File | null, storeId?: string) => Promise<string | null>;
-  saveCategory: (input: { id: string; name: string; imageFile?: File | null; storeId?: string }) => Promise<boolean>;
+  addCategory: (name: string, imageFile?: File | null, storeId?: string, separatorAfter?: boolean) => Promise<string | null>;
+  saveCategory: (input: { id: string; name: string; imageFile?: File | null; storeId?: string; separatorAfter?: boolean }) => Promise<boolean>;
   deleteCategory: (id: string) => Promise<void>;
   deleteItem: (id: string) => Promise<void>;
   saveStore: (input: { id: string; name?: string; color?: string }) => Promise<string | null>;
@@ -648,7 +648,7 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
           );
         });
       },
-      async addCategory(name, imageFile, storeId) {
+      async addCategory(name, imageFile, storeId, separatorAfter = false) {
         const trimmed = name.trim();
         if (!trimmed) {
           setError("יש להזין שם");
@@ -671,6 +671,7 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
             name: trimmed,
             color,
             sort_order: index,
+            separator_after: separatorAfter,
             ...(chosenStore ? { store_id: chosenStore } : {}),
           })
           .select("*")
@@ -708,7 +709,7 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
         const chosenStore = input.storeId || undefined;
         const { error: updateError } = await supabaseRef.current
           .from("categories")
-          .update({ name, ...(chosenStore ? { store_id: chosenStore } : {}) })
+          .update({ name, separator_after: input.separatorAfter === true, ...(chosenStore ? { store_id: chosenStore } : {}) })
           .eq("id", input.id);
         if (updateError) {
           setSaving(false);
@@ -717,7 +718,9 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
         }
         setCategories((current) =>
           current.map((category) =>
-            category.id === input.id ? { ...category, name, store_id: chosenStore ?? category.store_id } : category,
+            category.id === input.id
+              ? { ...category, name, store_id: chosenStore ?? category.store_id, separator_after: input.separatorAfter === true }
+              : category,
           ),
         );
         if (input.imageFile) {
@@ -1115,6 +1118,7 @@ function normalizeCategory(row: {
   image_path: string | null;
   sort_order: number;
   store_id?: string | null;
+  separator_after?: boolean | null;
 }): Category {
   return {
     id: row.id,
@@ -1124,6 +1128,7 @@ function normalizeCategory(row: {
     image_path: row.image_path,
     sort_order: row.sort_order,
     store_id: row.store_id ?? "",
+    separator_after: row.separator_after === true,
   };
 }
 

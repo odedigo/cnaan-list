@@ -29,6 +29,7 @@ export type ImportedCategory = {
   color: string;
   sortOrder: number;
   store: string | null;
+  separatorAfter: boolean;
   image: ImportedPhoto | null;
   items: ImportedItem[];
 };
@@ -98,6 +99,7 @@ function readCategory(value: unknown, index: number, files: Map<string, Uint8Arr
     color: colorHex(typeof category.color === "string" ? category.color : ""),
     sortOrder: order(category.sortOrder, index),
     store: typeof category.store === "string" && category.store.trim() ? category.store.trim() : null,
+    separatorAfter: category.separatorAfter === true,
     image: photo(category.image, files),
     items: category.items.map((item, itemIndex) => readItem(item, itemIndex, files)),
   };

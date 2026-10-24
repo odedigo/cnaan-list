@@ -17,6 +17,7 @@ export type Category = {
   image_path: string | null;
   sort_order: number;
   store_id: string;
+  separator_after: boolean;
 };
 
 export type Item = {

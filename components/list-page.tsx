@@ -538,11 +538,12 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
                 ? "#b5b5b5"
                 : (store?.color ?? DEFAULT_STORE_COLOR);
               const categoryInk = inkFor(categoryBackground);
+              const showSeparator = mode === "inventory" && category.separator_after;
               return (
                 <SortableBlock key={category.id} id={category.id}>
                   {(handle) => (
                     <section
-                      className="mb-2"
+                      className={showSeparator ? undefined : "mb-2"}
                       ref={(node) => {
                         if (node) categoryNodes.current.set(category.id, node);
                         else categoryNodes.current.delete(category.id);
@@ -686,6 +687,12 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
                             ))}
                           </SortableContext>
                         </>
+                      ) : null}
+                      {showSeparator ? (
+                        <div
+                          aria-hidden="true"
+                          style={{ height: "1px", marginTop: "1.25rem", marginBottom: "1.25rem", background: "#c4c4c4" }}
+                        />
                       ) : null}
                     </section>
                   )}

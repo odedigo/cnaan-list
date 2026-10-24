@@ -2,13 +2,24 @@
 name: cnaanlist
 description: >-
   Guides changes to CnaanList, the Hebrew RTL grocery and inventory app on
-  Supabase. Use when editing this repo's UI, auth, grocery sync, inventory,
-  stores, settings, checklists, navigation, images, or Supabase schema.
+  Supabase. All UI follows Hebrew right-to-left layout. Use when editing this
+  repo's UI, auth, grocery sync, inventory, stores, settings, checklists,
+  navigation, images, or Supabase schema.
 ---
 
 # CnaanList
 
-Hebrew RTL Next.js App Router app (`lang=he`, `dir=rtl`). One account has one inventory list and one grocery list. Nothing is shared across accounts. UI copy is Hebrew. Header chrome and the bottom nav are `dir=ltr`. The app column is `max-w-[480px]`.
+Hebrew RTL Next.js App Router app (`lang=he`, `dir=rtl`). One account has one inventory list and one grocery list. Nothing is shared across accounts. The app column is `max-w-[480px]`.
+
+## Hebrew RTL
+
+This is a Hebrew right-to-left app. Every screen, dialog, label, and control follows that direction.
+
+- UI copy is Hebrew. Labels and text align to the right. Use `text-start`. `text-end` aligns to the physical left.
+- The start side is the physical right. Place a checkbox, radio, or leading icon on the right of its label. The label continues to the left.
+- Do not set `dir=ltr` on a Hebrew row to copy a left-to-right mockup. A control on the left of a screenshot is on the end side.
+- Use logical properties (`ps`, `pe`, `start`, `end`, `margin-inline`) for Hebrew layout. Physical `left` and `right` are only for the documented `dir=ltr` exceptions.
+- Header chrome and the bottom nav are `dir=ltr`. Nothing else is.
 
 ## Leave alone unless asked
 
