@@ -110,10 +110,80 @@ export function ingredientName(ingredient: RecipeIngredient) {
   return clean(ingredient.product) || clean(ingredient.text) || "";
 }
 
+const singularUnits: Record<string, string> = {
+  ליטרים: "ליטר",
+  כוסות: "כוס",
+  כפות: "כף",
+  כפיות: "כפית",
+  שיניים: "שן",
+  שיני: "שן",
+  חבילות: "חבילה",
+  שקיות: "שקית",
+  קופסאות: "קופסה",
+  בקבוקים: "בקבוק",
+  קורטים: "קורט",
+  צרורות: "צרור",
+  יחידות: "יחידה",
+};
+
+const pluralUnits: Record<string, string> = {
+  ליטר: "ליטרים",
+  כוס: "כוסות",
+  כף: "כפות",
+  כפית: "כפיות",
+  שן: "שיניים",
+  חבילה: "חבילות",
+  שקית: "שקיות",
+  קופסה: "קופסאות",
+  בקבוק: "בקבוקים",
+  קורט: "קורטים",
+  צרור: "צרורות",
+  יחידה: "יחידות",
+};
+
+const fractionGlyphs: Record<string, string> = {
+  "½": "1/2",
+  "⅓": "1/3",
+  "⅔": "2/3",
+  "¼": "1/4",
+  "¾": "3/4",
+  "⅕": "1/5",
+  "⅙": "1/6",
+  "⅛": "1/8",
+  "⅜": "3/8",
+  "⅝": "5/8",
+  "⅞": "7/8",
+};
+
 export function formatAmount(quantity: string | null, unit: string | null) {
   const qty = clean(quantity);
   if (!qty) return "";
-  return [formatQuantityToken(qty), clean(unit) || "יחידה"].join(" ");
+  const base = singularUnits[clean(unit)] ?? (clean(unit) || "יחידה");
+  const shown = quantityGreaterThanOne(qty) ? (pluralUnits[base] ?? base) : base;
+  return [formatQuantityToken(qty), shown].join(" ");
+}
+
+function quantityGreaterThanOne(quantity: string) {
+  let text = quantity.trim();
+  for (const [glyph, ascii] of Object.entries(fractionGlyphs)) text = text.replaceAll(glyph, ` ${ascii}`);
+  text = text.replace(/,/g, ".");
+  return text.split(/\s*(?:-|\u2013|\u2014|עד)\s*/).some((part) => amountValue(part) > 1);
+}
+
+function amountValue(part: string) {
+  const trimmed = part.trim();
+  const mixed = trimmed.match(/^(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)$/);
+  if (mixed) {
+    const denominator = Number(mixed[3]);
+    return denominator ? Number(mixed[1]) + Number(mixed[2]) / denominator : Number.NaN;
+  }
+  const fraction = trimmed.match(/^(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)$/);
+  if (fraction) {
+    const denominator = Number(fraction[2]);
+    return denominator ? Number(fraction[1]) / denominator : Number.NaN;
+  }
+  const number = trimmed.match(/^(\d+(?:\.\d+)?)/);
+  return number ? Number(number[1]) : Number.NaN;
 }
 
 export function formatQuantityToken(quantity: string) {

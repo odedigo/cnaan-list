@@ -2,7 +2,7 @@
 
 /** Recipes browser, reader, editor, rating, and Hebrew text export. */
 
-import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent, type PointerEvent } from "react";
 import {
   closestCenter,
   DndContext,
@@ -102,6 +102,11 @@ export function RecipesPage({ active }: { active: boolean }) {
   const [slides, setSlides] = useState<{ id: string; url: string }[]>([]);
   const [slide, setSlide] = useState(0);
   const [creating, setCreating] = useState(false);
+  const [addingCategory, setAddingCategory] = useState(false);
+  const [categoryMenuId, setCategoryMenuId] = useState<string | null>(null);
+  const [categoryDeleteId, setCategoryDeleteId] = useState<string | null>(null);
+  const [recipeMenuId, setRecipeMenuId] = useState<string | null>(null);
+  const [recipeDeleteId, setRecipeDeleteId] = useState<string | null>(null);
   const [imageCategoryId, setImageCategoryId] = useState<string | null>(null);
   const [imageEdit, setImageEdit] = useState<{ id: string | null } | null>(null);
   const [categoryImages, setCategoryImages] = useState<Record<string, string>>({});
@@ -386,23 +391,81 @@ export function RecipesPage({ active }: { active: boolean }) {
     }
   }
 
-  async function createCategory(name: string) {
+  async function createCategory(name: string, parentId: string | null = null) {
     const trimmed = name.trim();
     if (!trimmed) return null;
+    setBusy(true);
+    setError(null);
     try {
-    const siblings = categories.filter((category) => category.parent_id === null);
-    const index = nameInsertIndex(siblings.map((category) => category.name), trimmed);
-    const { data, error: insertError } = await supabase
-      .from("recipe_categories")
-      .insert({ account_id: lists.accountId, parent_id: null, name: trimmed, sort_order: index })
-      .select("id, parent_id, name, image_path, sort_order")
-      .single();
-    if (insertError || !data) throw insertError ?? new Error("category failed");
-    setCategories((current) => [...current, data as CategoryRow]);
-    return (data as CategoryRow).id;
+      const siblings = categories.filter((category) => category.parent_id === parentId).sort((a, b) => a.sort_order - b.sort_order);
+      const index = nameInsertIndex(siblings.map((category) => category.name), trimmed);
+      const sortOrder = siblings.length === 0 ? 0 : index === 0 ? siblings[0].sort_order - 1 : siblings[index - 1].sort_order + 1;
+      const shifted = siblings.filter((row) => row.sort_order >= sortOrder);
+      if (shifted.length > 0) {
+        const updates = await Promise.all(shifted.map((row) => supabase.from("recipe_categories").update({ sort_order: row.sort_order + 1 }).eq("id", row.id)));
+        const updateError = updates.find((result) => result.error)?.error;
+        if (updateError) throw updateError;
+      }
+      const { data, error: insertError } = await supabase
+        .from("recipe_categories")
+        .insert({ account_id: lists.accountId, parent_id: parentId, name: trimmed, sort_order: sortOrder })
+        .select("id, parent_id, name, image_path, sort_order")
+        .single();
+      if (insertError || !data) throw insertError ?? new Error("category failed");
+      setCategories((current) => [
+        ...current.map((row) => (shifted.some((item) => item.id === row.id) ? { ...row, sort_order: row.sort_order + 1 } : row)),
+        data as CategoryRow,
+      ]);
+      return (data as CategoryRow).id;
     } catch {
       setError("לא ניתן ליצור קטגוריה.");
       return null;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeCategory(category: CategoryRow) {
+    setBusy(true);
+    setError(null);
+    try {
+      const ids = [category.id];
+      for (let index = 0; index < ids.length; index += 1) {
+        for (const row of categories) {
+          if (row.parent_id === ids[index]) ids.push(row.id);
+        }
+      }
+      const idSet = new Set(ids);
+      const doomed = recipes.filter((row) => idSet.has(row.leaf_category_id));
+      const paths = categories.flatMap((row) => (idSet.has(row.id) && row.image_path ? [row.image_path] : []));
+      for (let index = 0; index < doomed.length; index += 40) {
+        const slice = doomed.slice(index, index + 40).map((row) => row.id);
+        const { data, error: loadError } = await supabase.from("recipes").select("id, title, document").in("id", slice);
+        if (loadError) throw loadError;
+        for (const row of data ?? []) {
+          const record = row as { title: string; document: unknown };
+          for (const image of parseDocument(record.document, record.title).images) {
+            if (image.storagePath) paths.push(image.storagePath);
+          }
+        }
+      }
+      const { error: deleteError } = await supabase.from("recipe_categories").delete().eq("id", category.id);
+      if (deleteError) throw deleteError;
+      for (let index = 0; index < paths.length; index += 100) {
+        await supabase.storage.from("recipe-images").remove(paths.slice(index, index + 100));
+      }
+      for (const row of doomed) localStorage.removeItem(checksKey(row.id));
+      const doomedIds = new Set(doomed.map((row) => row.id));
+      setCategories((current) => current.filter((row) => !idSet.has(row.id)));
+      setRecipes((current) => current.filter((row) => !doomedIds.has(row.id)));
+      setLabels((current) => current.filter((label) => !idSet.has(label.category_id) && !doomedIds.has(label.recipe_id)));
+      if (folderId && idSet.has(folderId)) setFolderId(category.parent_id);
+      setCategoryMenuId(null);
+      setCategoryDeleteId(null);
+    } catch {
+      setError("לא ניתן למחוק את הקטגוריה.");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -559,27 +622,35 @@ export function RecipesPage({ active }: { active: boolean }) {
     }
   }
 
-  async function deleteRecipe() {
-    if (!open) return;
+  async function deleteRecipe(recipeId?: string) {
+    const id = recipeId ?? open?.id;
+    if (!id) return;
     setBusy(true);
     setError(null);
     try {
-      const paths = open.document.images.map((image) => image.storagePath).filter((path): path is string => Boolean(path));
-      const { error: deleteError } = await supabase.from("recipes").delete().eq("id", open.id);
+      let paths: string[] = [];
+      if (open?.id === id) {
+        paths = open.document.images.map((image) => image.storagePath).filter((path): path is string => Boolean(path));
+      } else {
+        const { data, error: loadError } = await supabase.from("recipes").select("title, document").eq("id", id).single();
+        if (loadError) throw loadError;
+        const record = data as { title: string; document: unknown };
+        paths = parseDocument(record.document, record.title).images.map((image) => image.storagePath).filter((path): path is string => Boolean(path));
+      }
+      const { error: deleteError } = await supabase.from("recipes").delete().eq("id", id);
       if (deleteError) throw deleteError;
       if (paths.length > 0) await supabase.storage.from("recipe-images").remove(paths);
-      localStorage.removeItem(checksKey(open.id));
-      setRecipes((current) => current.filter((row) => row.id !== open.id));
-      setLabels((current) => current.filter((label) => label.recipe_id !== open.id));
-      setRecipeCovers((current) => {
-        const previous = current[open.id];
-        if (previous?.startsWith("blob:")) URL.revokeObjectURL(previous);
-        const next = { ...current };
-        delete next[open.id];
-        return next;
-      });
-      setImageEdit(null);
-      setOpen(null);
+      localStorage.removeItem(checksKey(id));
+      setRecipes((current) => current.filter((row) => row.id !== id));
+      setLabels((current) => current.filter((label) => label.recipe_id !== id));
+      setRecipeCovers((current) => dropBlob(current, id));
+      setSearchThumbs((current) => dropBlob(current, id));
+      if (open?.id === id) {
+        setImageEdit(null);
+        setOpen(null);
+      }
+      setRecipeMenuId(null);
+      setRecipeDeleteId(null);
     } catch {
       setError("לא ניתן למחוק את המתכון.");
     } finally {
@@ -636,6 +707,10 @@ export function RecipesPage({ active }: { active: boolean }) {
   }, [opened, searchKey, supabase]);
   const folder = folderId ? byId.get(folderId) : undefined;
   const imageCategory = imageCategoryId ? byId.get(imageCategoryId) : undefined;
+  const menuCategory = categoryMenuId ? byId.get(categoryMenuId) : undefined;
+  const categoryToDelete = categoryDeleteId ? byId.get(categoryDeleteId) : undefined;
+  const menuRecipe = recipeMenuId ? recipes.find((row) => row.id === recipeMenuId) : undefined;
+  const recipeToDelete = recipeDeleteId ? recipes.find((row) => row.id === recipeDeleteId) : undefined;
   const childCategories = categories.filter((category) => category.parent_id === folderId).sort((a, b) => a.sort_order - b.sort_order);
 
   return (
@@ -673,6 +748,7 @@ export function RecipesPage({ active }: { active: boolean }) {
               labelFor={labelText}
               empty="אין מתכונים תואמים."
               onOpen={(row) => void openRecipe(row)}
+              onMenu={setRecipeMenuId}
             />
           ) : (
             <>
@@ -687,8 +763,10 @@ export function RecipesPage({ active }: { active: boolean }) {
                 images={categoryImages}
                 onOpen={setFolderId}
                 onImage={setImageCategoryId}
+                onAdd={() => setAddingCategory(true)}
+                onMenu={setCategoryMenuId}
               />
-              <RecipeTiles rows={folderRecipes} images={recipeCovers} onOpen={(row) => void openRecipe(row)} />
+              <RecipeTiles rows={folderRecipes} images={recipeCovers} onOpen={(row) => void openRecipe(row)} onMenu={setRecipeMenuId} />
               {childCategories.length === 0 && folderRecipes.length === 0 ? <p className="px-6 pt-10 text-center text-neutral-500">אין כאן מתכונים.</p> : null}
             </>
           )}
@@ -753,8 +831,133 @@ export function RecipesPage({ active }: { active: boolean }) {
           onRemove={imageEdit.id ? () => void changeRecipeImage(imageEdit.id, null) : null}
         />
       ) : null}
+      {addingCategory ? (
+        <CategoryNameDialog
+          busy={busy}
+          onClose={() => setAddingCategory(false)}
+          onCreate={(name) => {
+            void createCategory(name, folderId).then((id) => {
+              if (id) setAddingCategory(false);
+            });
+          }}
+        />
+      ) : null}
+      {menuCategory ? (
+        <Overlay label={`פעולות עבור ${menuCategory.name}`} onClose={() => setCategoryMenuId(null)}>
+          <h3 className="text-start text-lg font-semibold">{menuCategory.name}</h3>
+          <button
+            type="button"
+            className="mt-4 w-full rounded-xl py-3 font-medium text-red-600"
+            onClick={() => {
+              setCategoryDeleteId(menuCategory.id);
+              setCategoryMenuId(null);
+            }}
+          >
+            מחיקת קטגוריה
+          </button>
+          <button type="button" className="mt-2 w-full rounded-xl bg-neutral-100 py-3 font-medium" onClick={() => setCategoryMenuId(null)}>
+            ביטול
+          </button>
+        </Overlay>
+      ) : null}
+      {categoryToDelete ? (
+        <Overlay label="מחיקת קטגוריה" onClose={() => setCategoryDeleteId(null)}>
+          <h3 className="text-start text-lg font-semibold">למחוק את {categoryToDelete.name}?</h3>
+          <p className="mt-2 text-start text-sm text-neutral-600">הקטגוריה תימחק יחד עם כל הקטגוריות והמתכונים שבתוכה.</p>
+          <button type="button" className="mt-4 w-full rounded-xl bg-red-50 py-3 font-medium text-red-700 disabled:opacity-40" disabled={busy} onClick={() => void removeCategory(categoryToDelete)}>
+            אישור מחיקה
+          </button>
+          <button type="button" className="mt-2 w-full rounded-xl bg-neutral-100 py-3 font-medium" onClick={() => setCategoryDeleteId(null)}>
+            ביטול
+          </button>
+        </Overlay>
+      ) : null}
+      {menuRecipe ? (
+        <Overlay label={`פעולות עבור ${menuRecipe.title}`} onClose={() => setRecipeMenuId(null)}>
+          <h3 className="text-start text-lg font-semibold">{menuRecipe.title}</h3>
+          <button
+            type="button"
+            className="mt-4 w-full rounded-xl py-3 font-medium text-red-600"
+            onClick={() => {
+              setRecipeDeleteId(menuRecipe.id);
+              setRecipeMenuId(null);
+            }}
+          >
+            מחיקת מתכון
+          </button>
+          <button type="button" className="mt-2 w-full rounded-xl bg-neutral-100 py-3 font-medium" onClick={() => setRecipeMenuId(null)}>
+            ביטול
+          </button>
+        </Overlay>
+      ) : null}
+      {recipeToDelete ? (
+        <Overlay label="מחיקת מתכון" onClose={() => setRecipeDeleteId(null)}>
+          <h3 className="text-start text-lg font-semibold">למחוק את {recipeToDelete.title}?</h3>
+          <button type="button" className="mt-4 w-full rounded-xl bg-red-50 py-3 font-medium text-red-700 disabled:opacity-40" disabled={busy} onClick={() => void deleteRecipe(recipeToDelete.id)}>
+            אישור מחיקה
+          </button>
+          <button type="button" className="mt-2 w-full rounded-xl bg-neutral-100 py-3 font-medium" onClick={() => setRecipeDeleteId(null)}>
+            ביטול
+          </button>
+        </Overlay>
+      ) : null}
     </div>
   );
+}
+
+function useHoldMenu(onMenu: (id: string) => void) {
+  const hold = useRef<{ timer: number; x: number; y: number } | null>(null);
+  const skipClick = useRef(false);
+
+  function clearHold() {
+    if (!hold.current) return;
+    window.clearTimeout(hold.current.timer);
+    hold.current = null;
+  }
+
+  return function menuProps(id: string) {
+    return {
+      style: { WebkitTouchCallout: "none" as const, userSelect: "none" as const },
+      onContextMenu(event: MouseEvent) {
+        event.preventDefault();
+        onMenu(id);
+      },
+      onPointerDown(event: PointerEvent<HTMLElement>) {
+        if (event.pointerType !== "touch") return;
+        clearHold();
+        const x = event.clientX;
+        const y = event.clientY;
+        const timer = window.setTimeout(() => {
+          hold.current = null;
+          skipClick.current = true;
+          onMenu(id);
+        }, 500);
+        hold.current = { timer, x, y };
+      },
+      onPointerMove(event: PointerEvent<HTMLElement>) {
+        const current = hold.current;
+        if (!current) return;
+        if (Math.abs(event.clientX - current.x) > 12 || Math.abs(event.clientY - current.y) > 12) clearHold();
+      },
+      onPointerUp: clearHold,
+      onPointerCancel: clearHold,
+      onClickCapture(event: MouseEvent) {
+        if (!skipClick.current) return;
+        event.preventDefault();
+        event.stopPropagation();
+        skipClick.current = false;
+      },
+    };
+  };
+}
+
+function dropBlob(images: Record<string, string>, id: string) {
+  const previous = images[id];
+  if (!previous) return images;
+  if (previous.startsWith("blob:")) URL.revokeObjectURL(previous);
+  const next = { ...images };
+  delete next[id];
+  return next;
 }
 
 function CategoryTiles({
@@ -762,19 +965,23 @@ function CategoryTiles({
   images,
   onOpen,
   onImage,
+  onAdd,
+  onMenu,
 }: {
   categories: CategoryRow[];
   images: Record<string, string>;
   onOpen: (id: string) => void;
   onImage: (id: string) => void;
+  onAdd: () => void;
+  onMenu: (id: string) => void;
 }) {
-  if (categories.length === 0) return null;
+  const menuProps = useHoldMenu(onMenu);
   return (
     <div className="grid gap-2 px-3 pt-3" style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))" }}>
       {categories.map((category) => {
         const src = images[category.id];
         return (
-          <div key={category.id} className="relative">
+          <div key={category.id} className="relative" {...menuProps(category.id)}>
             <button type="button" className="block w-full overflow-hidden rounded-lg border border-neutral-200 bg-white text-start shadow-sm" aria-label={category.name} onClick={() => onOpen(category.id)}>
               <span className="relative block aspect-square overflow-hidden bg-[var(--cream)] text-neutral-400">
                 {src ? (
@@ -799,7 +1006,39 @@ function CategoryTiles({
           </div>
         );
       })}
+      <button type="button" className="block w-full overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-sm" aria-label="קטגוריה חדשה" onClick={onAdd}>
+        <span className="grid aspect-square bg-[var(--cream)] text-[var(--teal)]" style={{ placeItems: "center" }}>
+          <PlusIcon className="size-8" />
+        </span>
+        <span className="block px-1 py-1 text-xs">&nbsp;</span>
+      </button>
     </div>
+  );
+}
+
+function CategoryNameDialog({ busy, onClose, onCreate }: { busy: boolean; onClose: () => void; onCreate: (name: string) => void }) {
+  const [name, setName] = useState("");
+  return (
+    <Overlay label="קטגוריה חדשה" onClose={onClose}>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (name.trim() && !busy) onCreate(name);
+        }}
+      >
+        <h3 className="text-lg font-semibold">קטגוריה חדשה</h3>
+        <label className="mt-3 block text-start">
+          <span className="mb-1 block text-sm">שם הקטגוריה</span>
+          <input className="w-full rounded-xl border border-neutral-300 px-3 py-2" value={name} autoFocus onChange={(event) => setName(event.target.value)} />
+        </label>
+        <button type="submit" className="mt-4 w-full rounded-xl bg-[var(--teal)] py-3 font-medium text-white disabled:opacity-40" disabled={busy || !name.trim()}>
+          יצירה
+        </button>
+        <button type="button" className="mt-2 w-full rounded-xl bg-neutral-100 py-3 font-medium" onClick={onClose}>
+          ביטול
+        </button>
+      </form>
+    </Overlay>
   );
 }
 
@@ -923,11 +1162,14 @@ function RecipeTiles({
   rows,
   images,
   onOpen,
+  onMenu,
 }: {
   rows: RecipeRow[];
   images: Record<string, string>;
   onOpen: (row: RecipeRow) => void;
+  onMenu: (id: string) => void;
 }) {
+  const menuProps = useHoldMenu(onMenu);
   if (rows.length === 0) return null;
   return (
     <section>
@@ -935,13 +1177,15 @@ function RecipeTiles({
       <div className="grid gap-2 px-3 pt-2" style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))" }}>
       {rows.map((row) => {
         const src = images[row.id];
+        const menu = menuProps(row.id);
         return (
           <button
             key={row.id}
             type="button"
             className="block w-full overflow-hidden rounded-lg border text-start shadow-sm"
-            style={{ background: "#F2F2F2", borderColor: "#128F86" }}
-            aria-label={row.title}
+            aria-label={row.rating != null ? `${row.title}, דירוג ${row.rating}` : row.title}
+            {...menu}
+            style={{ background: "#F2F2F2", borderColor: "#128F86", ...menu.style }}
             onClick={() => onOpen(row)}
           >
             <span className="relative block aspect-square overflow-hidden text-neutral-500" style={{ background: "#F2F2F2" }}>
@@ -952,6 +1196,7 @@ function RecipeTiles({
                   <ImageIcon className="size-5" />
                 </span>
               )}
+              <TileRating rating={row.rating} />
             </span>
             <span className="block truncate px-1 py-1 text-center text-xs font-medium">{row.title}</span>
           </button>
@@ -959,6 +1204,18 @@ function RecipeTiles({
       })}
       </div>
     </section>
+  );
+}
+
+function TileRating({ rating }: { rating: number | null }) {
+  if (rating == null) return null;
+  return (
+    <span className="absolute flex items-center font-semibold text-neutral-900" dir="ltr" style={{ top: 4, left: 4, gap: 2, padding: "2px 4px", borderRadius: 6, background: "#fff", fontSize: 13, lineHeight: 1 }}>
+      <svg viewBox="0 0 24 24" aria-hidden="true" style={{ width: 15, height: 15 }}>
+        <path d="m12 3.2 2.4 5.2 5.6.7-4.1 3.8 1.1 5.6L12 15.8 7 18.5l1.1-5.6L4 9.1l5.6-.7L12 3.2Z" fill="#f5b400" />
+      </svg>
+      {rating}
+    </span>
   );
 }
 
@@ -972,13 +1229,16 @@ function RecipeList({
   labelFor,
   empty,
   onOpen,
+  onMenu,
 }: {
   rows: RecipeRow[];
   images: Record<string, string>;
   labelFor: (id: string) => string;
   empty: string;
   onOpen: (row: RecipeRow) => void;
+  onMenu: (id: string) => void;
 }) {
+  const menuProps = useHoldMenu(onMenu);
   if (rows.length === 0) return empty ? <p className="px-6 pt-10 text-center text-neutral-500">{empty}</p> : null;
   return (
     <div>
@@ -986,7 +1246,7 @@ function RecipeList({
         const labels = labelFor(row.id);
         const src = images[row.id];
         return (
-          <button key={row.id} type="button" className="flex w-full items-center gap-3 border-b border-neutral-200 px-4 py-3 text-start" onClick={() => onOpen(row)}>
+          <button key={row.id} type="button" className="flex w-full items-center gap-3 border-b border-neutral-200 px-4 py-3 text-start" {...menuProps(row.id)} onClick={() => onOpen(row)}>
             <span className="relative shrink-0 overflow-hidden rounded-lg text-neutral-400" style={{ width: "2.75rem", height: "2.75rem", background: "#F2F2F2" }}>
               {src ? (
                 <img src={src} alt="" className="absolute inset-0 size-full object-cover" />
@@ -1320,6 +1580,7 @@ function IngredientEditor({
       note: ingredient.note ?? "",
     })),
   );
+  const [openKey, setOpenKey] = useState<string | null>(null);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 8 } }),
@@ -1351,27 +1612,50 @@ function IngredientEditor({
             const itemNumber = rows.filter((item) => !item.heading && rows.indexOf(item) <= rows.indexOf(row)).length;
             return (
               <SortableStep key={row.key} id={row.key}>
-                {row.heading ? (
-                  <Field compact label="כותרת" value={row.name.replace(/:$/, "")} onChange={(name) => setRows((current) => current.map((item) => (item.key === row.key ? { ...item, name } : item)))} />
-                ) : (
-                  <>
-                    <Field compact label={`מצרך ${itemNumber}`} value={row.name} onChange={(name) => setRows((current) => current.map((item) => (item.key === row.key ? { ...item, name } : item)))} />
-                    <div className="grid grid-cols-2 gap-2">
-                      <Field compact label="כמות" value={row.quantity} onChange={(quantity) => setRows((current) => current.map((item) => (item.key === row.key ? { ...item, quantity } : item)))} />
-                      <UnitField unit={row.unit} onChange={(unit) => setRows((current) => current.map((item) => (item.key === row.key ? { ...item, unit } : item)))} />
-                    </div>
-                    <Field compact label="הערה" value={row.note} onChange={(note) => setRows((current) => current.map((item) => (item.key === row.key ? { ...item, note } : item)))} />
-                  </>
-                )}
-                <DeleteRow onClick={() => setRows((current) => current.filter((item) => item.key !== row.key))} />
+                <EditRow
+                  open={openKey === row.key}
+                  summary={<IngredientSummary row={row} />}
+                  onToggle={() => setOpenKey((current) => (current === row.key ? null : row.key))}
+                  onDelete={() => {
+                    setRows((current) => current.filter((item) => item.key !== row.key));
+                    setOpenKey((current) => (current === row.key ? null : current));
+                  }}
+                >
+                  {row.heading ? (
+                    <Field compact label="כותרת" value={row.name.replace(/:$/, "")} onChange={(name) => setRows((current) => current.map((item) => (item.key === row.key ? { ...item, name } : item)))} />
+                  ) : (
+                    <>
+                      <Field compact label={`מצרך ${itemNumber}`} value={row.name} onChange={(name) => setRows((current) => current.map((item) => (item.key === row.key ? { ...item, name } : item)))} />
+                      <div className="grid grid-cols-2 gap-2">
+                        <Field compact label="כמות" value={row.quantity} onChange={(quantity) => setRows((current) => current.map((item) => (item.key === row.key ? { ...item, quantity } : item)))} />
+                        <UnitField unit={row.unit} onChange={(unit) => setRows((current) => current.map((item) => (item.key === row.key ? { ...item, unit } : item)))} />
+                      </div>
+                      <Field compact label="הערה" value={row.note} onChange={(note) => setRows((current) => current.map((item) => (item.key === row.key ? { ...item, note } : item)))} />
+                    </>
+                  )}
+                </EditRow>
               </SortableStep>
             );
           })}
         </SortableContext>
       </DndContext>
       <div className="flex items-center justify-start gap-2 px-4 py-3">
-        <AddButton label="הוספת מצרך" onClick={() => setRows((current) => [...current, { key: crypto.randomUUID(), heading: false, name: "", quantity: "", unit: "יחידה", note: "" }])} />
-        <AddButton label="הוספת כותרת" onClick={() => setRows((current) => [...current, { key: crypto.randomUUID(), heading: true, name: "", quantity: "", unit: "", note: "" }])} />
+        <AddButton
+          label="הוספת מצרך"
+          onClick={() => {
+            const key = crypto.randomUUID();
+            setRows((current) => [...current, { key, heading: false, name: "", quantity: "", unit: "יחידה", note: "" }]);
+            setOpenKey(key);
+          }}
+        />
+        <AddButton
+          label="הוספת כותרת"
+          onClick={() => {
+            const key = crypto.randomUUID();
+            setRows((current) => [...current, { key, heading: true, name: "", quantity: "", unit: "", note: "" }]);
+            setOpenKey(key);
+          }}
+        />
       </div>
     </form>
   );
@@ -1389,6 +1673,7 @@ function StepEditor({
   onSave: (steps: RecipeStep[]) => Promise<boolean>;
 }) {
   const [rows, setRows] = useState<StepRow[]>(() => steps.map((step) => ({ key: crypto.randomUUID(), heading: isSubtitle(step.text), text: step.text })));
+  const [openKey, setOpenKey] = useState<string | null>(null);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 8 } }),
@@ -1420,25 +1705,105 @@ function StepEditor({
             const itemNumber = rows.filter((item) => !item.heading && rows.indexOf(item) <= rows.indexOf(row)).length;
             return (
               <SortableStep key={row.key} id={row.key}>
-                {row.heading ? (
-                  <Field compact label="כותרת" value={row.text.replace(/:$/, "")} onChange={(text) => setRows((current) => current.map((item) => (item.key === row.key ? { ...item, text } : item)))} />
-                ) : (
-                  <label className="block text-start">
-                    <span className="mb-1 block text-sm">{`שלב ${itemNumber}`}</span>
-                    <textarea className="w-full rounded-xl border border-neutral-300 px-3 py-2" rows={3} value={row.text} onChange={(event) => setRows((current) => current.map((item) => (item.key === row.key ? { ...item, text: event.target.value } : item)))} />
-                  </label>
-                )}
-                <DeleteRow onClick={() => setRows((current) => current.filter((item) => item.key !== row.key))} />
+                <EditRow
+                  open={openKey === row.key}
+                  summary={<StepSummary row={row} number={itemNumber} />}
+                  onToggle={() => setOpenKey((current) => (current === row.key ? null : row.key))}
+                  onDelete={() => {
+                    setRows((current) => current.filter((item) => item.key !== row.key));
+                    setOpenKey((current) => (current === row.key ? null : current));
+                  }}
+                >
+                  {row.heading ? (
+                    <Field compact label="כותרת" value={row.text.replace(/:$/, "")} onChange={(text) => setRows((current) => current.map((item) => (item.key === row.key ? { ...item, text } : item)))} />
+                  ) : (
+                    <label className="block text-start">
+                      <span className="mb-1 block text-sm">{`שלב ${itemNumber}`}</span>
+                      <textarea className="w-full rounded-xl border border-neutral-300 px-3 py-2" rows={3} value={row.text} onChange={(event) => setRows((current) => current.map((item) => (item.key === row.key ? { ...item, text: event.target.value } : item)))} />
+                    </label>
+                  )}
+                </EditRow>
               </SortableStep>
             );
           })}
         </SortableContext>
       </DndContext>
       <div className="flex items-center justify-start gap-2 px-4 py-3">
-        <AddButton label="הוספת שלב" onClick={() => setRows((current) => [...current, { key: crypto.randomUUID(), heading: false, text: "" }])} />
-        <AddButton label="הוספת כותרת" onClick={() => setRows((current) => [...current, { key: crypto.randomUUID(), heading: true, text: "" }])} />
+        <AddButton
+          label="הוספת שלב"
+          onClick={() => {
+            const key = crypto.randomUUID();
+            setRows((current) => [...current, { key, heading: false, text: "" }]);
+            setOpenKey(key);
+          }}
+        />
+        <AddButton
+          label="הוספת כותרת"
+          onClick={() => {
+            const key = crypto.randomUUID();
+            setRows((current) => [...current, { key, heading: true, text: "" }]);
+            setOpenKey(key);
+          }}
+        />
       </div>
     </form>
+  );
+}
+
+function EditRow({ open, summary, onToggle, onDelete, children }: { open: boolean; summary: React.ReactNode; onToggle: () => void; onDelete: () => void; children: React.ReactNode }) {
+  if (!open) {
+    return (
+      <button type="button" className="flex w-full items-center gap-2 py-1 text-start" aria-expanded={false} onClick={onToggle}>
+        <span className="min-w-0 flex-1">{summary}</span>
+        <ChevronIcon className="size-4 shrink-0 text-neutral-400" style={{ transform: "rotate(180deg)" }} />
+      </button>
+    );
+  }
+  return (
+    <div>
+      {children}
+      <div className="mt-3 flex items-center justify-between">
+        <button type="button" className="text-sm font-medium text-[var(--teal)]" aria-expanded={true} onClick={onToggle}>
+          סגירה
+        </button>
+        <button type="button" className="text-sm text-red-600" onClick={onDelete}>
+          מחיקה
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function IngredientSummary({ row }: { row: IngredientRow }) {
+  if (row.heading) {
+    const title = row.name.trim().replace(/:$/, "");
+    return <span className={`block truncate font-semibold ${title ? "" : "text-neutral-400"}`}>{title ? `${title}:` : "כותרת חדשה"}</span>;
+  }
+  const amount = formatAmount(row.quantity.trim() || null, row.unit.trim() || null);
+  const name = row.name.trim();
+  const note = row.note.trim();
+  return (
+    <span className="block text-start">
+      <span className="flex items-start justify-between gap-3">
+        <span className={`min-w-0 flex-1 truncate ${name ? "font-medium" : "text-neutral-400"}`}>{name || "מצרך חדש"}</span>
+        {amount ? <span className="shrink-0 text-neutral-700">{amount}</span> : null}
+      </span>
+      {note ? <span className="mt-1 block truncate text-sm font-normal text-neutral-600">{note}</span> : null}
+    </span>
+  );
+}
+
+function StepSummary({ row, number }: { row: StepRow; number: number }) {
+  if (row.heading) {
+    const title = row.text.trim().replace(/:$/, "");
+    return <span className={`block truncate font-semibold ${title ? "" : "text-neutral-400"}`}>{title ? `${title}:` : "כותרת חדשה"}</span>;
+  }
+  const text = row.text.trim();
+  return (
+    <span className="block text-start" style={text ? { display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" } : undefined}>
+      <span className="me-2">{number}.</span>
+      <span className={text ? "" : "text-neutral-400"}>{text || "שלב חדש"}</span>
+    </span>
   );
 }
 
