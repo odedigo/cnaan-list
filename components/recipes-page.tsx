@@ -3,6 +3,7 @@
 /** Recipes browser, reader, editor, rating, and Hebrew text export. */
 
 import { useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent, type PointerEvent } from "react";
+import { createPortal } from "react-dom";
 import {
   closestCenter,
   DndContext,
@@ -16,7 +17,7 @@ import { arrayMove, SortableContext, useSortable, verticalListSortingStrategy } 
 import { CSS } from "@dnd-kit/utilities";
 
 import { AppHeader } from "@/components/app-header";
-import { ArrowIcon, CameraIcon, CheckIcon, ChevronIcon, CloseIcon, GripIcon, ImageIcon, PenIcon, PlusIcon, TrashIcon } from "@/components/icons";
+import { ArrowIcon, CameraIcon, CheckIcon, ChevronIcon, ClearMarksIcon, CloseIcon, GripIcon, ImageIcon, PenIcon, PlusIcon } from "@/components/icons";
 import { useLists } from "@/components/lists-provider";
 import { shrinkImage } from "@/lib/images";
 import { nameInsertIndex } from "@/lib/order";
@@ -1088,6 +1089,7 @@ function CategoryImageDialog({
       <button type="button" className="mt-4 w-full rounded-xl bg-[var(--teal)] py-3 font-medium text-white disabled:opacity-40" disabled={busy} onClick={() => inputRef.current?.click()}>
         בחירת תמונה
       </button>
+      <CameraShot disabled={busy} onFile={onFile} />
       {category.image_path ? (
         <button type="button" className="mt-2 w-full rounded-xl py-3 font-medium text-red-600 disabled:opacity-40" disabled={busy} onClick={onRemove}>
           הסרת תמונה
@@ -1146,6 +1148,7 @@ function RecipeImageDialog({
       <button type="button" className="mt-4 w-full rounded-xl bg-[var(--teal)] py-3 font-medium text-white disabled:opacity-40" disabled={busy} onClick={() => inputRef.current?.click()}>
         בחירת תמונה
       </button>
+      <CameraShot disabled={busy} onFile={onFile} />
       {onRemove ? (
         <button type="button" className="mt-2 w-full rounded-xl py-3 font-medium text-red-600 disabled:opacity-40" disabled={busy} onClick={onRemove}>
           הסרת תמונה
@@ -1155,6 +1158,117 @@ function RecipeImageDialog({
         סגירה
       </button>
     </Overlay>
+  );
+}
+
+function cameraDenied(error: unknown) {
+  return error instanceof DOMException && (error.name === "NotAllowedError" || error.name === "PermissionDeniedError");
+}
+
+async function cameraPermission() {
+  if (!navigator.permissions?.query) return "prompt";
+  try {
+    const status = await navigator.permissions.query({ name: "camera" as PermissionName });
+    return status.state;
+  } catch {
+    return "prompt";
+  }
+}
+
+function CameraShot({ disabled, onFile }: { disabled: boolean; onFile: (file: File) => void }) {
+  const [open, setOpen] = useState(false);
+  const [ready, setReady] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+
+  function stop() {
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+    if (videoRef.current) videoRef.current.srcObject = null;
+    setReady(false);
+    setOpen(false);
+  }
+
+  useEffect(() => {
+    return () => {
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    const stream = streamRef.current;
+    if (!open || !video || !stream) return;
+    video.srcObject = stream;
+    void video.play();
+  }, [open]);
+
+  async function openCamera() {
+    setError(null);
+    if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+      setError("המצלמה אינה זמינה בדפדפן זה");
+      return;
+    }
+    if ((await cameraPermission()) === "denied") {
+      setError("יש לאשר גישה למצלמה");
+      return;
+    }
+    try {
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
+      } catch (failure) {
+        if (cameraDenied(failure)) throw failure;
+        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      }
+      streamRef.current = stream;
+      setOpen(true);
+    } catch (failure) {
+      setError(cameraDenied(failure) ? "יש לאשר גישה למצלמה" : "לא ניתן לפתוח את המצלמה");
+    }
+  }
+
+  function capture() {
+    const video = videoRef.current;
+    if (!video?.videoWidth) return;
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    context.drawImage(video, 0, 0);
+    canvas.toBlob((blob) => {
+      stop();
+      if (!blob) return;
+      onFile(new File([blob], "camera.jpg", { type: "image/jpeg" }));
+    }, "image/jpeg", 0.9);
+  }
+
+  return (
+    <>
+      <button type="button" className="mt-2 w-full rounded-xl border border-neutral-300 py-3 font-medium disabled:opacity-40" disabled={disabled} onClick={() => void openCamera()}>
+        צילום
+      </button>
+      {error ? <p className="mt-2 text-center text-sm text-red-600">{error}</p> : null}
+      {open
+        ? createPortal(
+            <div className="fixed inset-0 flex flex-col bg-black p-4" style={{ zIndex: 90 }} role="dialog" aria-modal="true" aria-label="מצלמה">
+              <video ref={videoRef} autoPlay playsInline muted className="mx-auto my-auto max-h-[70vh] max-w-full rounded-lg" onLoadedMetadata={() => setReady(true)} />
+              <div className="mx-auto mt-4 flex items-center gap-3">
+                <button type="button" className="grid size-14 place-items-center rounded-full bg-[var(--teal)] text-white disabled:opacity-40" aria-label="צילום" disabled={!ready} onClick={capture}>
+                  <CameraIcon className="size-7" />
+                </button>
+                <button type="button" className="grid size-14 place-items-center rounded-full bg-white text-neutral-700" aria-label="ביטול" onClick={stop}>
+                  <CloseIcon className="size-6" />
+                </button>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
+    </>
   );
 }
 
@@ -1553,8 +1667,8 @@ function TabActions({
 
 function ClearMarksButton({ onClick }: { onClick: () => void }) {
   return (
-    <button type="button" className="grid size-8 place-items-center text-red-600" aria-label="מחיקת סימונים" onClick={onClick}>
-      <TrashIcon className="size-4" />
+    <button type="button" className="grid size-8 place-items-center" aria-label="מחיקת סימונים" onClick={onClick}>
+      <ClearMarksIcon className="size-5" />
     </button>
   );
 }
