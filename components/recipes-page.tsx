@@ -1646,7 +1646,7 @@ function filledText(rows: TextRow[]) {
 }
 
 function rowsToIngredients(rows: IngredientRow[]): RecipeIngredient[] {
-  return rows.flatMap((row) => {
+  return rows.flatMap((row): RecipeIngredient[] => {
     const name = row.name.trim().replace(/:$/, "");
     if (!name) return [];
     if (row.heading) {
