@@ -56,6 +56,7 @@ export async function replaceInventory(
         sortOrder: category.sortOrder,
         store: category.store,
         separatorAfter: category.separatorAfter,
+        separatorText: category.separatorText,
         image: category.image,
         imagePath: null as string | null,
         items,
@@ -126,6 +127,7 @@ export async function replaceInventory(
         sort_order: category.sortOrder,
         store_id: storeId,
         separator_after: category.separatorAfter,
+        separator_text: category.separatorAfter ? category.separatorText.trim() : "",
       };
     });
     items = plan.flatMap((category) =>

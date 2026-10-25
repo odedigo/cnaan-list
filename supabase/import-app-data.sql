@@ -69,7 +69,7 @@ begin
       limit 1;
     end if;
 
-    insert into public.categories (id, account_id, name, color, image_path, sort_order, store_id, separator_after)
+    insert into public.categories (id, account_id, name, color, image_path, sort_order, store_id, separator_after, separator_text)
     values (
       new_id,
       target_account,
@@ -78,7 +78,8 @@ begin
       null,
       coalesce((category->>'sort_order')::integer, 0),
       store_id,
-      coalesce((category->>'separator_after')::boolean, false)
+      coalesce((category->>'separator_after')::boolean, false),
+      coalesce(category->>'separator_text', '')
     );
   end loop;
 

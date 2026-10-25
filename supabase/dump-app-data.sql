@@ -18,6 +18,7 @@ select jsonb_pretty(
             'image_path', category.image_path,
             'sort_order', category.sort_order,
             'separator_after', category.separator_after,
+            'separator_text', category.separator_text,
             'store', (
               select store.name
               from public.stores as store

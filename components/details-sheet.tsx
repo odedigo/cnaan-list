@@ -74,6 +74,7 @@ export function DetailsSheet({
   const [separatorAfter, setSeparatorAfter] = useState(
     category?.separator_after === true,
   );
+  const [separatorText, setSeparatorText] = useState(category?.separator_text ?? "");
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -122,6 +123,7 @@ export function DetailsSheet({
         imageFile,
         storeId || undefined,
         separatorAfter,
+        separatorAfter ? separatorText : "",
       );
       if (id) {
         onCategoryAdded?.(id);
@@ -137,6 +139,7 @@ export function DetailsSheet({
             imageFile,
             storeId: storeId || undefined,
             separatorAfter,
+            separatorText: separatorAfter ? separatorText : "",
           })
         : await lists.saveItem({
             id: editor.kind === "item" ? editor.id : undefined,
@@ -202,6 +205,14 @@ export function DetailsSheet({
               />
               <span>הצגת קו הפרדה אחרי הקטגוריה</span>
             </label>
+            {separatorAfter ? (
+              <Field
+                value={separatorText}
+                onChange={setSeparatorText}
+                label="טקסט על קו ההפרדה"
+                onClear={() => setSeparatorText("")}
+              />
+            ) : null}
             <div dir="ltr" className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2">
                 <ProductPhoto

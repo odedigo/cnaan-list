@@ -120,6 +120,7 @@ export async function downloadInventoryZip(
         sortOrder: category.sort_order,
         store: stores.find((store) => store.id === category.store_id)?.name ?? null,
         separatorAfter: category.separator_after === true,
+        separatorText: category.separator_text.trim(),
         image: byKey.get(`category:${category.id}`)?.fileName ?? null,
         items: items
           .filter((item) => item.category_id === category.id)

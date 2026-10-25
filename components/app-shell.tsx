@@ -8,6 +8,7 @@ import { usePathname } from "next/navigation";
 import { AppPathContext } from "@/components/app-path";
 import { AppHeader } from "@/components/app-header";
 import { BottomNav } from "@/components/bottom-nav";
+import { DataTransfer } from "@/components/data-transfer";
 import { ChecklistPage } from "@/components/checklist-page";
 import { ListPage } from "@/components/list-page";
 import { RecipesPage } from "@/components/recipes-page";
@@ -133,10 +134,16 @@ export function AppShell({
     children
   );
 
-  return (
-    <AppPathContext.Provider value={{ path, go }}>
+  const frame = (
+    <>
       <div className="pb-24">{body}</div>
       <BottomNav signedIn={signedIn} />
+    </>
+  );
+
+  return (
+    <AppPathContext.Provider value={{ path, go }}>
+      {signedIn ? <DataTransfer>{frame}</DataTransfer> : frame}
     </AppPathContext.Provider>
   );
 }

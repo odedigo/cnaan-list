@@ -40,6 +40,7 @@ create table if not exists public.categories (
   sort_order integer not null default 0,
   store_id uuid references public.stores (id),
   separator_after boolean not null default false,
+  separator_text text not null default '',
   constraint categories_color_hex check (color ~ '^#[0-9A-Fa-f]{6}$')
 );
 
@@ -541,6 +542,8 @@ where store.account_id = category.account_id
 alter table public.categories alter column store_id set not null;
 
 alter table public.categories add column if not exists separator_after boolean not null default false;
+
+alter table public.categories add column if not exists separator_text text not null default '';
 
 drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created

@@ -52,8 +52,8 @@ type ListsContextValue = {
   sortAlphabetically: () => Promise<boolean>;
   moveCategories: (activeId: string, overId: string, visibleIds: string[]) => void;
   moveItems: (categoryId: string, activeId: string, overId: string, visibleIds: string[]) => void;
-  addCategory: (name: string, imageFile?: File | null, storeId?: string, separatorAfter?: boolean) => Promise<string | null>;
-  saveCategory: (input: { id: string; name: string; imageFile?: File | null; storeId?: string; separatorAfter?: boolean }) => Promise<boolean>;
+  addCategory: (name: string, imageFile?: File | null, storeId?: string, separatorAfter?: boolean, separatorText?: string) => Promise<string | null>;
+  saveCategory: (input: { id: string; name: string; imageFile?: File | null; storeId?: string; separatorAfter?: boolean; separatorText?: string }) => Promise<boolean>;
   deleteCategory: (id: string) => Promise<void>;
   deleteItem: (id: string) => Promise<void>;
   saveStore: (input: { id: string; name?: string; color?: string }) => Promise<string | null>;
@@ -649,7 +649,7 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
           );
         });
       },
-      async addCategory(name, imageFile, storeId, separatorAfter = false) {
+      async addCategory(name, imageFile, storeId, separatorAfter = false, separatorText = "") {
         const trimmed = name.trim();
         if (!trimmed) {
           setError("יש להזין שם");
@@ -673,6 +673,7 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
             color,
             sort_order: index,
             separator_after: separatorAfter,
+            separator_text: separatorAfter ? separatorText.trim() : "",
             ...(chosenStore ? { store_id: chosenStore } : {}),
           })
           .select("*")
@@ -710,7 +711,12 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
         const chosenStore = input.storeId || undefined;
         const { error: updateError } = await supabaseRef.current
           .from("categories")
-          .update({ name, separator_after: input.separatorAfter === true, ...(chosenStore ? { store_id: chosenStore } : {}) })
+          .update({
+            name,
+            separator_after: input.separatorAfter === true,
+            separator_text: input.separatorAfter === true ? (input.separatorText ?? "").trim() : "",
+            ...(chosenStore ? { store_id: chosenStore } : {}),
+          })
           .eq("id", input.id);
         if (updateError) {
           setSaving(false);
@@ -720,7 +726,13 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
         setCategories((current) =>
           current.map((category) =>
             category.id === input.id
-              ? { ...category, name, store_id: chosenStore ?? category.store_id, separator_after: input.separatorAfter === true }
+              ? {
+                  ...category,
+                  name,
+                  store_id: chosenStore ?? category.store_id,
+                  separator_after: input.separatorAfter === true,
+                  separator_text: input.separatorAfter === true ? (input.separatorText ?? "").trim() : "",
+                }
               : category,
           ),
         );
@@ -1126,6 +1138,7 @@ function normalizeCategory(row: {
   sort_order: number;
   store_id?: string | null;
   separator_after?: boolean | null;
+  separator_text?: string | null;
 }): Category {
   return {
     id: row.id,
@@ -1136,6 +1149,7 @@ function normalizeCategory(row: {
     sort_order: row.sort_order,
     store_id: row.store_id ?? "",
     separator_after: row.separator_after === true,
+    separator_text: typeof row.separator_text === "string" ? row.separator_text : "",
   };
 }
 

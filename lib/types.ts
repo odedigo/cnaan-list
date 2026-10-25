@@ -18,6 +18,7 @@ export type Category = {
   sort_order: number;
   store_id: string;
   separator_after: boolean;
+  separator_text: string;
 };
 
 export type Item = {

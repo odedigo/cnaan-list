@@ -14,11 +14,8 @@ import {
 import {
   ChevronIcon,
   CloseIcon,
-  DownloadIcon,
   ExportIcon,
   MenuIcon,
-  UploadIcon,
-  ReloadIcon,
   PlusIcon,
   ReorderIcon,
   SearchIcon,
@@ -29,6 +26,7 @@ import { closeInstalledApp, isInstalledApp } from "@/lib/installed-app";
 
 export function AppHeader({
   title,
+  badge,
   actionsEnabled,
   reorderActive = false,
   searchOpen = false,
@@ -41,10 +39,6 @@ export function AppHeader({
   onAdd,
   onSort,
   onReorder,
-  onExport,
-  exporting = false,
-  onImport,
-  importing = false,
   categoriesExpanded,
   onToggleCategories,
   onClearGrocery,
@@ -58,6 +52,7 @@ export function AppHeader({
   creditVersion = "",
 }: {
   title: string;
+  badge?: number;
   actionsEnabled: boolean;
   reorderActive?: boolean;
   searchOpen?: boolean;
@@ -70,10 +65,6 @@ export function AppHeader({
   onAdd?: () => void;
   onSort?: () => void;
   onReorder?: () => void;
-  onExport?: () => void;
-  exporting?: boolean;
-  onImport?: () => void;
-  importing?: boolean;
   categoriesExpanded?: boolean;
   onToggleCategories?: () => void;
   onClearGrocery?: () => void;
@@ -88,10 +79,9 @@ export function AppHeader({
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [creditOpen, setCreditOpen] = useState(false);
-  const [reloading, setReloading] = useState(false);
   const [installed, setInstalled] = useState(false);
   const showMenu = Boolean(
-    onAdd || onSort || onReorder || onExport || onImport,
+    onAdd || onSort || onReorder,
   );
   useEffect(() => {
     const media = window.matchMedia("(display-mode: standalone)");
@@ -100,13 +90,6 @@ export function AppHeader({
     media.addEventListener("change", sync);
     return () => media.removeEventListener("change", sync);
   }, []);
-  useEffect(() => {
-    if (!reloading) return;
-    const timer = window.setTimeout(() => {
-      window.location.reload();
-    }, 80);
-    return () => window.clearTimeout(timer);
-  }, [reloading]);
   const searchButton = onSearchToggle ? (
     <button
       type="button"
@@ -120,6 +103,26 @@ export function AppHeader({
       />
     </button>
   ) : null;
+  const countBadge =
+    badge != null ? (
+      <span
+        className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-white py-0.5 ps-1.5 text-xs font-semibold text-neutral-700"
+        style={{ minHeight: "1.25rem", paddingInlineEnd: onClearGrocery ? "0.125rem" : "0.375rem" }}
+      >
+        <span className="min-w-4 text-center leading-5">{badge > 99 ? "99+" : badge}</span>
+        {onClearGrocery ? (
+          <button
+            type="button"
+            className="grid size-5 place-items-center rounded-full text-neutral-600 disabled:opacity-30"
+            aria-label="ריקון רשימת הקניות"
+            disabled={!actionsEnabled || !clearGroceryEnabled}
+            onClick={onClearGrocery}
+          >
+            <TrashIcon className="size-3.5" />
+          </button>
+        ) : null}
+      </span>
+    ) : null;
   return (
     <header className="sticky top-0 z-20 border-b-[3px] border-[var(--cream)] bg-[var(--header)]">
       <div
@@ -148,15 +151,7 @@ export function AppHeader({
               />
             </HeaderButton>
           ) : null}
-          {onClearGrocery ? (
-            <HeaderButton
-              label="ריקון רשימת הקניות"
-              disabled={!actionsEnabled || !clearGroceryEnabled}
-              onClick={onClearGrocery}
-            >
-              <TrashIcon className="size-5" />
-            </HeaderButton>
-          ) : null}
+          {countBadge}
           {searchSide === "start" ? searchButton : null}
         </div>
         <h1
@@ -251,48 +246,6 @@ export function AppHeader({
                 >
                   <SortIcon className="size-5" />
                 </MenuItem>
-                <div
-                  role="separator"
-                  className="mx-3 my-1 h-px bg-neutral-200"
-                />
-                <MenuItem
-                  label={reloading ? "מרענן…" : "רענון האפליקציה"}
-                  disabled={reloading}
-                  onClick={() => {
-                    setMenuOpen(false);
-                    setReloading(true);
-                  }}
-                >
-                  <ReloadIcon className="size-5" />
-                </MenuItem>
-                <div
-                  role="separator"
-                  className="mx-3 my-1 h-px bg-neutral-200"
-                />
-                <MenuItem
-                  label={exporting ? "מייצא…" : "ייצוא נתונים"}
-                  disabled={
-                    !actionsEnabled || !onExport || exporting || importing
-                  }
-                  onClick={() => {
-                    setMenuOpen(false);
-                    onExport?.();
-                  }}
-                >
-                  <DownloadIcon className="size-5" />
-                </MenuItem>
-                <MenuItem
-                  label={importing ? "מייבא…" : "ייבוא נתונים"}
-                  disabled={
-                    !actionsEnabled || !onImport || importing || exporting
-                  }
-                  onClick={() => {
-                    setMenuOpen(false);
-                    onImport?.();
-                  }}
-                >
-                  <UploadIcon className="size-5" />
-                </MenuItem>
                 {installed ? (
                   <>
                     <div
@@ -349,7 +302,6 @@ export function AppHeader({
           </div>
         </div>
       ) : null}
-      {reloading ? <ReloadNotice /> : null}
       {creditOpen ? <CreditDialog version={creditVersion} onClose={() => setCreditOpen(false)} /> : null}
     </header>
   );
@@ -414,77 +366,6 @@ function CreditDialog({ version, onClose }: { version: string; onClose: () => vo
         >
           סגירה
         </button>
-      </div>
-    </dialog>
-  );
-}
-
-function ReloadNotice() {
-  const dialogRef = useRef<HTMLDialogElement>(null);
-  useLayoutEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog || dialog.open) return;
-    dialog.showModal();
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      if (dialog.open) dialog.close();
-    };
-  }, []);
-  return (
-    <dialog
-      ref={dialogRef}
-      aria-label="מרענן את האפליקציה"
-      onCancel={(event) => event.preventDefault()}
-      style={{
-        position: "fixed",
-        inset: 0,
-        width: "100vw",
-        height: "100vh",
-        maxWidth: "none",
-        maxHeight: "none",
-        margin: 0,
-        padding: 24,
-        border: "none",
-        background: "rgba(0, 0, 0, 0.55)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-      }}
-    >
-      <div
-        style={{
-          width: "100%",
-          maxWidth: 360,
-          borderRadius: 16,
-          background: "#fff",
-          textAlign: "center",
-          padding: "2rem 1.5rem",
-          boxShadow: "0 12px 40px rgba(0, 0, 0, 0.28)",
-        }}
-      >
-        <style>
-          {"@keyframes cnaanlist-spin { to { transform: rotate(360deg); } }"}
-        </style>
-        <div
-          aria-hidden
-          style={{
-            width: 52,
-            height: 52,
-            margin: "0 auto 20px",
-            borderRadius: "50%",
-            border: "4px solid #e5e5e5",
-            borderTopColor: "var(--teal)",
-            animation: "cnaanlist-spin 0.8s linear infinite",
-          }}
-        />
-        <p
-          className="font-semibold"
-          style={{ fontSize: "1.5rem", lineHeight: 1.35 }}
-        >
-          מרענן את האפליקציה…
-        </p>
       </div>
     </dialog>
   );

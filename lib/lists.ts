@@ -42,6 +42,7 @@ function normalizeCategory(row: {
   sort_order: number;
   store_id?: string | null;
   separator_after?: boolean | null;
+  separator_text?: string | null;
 }): Category {
   return {
     id: row.id,
@@ -52,6 +53,7 @@ function normalizeCategory(row: {
     sort_order: row.sort_order,
     store_id: row.store_id ?? "",
     separator_after: row.separator_after === true,
+    separator_text: typeof row.separator_text === "string" ? row.separator_text : "",
   };
 }
 

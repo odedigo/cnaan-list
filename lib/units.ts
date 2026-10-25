@@ -1,13 +1,13 @@
 export const UNITS = [
-  { id: "unit", label: "יחידה", short: "יח" },
+  { id: "unit", label: "יחידה", short: "יח'" },
   { id: "kg", label: "ק״ג", short: "ק״ג" },
-  { id: "g", label: "גרם", short: "גרם" },
+  { id: "g", label: "גרם", short: "גר'" },
   { id: "l", label: "ליטר", short: "ליטר" },
   { id: "ml", label: "מ״ל", short: "מ״ל" },
-  { id: "pack", label: "חבילה", short: "חבילה" },
-  { id: "box", label: "קופסה", short: "קופסה" },
-  { id: "bag", label: "שקית", short: "שקית" },
-  { id: "bottle", label: "בקבוק", short: "בקבוק" },
+  { id: "pack", label: "חבילה", short: "חב'" },
+  { id: "box", label: "קופסה", short: "קפ'" },
+  { id: "bag", label: "שקית", short: "שק'" },
+  { id: "bottle", label: "בקבוק", short: "בק'" },
 ] as const;
 
 export type UnitId = (typeof UNITS)[number]["id"];
