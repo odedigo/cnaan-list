@@ -6,9 +6,9 @@ import "./globals.css";
 const rubik = Rubik({ subsets: ["hebrew", "latin"], variable: "--font-rubik" });
 
 export const metadata: Metadata = {
-  title: "רשימת הקניות של משפחת כנען",
+  title: "שיתוף משפחתי",
   description: "רשימת קניות ומלאי",
-  applicationName: "רשימת הקניות של משפחת כנען",
+  applicationName: "שיתוף משפחתי",
   manifest: "/site.webmanifest",
   icons: {
     icon: [

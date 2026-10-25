@@ -17,7 +17,7 @@ import { arrayMove, SortableContext, useSortable, verticalListSortingStrategy } 
 import { CSS } from "@dnd-kit/utilities";
 
 import { AppHeader } from "@/components/app-header";
-import { ArrowIcon, CameraIcon, CheckIcon, ChevronIcon, ClearMarksIcon, CloseIcon, GripIcon, ImageIcon, PenIcon, PlusIcon } from "@/components/icons";
+import { ArrowIcon, CameraIcon, CheckIcon, ChevronIcon, ClearMarksIcon, CloseIcon, GripIcon, ImageIcon, MoveAcrossIcon, PenIcon, PlusIcon } from "@/components/icons";
 import { useLists } from "@/components/lists-provider";
 import { shrinkImage } from "@/lib/images";
 import { nameInsertIndex } from "@/lib/order";
@@ -529,6 +529,42 @@ export function RecipesPage({ active }: { active: boolean }) {
     }
   }
 
+  async function moveIngredientToSteps(index: number) {
+    if (!open) return;
+    const text = ingredientMoveText(open.document.ingredients[index]);
+    if (!text) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const ingredients = open.document.ingredients.filter((_, itemIndex) => itemIndex !== index);
+      const steps = renumberSteps([...open.document.steps, { number: 0, text }]);
+      await saveDocument(open, { ...open.document, ingredients, steps });
+      writeChecks({ ingredients: shiftChecks(checks.ingredients, index), steps: checks.steps });
+    } catch {
+      setError("לא ניתן להעביר את המצרך.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function moveStepToIngredients(index: number) {
+    if (!open) return;
+    const ingredient = ingredientFromStep(open.document.steps[index]);
+    if (!ingredient) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const steps = renumberSteps(open.document.steps.filter((_, itemIndex) => itemIndex !== index));
+      const ingredients = [...open.document.ingredients, ingredient];
+      await saveDocument(open, { ...open.document, ingredients, steps });
+      writeChecks({ ingredients: checks.ingredients, steps: shiftChecks(checks.steps, index) });
+    } catch {
+      setError("לא ניתן להעביר את השלב.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function saveSteps(steps: RecipeStep[], title: string) {
     if (!open) return false;
     const nextTitle = title.trim();
@@ -818,6 +854,8 @@ export function RecipesPage({ active }: { active: boolean }) {
           onClear={(kind) => writeChecks({ ...checks, [kind]: [] })}
           onSaveIngredients={saveIngredients}
           onSaveSteps={saveSteps}
+          onMoveIngredient={(index) => void moveIngredientToSteps(index)}
+          onMoveStep={(index) => void moveStepToIngredients(index)}
           onSaveInfo={saveRecipeEdits}
           onImage={(id) => setImageEdit({ id })}
           onDelete={deleteRecipe}
@@ -1429,6 +1467,8 @@ function RecipeDetail({
   onClear,
   onSaveIngredients,
   onSaveSteps,
+  onMoveIngredient,
+  onMoveStep,
   onSaveInfo,
   onImage,
   onDelete,
@@ -1450,6 +1490,8 @@ function RecipeDetail({
   onClear: (kind: "ingredients" | "steps") => void;
   onSaveIngredients: (ingredients: RecipeIngredient[], title: string) => Promise<boolean>;
   onSaveSteps: (steps: RecipeStep[], title: string) => Promise<boolean>;
+  onMoveIngredient: (index: number) => void;
+  onMoveStep: (index: number) => void;
   onSaveInfo: (draft: EditDraft) => Promise<boolean>;
   onImage: (id: string | null) => void;
   onDelete: () => Promise<void>;
@@ -1593,9 +1635,10 @@ function RecipeDetail({
             {recipe.document.steps.map((step, index) => {
               const itemNumber = recipe.document.steps.filter((item, itemIndex) => !isSubtitle(item.text) && itemIndex <= index).length;
               return isSubtitle(step.text) ? (
-                <p key={`${step.number}-${index}`} className="px-4 py-3 text-start font-semibold">
-                  {step.text}
-                </p>
+                <div key={`${step.number}-${index}`} className="flex items-start gap-3 px-4 py-3">
+                  <p className="min-w-0 flex-1 text-start font-semibold">{step.text}</p>
+                  <MoveAcrossButton label={`העברת ${step.text} למצרכים`} disabled={busy} onClick={() => onMoveStep(index)} />
+                </div>
               ) : (
                 <div key={`${step.number}-${index}`} className="flex items-start gap-3 border-b border-neutral-200 px-4 py-3">
                   <input
@@ -1609,6 +1652,7 @@ function RecipeDetail({
                     <span className="me-2">{itemNumber}.</span>
                     <span>{step.text}</span>
                   </p>
+                  <MoveAcrossButton label={`העברת שלב ${itemNumber} למצרכים`} disabled={busy} onClick={() => onMoveStep(index)} />
                 </div>
               );
             })}
@@ -1623,9 +1667,10 @@ function RecipeDetail({
             <TabActions onEdit={startEdit} extra={<ClearMarksButton onClick={() => onClear("ingredients")} />} />
             {recipe.document.ingredients.map((ingredient, index) =>
               isSubtitle(ingredientName(ingredient)) ? (
-                <p key={`${ingredient.text}-${index}`} className="px-4 py-3 text-start font-semibold">
-                  {ingredientName(ingredient)}
-                </p>
+                <div key={`${ingredient.text}-${index}`} className="flex items-start gap-3 px-4 py-3">
+                  <p className="min-w-0 flex-1 text-start font-semibold">{ingredientName(ingredient)}</p>
+                  <MoveAcrossButton label={`העברת ${ingredientName(ingredient)} להכנה`} disabled={busy} onClick={() => onMoveIngredient(index)} />
+                </div>
               ) : (
                 <div key={`${ingredient.text}-${index}`} className="flex items-start gap-3 border-b border-neutral-200 px-4 py-3">
                   <input
@@ -1642,6 +1687,7 @@ function RecipeDetail({
                     </span>
                     <span className="shrink-0 text-neutral-700">{formatAmount(ingredient.quantity, ingredient.unit)}</span>
                   </p>
+                  <MoveAcrossButton label={`העברת ${ingredientName(ingredient)} להכנה`} disabled={busy} onClick={() => onMoveIngredient(index)} />
                 </div>
               ),
             )}
@@ -2158,6 +2204,34 @@ function textRows(values: string[]) {
 
 function filledText(rows: TextRow[]) {
   return rows.map((row) => row.text.trim()).filter(Boolean);
+}
+
+function MoveAcrossButton({ label, disabled, onClick }: { label: string; disabled: boolean; onClick: () => void }) {
+  return (
+    <button type="button" className="desktop-only size-6 shrink-0 text-[var(--teal)] disabled:opacity-40" style={{ alignItems: "center", justifyContent: "center" }} aria-label={label} disabled={disabled} onClick={onClick}>
+      <MoveAcrossIcon className="size-4" />
+    </button>
+  );
+}
+
+function ingredientMoveText(ingredient: RecipeIngredient | undefined) {
+  const name = ingredient ? ingredientName(ingredient).trim() : "";
+  if (!name) return "";
+  return isSubtitle(name) ? (name.endsWith(":") ? name : `${name}:`) : name.replace(/:$/, "");
+}
+
+function ingredientFromStep(step: RecipeStep | undefined): RecipeIngredient | null {
+  const text = step?.text.trim() ?? "";
+  if (!text) return null;
+  if (isSubtitle(text)) {
+    const title = text.endsWith(":") ? text : `${text}:`;
+    return { text: title, quantity: null, unit: null, product: title, note: null };
+  }
+  return { text, quantity: null, unit: null, product: text, note: null };
+}
+
+function shiftChecks(indexes: number[], removed: number) {
+  return indexes.filter((index) => index !== removed).map((index) => (index > removed ? index - 1 : index));
 }
 
 function toggleIngredientKind(row: IngredientRow): IngredientRow {

@@ -1,6 +1,6 @@
 {
-  "name": "רשימת הקניות של משפחת כנען",
-  "short_name": "רשימת הקניות של משפחת כנען",
+  "name": "שיתוף משפחתי",
+  "short_name": "שיתוף משפחתי",
   "icons": [
     { "src": "/android-chrome-192x192.png", "sizes": "192x192", "type": "image/png" },
     { "src": "/android-chrome-512x512.png", "sizes": "512x512", "type": "image/png" }

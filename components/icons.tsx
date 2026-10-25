@@ -47,6 +47,15 @@ export function ArrowIcon(props: IconProps) {
   );
 }
 
+export function MoveAcrossIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true" {...props}>
+      <path d="M19 12H5" strokeLinecap="round" />
+      <path d="M11 6.5 5.5 12 11 17.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 export function ChevronIcon(props: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true" {...props}>

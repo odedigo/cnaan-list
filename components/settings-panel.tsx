@@ -1040,7 +1040,7 @@ function DevBanner() {
 function AppTitle() {
   return (
     <h2 className="px-6 pt-5 text-center text-lg font-semibold">
-      רשימת הקניות של משפחת כנען
+      שיתוף משפחתי
     </h2>
   );
 }
