@@ -1576,18 +1576,26 @@ function RecipeDetail({
         </div>
       </div>
       <div className="mt-3 flex bg-[var(--teal)] text-white">
-        {tabs.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            className="flex-1 py-3 text-center font-medium"
-            style={{ color: tab === item.id ? "#fff" : "#c4c4c4", boxShadow: tab === item.id ? "inset 0 -3px 0 #fff" : undefined }}
-            aria-current={tab === item.id ? "true" : undefined}
-            onClick={() => onTab(item.id)}
-          >
-            {item.label}
-          </button>
-        ))}
+        {tabs.map((item) => {
+          const locked = editing && item.id !== tab;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              className="flex-1 py-3 text-center font-medium"
+              style={{ color: tab === item.id ? "#fff" : "#c4c4c4", boxShadow: tab === item.id ? "inset 0 -3px 0 #fff" : undefined, opacity: locked ? 0.4 : undefined }}
+              aria-current={tab === item.id ? "true" : undefined}
+              aria-disabled={locked || undefined}
+              disabled={locked}
+              onClick={() => {
+                if (locked) return;
+                onTab(item.id);
+              }}
+            >
+              {item.label}
+            </button>
+          );
+        })}
       </div>
       {tab === "info" ? (
         <div className="pb-4">
@@ -1606,7 +1614,7 @@ function RecipeDetail({
           ) : (
             <>
               <TabActions onEdit={startEdit} />
-              <div className="px-4 py-4">
+              <div className="px-4 py-4" style={{ overflowWrap: "anywhere" }}>
                 <div className="relative" style={{ height: "16rem" }}>
                   {current ? (
                     <img src={current.url} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
@@ -1656,7 +1664,9 @@ function RecipeDetail({
                 {comments ? (
                   <>
                     <p className="mt-4 text-start font-semibold">הערות</p>
-                    <p className="text-start" style={{ whiteSpace: "pre-line" }}>{comments}</p>
+                    <p className="text-start" style={{ whiteSpace: "pre-line" }}>
+                      <LinkedText text={comments} />
+                    </p>
                   </>
                 ) : null}
               </div>
@@ -2396,6 +2406,45 @@ function UnitField({ unit, onChange }: { unit: string; onChange: (unit: string) 
         {extra ? <option value={extra}>{extra}</option> : null}
       </select>
     </label>
+  );
+}
+
+function splitUrl(raw: string) {
+  let href = raw;
+  let trailing = "";
+  const peel = () => {
+    trailing = href.slice(-1) + trailing;
+    href = href.slice(0, -1);
+  };
+  while (href && /[.,;:!?]$/.test(href)) peel();
+  while (href.endsWith(")") && href.split(")").length > href.split("(").length) peel();
+  while (href.endsWith("]") && href.split("]").length > href.split("[").length) peel();
+  return { href, trailing };
+}
+
+function LinkedText({ text }: { text: string }) {
+  const parts: { key: string; text: string; href: string | null }[] = [];
+  const pattern = /https?:\/\/[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]+/gi;
+  let cursor = 0;
+  let index = 0;
+  for (const match of text.matchAll(pattern)) {
+    const start = match.index ?? 0;
+    const { href, trailing } = splitUrl(match[0]);
+    if (start > cursor) parts.push({ key: `t${index}`, text: text.slice(cursor, start), href: null });
+    if (href) parts.push({ key: `u${index}`, text: href, href });
+    if (trailing) parts.push({ key: `r${index}`, text: trailing, href: null });
+    cursor = start + match[0].length;
+    index += 1;
+  }
+  if (cursor < text.length) parts.push({ key: "end", text: text.slice(cursor), href: null });
+  return parts.map((part) =>
+    part.href ? (
+      <a key={part.key} href={part.href} target="_blank" rel="noreferrer" dir="ltr" style={{ color: "#1d4ed8", textDecoration: "underline", unicodeBidi: "isolate" }}>
+        {part.text}
+      </a>
+    ) : (
+      <span key={part.key}>{part.text}</span>
+    ),
   );
 }
 
