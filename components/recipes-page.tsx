@@ -17,7 +17,7 @@ import { arrayMove, SortableContext, useSortable, verticalListSortingStrategy } 
 import { CSS } from "@dnd-kit/utilities";
 
 import { AppHeader } from "@/components/app-header";
-import { ArrowIcon, CameraIcon, CheckIcon, ChevronIcon, ClearMarksIcon, CloseIcon, GripIcon, ImageIcon, MoveAcrossIcon, PenIcon, PlusIcon } from "@/components/icons";
+import { ArrowIcon, CameraIcon, CheckIcon, ChevronIcon, ClearMarksIcon, CloseIcon, GripIcon, ImageIcon, MoveAcrossIcon, PenIcon, PlusIcon, SubheaderIcon } from "@/components/icons";
 import { useLists } from "@/components/lists-provider";
 import { shrinkImage } from "@/lib/images";
 import { nameInsertIndex } from "@/lib/order";
@@ -547,6 +547,43 @@ export function RecipesPage({ active }: { active: boolean }) {
     }
   }
 
+  async function makeIngredientSubtitle(index: number) {
+    if (!open) return;
+    const ingredient = open.document.ingredients[index];
+    const name = ingredient ? ingredientName(ingredient).trim().replace(/:$/, "") : "";
+    if (!ingredient || !name || isSubtitle(ingredientName(ingredient))) return;
+    const title = `${name}:`;
+    setBusy(true);
+    setError(null);
+    try {
+      const ingredients = open.document.ingredients.map((item, itemIndex) => (itemIndex === index ? { text: title, quantity: null, unit: null, product: title, note: null } : item));
+      await saveDocument(open, { ...open.document, ingredients });
+      writeChecks({ ingredients: checks.ingredients.filter((item) => item !== index), steps: checks.steps });
+    } catch {
+      setError("לא ניתן להפוך את המצרך לכותרת.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function makeStepSubtitle(index: number) {
+    if (!open) return;
+    const step = open.document.steps[index];
+    const text = step?.text.trim().replace(/:$/, "") ?? "";
+    if (!step || !text || isSubtitle(step.text)) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const steps = renumberSteps(open.document.steps.map((item, itemIndex) => (itemIndex === index ? { ...item, text: `${text}:` } : item)));
+      await saveDocument(open, { ...open.document, steps });
+      writeChecks({ ingredients: checks.ingredients, steps: checks.steps.filter((item) => item !== index) });
+    } catch {
+      setError("לא ניתן להפוך את השלב לכותרת.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function moveStepToIngredients(index: number) {
     if (!open) return;
     const ingredient = ingredientFromStep(open.document.steps[index]);
@@ -856,6 +893,8 @@ export function RecipesPage({ active }: { active: boolean }) {
           onSaveSteps={saveSteps}
           onMoveIngredient={(index) => void moveIngredientToSteps(index)}
           onMoveStep={(index) => void moveStepToIngredients(index)}
+          onMakeIngredientSubtitle={(index) => void makeIngredientSubtitle(index)}
+          onMakeStepSubtitle={(index) => void makeStepSubtitle(index)}
           onSaveInfo={saveRecipeEdits}
           onImage={(id) => setImageEdit({ id })}
           onDelete={deleteRecipe}
@@ -1469,6 +1508,8 @@ function RecipeDetail({
   onSaveSteps,
   onMoveIngredient,
   onMoveStep,
+  onMakeIngredientSubtitle,
+  onMakeStepSubtitle,
   onSaveInfo,
   onImage,
   onDelete,
@@ -1492,6 +1533,8 @@ function RecipeDetail({
   onSaveSteps: (steps: RecipeStep[], title: string) => Promise<boolean>;
   onMoveIngredient: (index: number) => void;
   onMoveStep: (index: number) => void;
+  onMakeIngredientSubtitle: (index: number) => void;
+  onMakeStepSubtitle: (index: number) => void;
   onSaveInfo: (draft: EditDraft) => Promise<boolean>;
   onImage: (id: string | null) => void;
   onDelete: () => Promise<void>;
@@ -1652,6 +1695,7 @@ function RecipeDetail({
                     <span className="me-2">{itemNumber}.</span>
                     <span>{step.text}</span>
                   </p>
+                  <SubheaderButton label={`הפיכת שלב ${itemNumber} לכותרת`} disabled={busy} onClick={() => onMakeStepSubtitle(index)} />
                   <MoveAcrossButton label={`העברת שלב ${itemNumber} למצרכים`} disabled={busy} onClick={() => onMoveStep(index)} />
                 </div>
               );
@@ -1687,6 +1731,7 @@ function RecipeDetail({
                     </span>
                     <span className="shrink-0 text-neutral-700">{formatAmount(ingredient.quantity, ingredient.unit)}</span>
                   </p>
+                  <SubheaderButton label={`הפיכת ${ingredientName(ingredient)} לכותרת`} disabled={busy} onClick={() => onMakeIngredientSubtitle(index)} />
                   <MoveAcrossButton label={`העברת ${ingredientName(ingredient)} להכנה`} disabled={busy} onClick={() => onMoveIngredient(index)} />
                 </div>
               ),
@@ -2206,11 +2251,27 @@ function filledText(rows: TextRow[]) {
   return rows.map((row) => row.text.trim()).filter(Boolean);
 }
 
-function MoveAcrossButton({ label, disabled, onClick }: { label: string; disabled: boolean; onClick: () => void }) {
+function DesktopRowButton({ label, disabled, onClick, children }: { label: string; disabled: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
     <button type="button" className="desktop-only size-6 shrink-0 text-[var(--teal)] disabled:opacity-40" style={{ alignItems: "center", justifyContent: "center" }} aria-label={label} disabled={disabled} onClick={onClick}>
-      <MoveAcrossIcon className="size-4" />
+      {children}
     </button>
+  );
+}
+
+function MoveAcrossButton({ label, disabled, onClick }: { label: string; disabled: boolean; onClick: () => void }) {
+  return (
+    <DesktopRowButton label={label} disabled={disabled} onClick={onClick}>
+      <MoveAcrossIcon className="size-4" />
+    </DesktopRowButton>
+  );
+}
+
+function SubheaderButton({ label, disabled, onClick }: { label: string; disabled: boolean; onClick: () => void }) {
+  return (
+    <DesktopRowButton label={label} disabled={disabled} onClick={onClick}>
+      <SubheaderIcon className="size-4" />
+    </DesktopRowButton>
   );
 }
 

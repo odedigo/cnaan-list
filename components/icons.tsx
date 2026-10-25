@@ -56,6 +56,15 @@ export function MoveAcrossIcon(props: IconProps) {
   );
 }
 
+export function SubheaderIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true" {...props}>
+      <path d="M4 7h9" strokeWidth="2.6" strokeLinecap="round" />
+      <path d="M4 12.5h16M4 17.5h11" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export function ChevronIcon(props: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true" {...props}>
