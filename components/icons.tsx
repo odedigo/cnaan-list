@@ -65,6 +65,15 @@ export function SubheaderIcon(props: IconProps) {
   );
 }
 
+export function StepIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true" {...props}>
+      <path d="M4 7h4.5M4 12h4.5M4 17h4.5" strokeLinecap="round" />
+      <path d="M11 7h9M11 12h9M11 17h9" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export function ChevronIcon(props: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true" {...props}>

@@ -17,7 +17,7 @@ import { arrayMove, SortableContext, useSortable, verticalListSortingStrategy } 
 import { CSS } from "@dnd-kit/utilities";
 
 import { AppHeader } from "@/components/app-header";
-import { ArrowIcon, CameraIcon, CheckIcon, ChevronIcon, ClearMarksIcon, CloseIcon, GripIcon, ImageIcon, MoveAcrossIcon, PenIcon, PlusIcon, SubheaderIcon } from "@/components/icons";
+import { ArrowIcon, CameraIcon, CheckIcon, ChevronIcon, ClearMarksIcon, CloseIcon, GripIcon, ImageIcon, MoveAcrossIcon, PenIcon, PlusIcon, StepIcon, SubheaderIcon } from "@/components/icons";
 import { useLists } from "@/components/lists-provider";
 import { shrinkImage } from "@/lib/images";
 import { nameInsertIndex } from "@/lib/order";
@@ -81,9 +81,9 @@ const tabs: { id: TabId; label: string }[] = [
 ];
 
 function ratingSearch(query: string) {
-  const match = query.match(/^(\+)?r(\d+)$/i);
+  const match = query.match(/^צ(\d+)(\+)?$/);
   if (!match) return null;
-  return { exact: Boolean(match[1]), value: Number(match[2]) };
+  return { exact: !match[2], value: Number(match[1]) };
 }
 
 export function RecipesPage({ active }: { active: boolean }) {
@@ -584,6 +584,23 @@ export function RecipesPage({ active }: { active: boolean }) {
     }
   }
 
+  async function makeStepItem(index: number) {
+    if (!open) return;
+    const step = open.document.steps[index];
+    const text = step?.text.trim().replace(/:$/, "") ?? "";
+    if (!step || !text || !isSubtitle(step.text)) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const steps = renumberSteps(open.document.steps.map((item, itemIndex) => (itemIndex === index ? { ...item, text } : item)));
+      await saveDocument(open, { ...open.document, steps });
+    } catch {
+      setError("לא ניתן להפוך את הכותרת לשלב.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function moveStepToIngredients(index: number) {
     if (!open) return;
     const ingredient = ingredientFromStep(open.document.steps[index]);
@@ -816,7 +833,7 @@ export function RecipesPage({ active }: { active: boolean }) {
         actionsEnabled
         searchOpen={searchOpen}
         searchValue={query}
-        searchPlaceholder="חיפוש מתכון, r2 לדירוג 2 ומעלה, +r2 לדירוג 2"
+        searchPlaceholder="חיפוש מתכון, צ2 לדירוג 2, צ2+ לדירוג 2 ומעלה"
         searchInputRef={searchInputRef}
         searchSide="end"
         plusAfterSearch
@@ -895,6 +912,7 @@ export function RecipesPage({ active }: { active: boolean }) {
           onMoveStep={(index) => void moveStepToIngredients(index)}
           onMakeIngredientSubtitle={(index) => void makeIngredientSubtitle(index)}
           onMakeStepSubtitle={(index) => void makeStepSubtitle(index)}
+          onMakeStepItem={(index) => void makeStepItem(index)}
           onSaveInfo={saveRecipeEdits}
           onImage={(id) => setImageEdit({ id })}
           onDelete={deleteRecipe}
@@ -1510,6 +1528,7 @@ function RecipeDetail({
   onMoveStep,
   onMakeIngredientSubtitle,
   onMakeStepSubtitle,
+  onMakeStepItem,
   onSaveInfo,
   onImage,
   onDelete,
@@ -1535,6 +1554,7 @@ function RecipeDetail({
   onMoveStep: (index: number) => void;
   onMakeIngredientSubtitle: (index: number) => void;
   onMakeStepSubtitle: (index: number) => void;
+  onMakeStepItem: (index: number) => void;
   onSaveInfo: (draft: EditDraft) => Promise<boolean>;
   onImage: (id: string | null) => void;
   onDelete: () => Promise<void>;
@@ -1564,7 +1584,7 @@ function RecipeDetail({
           {editing ? (
             <input className="min-w-0 flex-1 rounded-lg border border-neutral-300 bg-white px-2 text-lg font-semibold" style={{ height: "2rem" }} aria-label="שם המתכון" value={title} onChange={(event) => setTitle(event.target.value)} />
           ) : (
-            <h2 className="min-w-0 text-lg font-semibold leading-8">{recipe.title}</h2>
+            <h2 className="min-w-0 text-lg font-semibold leading-8" style={{ overflowWrap: "anywhere" }}>{recipe.title}</h2>
           )}
         </div>
         <div dir="ltr" className="flex shrink-0">
@@ -1683,13 +1703,14 @@ function RecipeDetail({
         editing ? (
           <StepEditor steps={recipe.document.steps} busy={busy} onCancel={() => setEditing(false)} onSave={(steps) => onSaveSteps(steps, title)} />
         ) : (
-          <div>
+          <div style={{ overflowWrap: "anywhere" }}>
             <TabActions onEdit={startEdit} extra={<ClearMarksButton onClick={() => onClear("steps")} />} />
             {recipe.document.steps.map((step, index) => {
               const itemNumber = recipe.document.steps.filter((item, itemIndex) => !isSubtitle(item.text) && itemIndex <= index).length;
               return isSubtitle(step.text) ? (
                 <div key={`${step.number}-${index}`} className="flex items-start gap-3 px-4 py-3">
                   <p className="min-w-0 flex-1 text-start font-semibold">{step.text}</p>
+                  <StepButton label={`הפיכת ${step.text.replace(/:$/, "")} לשלב`} disabled={busy} onClick={() => onMakeStepItem(index)} />
                   <MoveAcrossButton label={`העברת ${step.text} למצרכים`} disabled={busy} onClick={() => onMoveStep(index)} />
                 </div>
               ) : (
@@ -1717,7 +1738,7 @@ function RecipeDetail({
         editing ? (
           <IngredientEditor ingredients={recipe.document.ingredients} busy={busy} onCancel={() => setEditing(false)} onSave={(ingredients) => onSaveIngredients(ingredients, title)} />
         ) : (
-          <div>
+          <div style={{ overflowWrap: "anywhere" }}>
             <TabActions onEdit={startEdit} extra={<ClearMarksButton onClick={() => onClear("ingredients")} />} />
             {recipe.document.ingredients.map((ingredient, index) =>
               isSubtitle(ingredientName(ingredient)) ? (
@@ -2053,7 +2074,7 @@ function StepSummary({ row, number }: { row: StepRow; number: number }) {
   }
   const text = row.text.trim();
   return (
-    <span className="block text-start" style={text ? { display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" } : undefined}>
+    <span className="block text-start" style={text ? { display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden", overflowWrap: "anywhere" } : undefined}>
       <span className="me-2">{number}.</span>
       <span className={text ? "" : "text-neutral-400"}>{text || "שלב חדש"}</span>
     </span>
@@ -2281,6 +2302,14 @@ function SubheaderButton({ label, disabled, onClick }: { label: string; disabled
   return (
     <DesktopRowButton label={label} disabled={disabled} onClick={onClick}>
       <SubheaderIcon className="size-4" />
+    </DesktopRowButton>
+  );
+}
+
+function StepButton({ label, disabled, onClick }: { label: string; disabled: boolean; onClick: () => void }) {
+  return (
+    <DesktopRowButton label={label} disabled={disabled} onClick={onClick}>
+      <StepIcon className="size-4" />
     </DesktopRowButton>
   );
 }
