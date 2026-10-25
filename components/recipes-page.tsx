@@ -80,6 +80,12 @@ const tabs: { id: TabId; label: string }[] = [
   { id: "info", label: "מידע" },
 ];
 
+function ratingSearch(query: string) {
+  const match = query.match(/^(\+)?r(\d+)$/i);
+  if (!match) return null;
+  return { exact: Boolean(match[1]), value: Number(match[2]) };
+}
+
 export function RecipesPage({ active }: { active: boolean }) {
   const lists = useLists();
   const supabase = useMemo(() => createClient(), []);
@@ -503,12 +509,17 @@ export function RecipesPage({ active }: { active: boolean }) {
     }
   }
 
-  async function saveIngredients(ingredients: RecipeIngredient[]) {
+  async function saveIngredients(ingredients: RecipeIngredient[], title: string) {
     if (!open) return false;
+    const nextTitle = title.trim();
+    if (!nextTitle) {
+      setError("יש להזין שם למתכון.");
+      return false;
+    }
     setBusy(true);
     setError(null);
     try {
-      await saveDocument(open, { ...open.document, ingredients });
+      await saveDocument(open, { ...open.document, ingredients }, nextTitle);
       return true;
     } catch {
       setError("לא ניתן לשמור את המצרכים.");
@@ -518,12 +529,17 @@ export function RecipesPage({ active }: { active: boolean }) {
     }
   }
 
-  async function saveSteps(steps: RecipeStep[]) {
+  async function saveSteps(steps: RecipeStep[], title: string) {
     if (!open) return false;
+    const nextTitle = title.trim();
+    if (!nextTitle) {
+      setError("יש להזין שם למתכון.");
+      return false;
+    }
     setBusy(true);
     setError(null);
     try {
-      await saveDocument(open, { ...open.document, steps });
+      await saveDocument(open, { ...open.document, steps }, nextTitle);
       return true;
     } catch {
       setError("לא ניתן לשמור את ההכנה.");
@@ -660,8 +676,14 @@ export function RecipesPage({ active }: { active: boolean }) {
   }
 
   const needle = query.trim().toLocaleLowerCase("he");
+  const rating = ratingSearch(needle);
   const searching = searchOpen && needle.length > 0;
-  const found = recipes.filter((row) => row.title.toLocaleLowerCase("he").includes(needle)).sort((a, b) => a.title.localeCompare(b.title, "he"));
+  const found = recipes
+    .filter((row) => {
+      if (rating) return row.rating != null && (rating.exact ? row.rating === rating.value : row.rating >= rating.value);
+      return row.title.toLocaleLowerCase("he").includes(needle);
+    })
+    .sort((a, b) => a.title.localeCompare(b.title, "he"));
   const searchKey = searching ? found.map((row) => row.id).join("|") : "";
   const searchIdsRef = useRef(found);
   searchIdsRef.current = found;
@@ -721,7 +743,7 @@ export function RecipesPage({ active }: { active: boolean }) {
         actionsEnabled
         searchOpen={searchOpen}
         searchValue={query}
-        searchPlaceholder="חיפוש מתכון"
+        searchPlaceholder="חיפוש מתכון, r2 לדירוג 2 ומעלה, +r2 לדירוג 2"
         searchInputRef={searchInputRef}
         searchSide="end"
         plusAfterSearch
@@ -1426,29 +1448,39 @@ function RecipeDetail({
   onRate: (value: number) => void;
   onToggle: (kind: "ingredients" | "steps", index: number) => void;
   onClear: (kind: "ingredients" | "steps") => void;
-  onSaveIngredients: (ingredients: RecipeIngredient[]) => Promise<boolean>;
-  onSaveSteps: (steps: RecipeStep[]) => Promise<boolean>;
+  onSaveIngredients: (ingredients: RecipeIngredient[], title: string) => Promise<boolean>;
+  onSaveSteps: (steps: RecipeStep[], title: string) => Promise<boolean>;
   onSaveInfo: (draft: EditDraft) => Promise<boolean>;
   onImage: (id: string | null) => void;
   onDelete: () => Promise<void>;
 }) {
   const [editing, setEditing] = useState(false);
+  const [title, setTitle] = useState(recipe.title);
   const [confirmDelete, setConfirmDelete] = useState(false);
   useEffect(() => {
     setEditing(false);
     setConfirmDelete(false);
-  }, [recipe.id, tab]);
+    setTitle(recipe.title);
+  }, [recipe.id, tab, recipe.title]);
+  function startEdit() {
+    setTitle(recipe.title);
+    setEditing(true);
+  }
   const source = recipe.document.source;
   const comments = [...recipe.document.credits, ...recipe.document.notes].map((line) => line.trim()).filter(Boolean).join("\n");
   const current = slides[slide];
   return (
     <div>
       <div className="flex items-start justify-between gap-3 px-4 pt-4">
-        <div className="flex min-w-0 items-start gap-3">
+        <div className="flex min-w-0 flex-1 items-start gap-3">
           <button type="button" className="shrink-0" aria-label="חזרה" onClick={onBack}>
             <BackMark />
           </button>
-          <h2 className="min-w-0 text-lg font-semibold leading-8">{recipe.title}</h2>
+          {editing ? (
+            <input className="min-w-0 flex-1 rounded-lg border border-neutral-300 bg-white px-2 text-lg font-semibold" style={{ height: "2rem" }} aria-label="שם המתכון" value={title} onChange={(event) => setTitle(event.target.value)} />
+          ) : (
+            <h2 className="min-w-0 text-lg font-semibold leading-8">{recipe.title}</h2>
+          )}
         </div>
         <div dir="ltr" className="flex shrink-0">
           {[1, 2, 3, 4, 5].map((value) => (
@@ -1483,12 +1515,12 @@ function RecipeDetail({
               depth={depth}
               onCancel={() => setEditing(false)}
               onSave={async (draft) => {
-                if (await onSaveInfo(draft)) setEditing(false);
+                if (await onSaveInfo({ ...draft, title })) setEditing(false);
               }}
             />
           ) : (
             <>
-              <TabActions onEdit={() => setEditing(true)} />
+              <TabActions onEdit={startEdit} />
               <div className="px-4 py-4">
                 <div className="relative" style={{ height: "16rem" }}>
                   {current ? (
@@ -1554,10 +1586,10 @@ function RecipeDetail({
       ) : null}
       {tab === "steps" ? (
         editing ? (
-          <StepEditor steps={recipe.document.steps} busy={busy} onCancel={() => setEditing(false)} onSave={onSaveSteps} />
+          <StepEditor steps={recipe.document.steps} busy={busy} onCancel={() => setEditing(false)} onSave={(steps) => onSaveSteps(steps, title)} />
         ) : (
           <div>
-            <TabActions onEdit={() => setEditing(true)} extra={<ClearMarksButton onClick={() => onClear("steps")} />} />
+            <TabActions onEdit={startEdit} extra={<ClearMarksButton onClick={() => onClear("steps")} />} />
             {recipe.document.steps.map((step, index) => {
               const itemNumber = recipe.document.steps.filter((item, itemIndex) => !isSubtitle(item.text) && itemIndex <= index).length;
               return isSubtitle(step.text) ? (
@@ -1585,10 +1617,10 @@ function RecipeDetail({
       ) : null}
       {tab === "ingredients" ? (
         editing ? (
-          <IngredientEditor ingredients={recipe.document.ingredients} busy={busy} onCancel={() => setEditing(false)} onSave={onSaveIngredients} />
+          <IngredientEditor ingredients={recipe.document.ingredients} busy={busy} onCancel={() => setEditing(false)} onSave={(ingredients) => onSaveIngredients(ingredients, title)} />
         ) : (
           <div>
-            <TabActions onEdit={() => setEditing(true)} extra={<ClearMarksButton onClick={() => onClear("ingredients")} />} />
+            <TabActions onEdit={startEdit} extra={<ClearMarksButton onClick={() => onClear("ingredients")} />} />
             {recipe.document.ingredients.map((ingredient, index) =>
               isSubtitle(ingredientName(ingredient)) ? (
                 <p key={`${ingredient.text}-${index}`} className="px-4 py-3 text-start font-semibold">
@@ -1734,6 +1766,11 @@ function IngredientEditor({
                     setRows((current) => current.filter((item) => item.key !== row.key));
                     setOpenKey((current) => (current === row.key ? null : current));
                   }}
+                  middle={
+                    <button type="button" className="text-sm font-medium text-[var(--teal)]" onClick={() => setRows((current) => current.map((item) => (item.key === row.key ? toggleIngredientKind(item) : item)))}>
+                      {row.heading ? "הפיכה למצרך" : "הפיכה לכותרת"}
+                    </button>
+                  }
                 >
                   {row.heading ? (
                     <Field compact label="כותרת" value={row.name.replace(/:$/, "")} onChange={(name) => setRows((current) => current.map((item) => (item.key === row.key ? { ...item, name } : item)))} />
@@ -1864,7 +1901,7 @@ function StepEditor({
   );
 }
 
-function EditRow({ open, summary, onToggle, onDelete, children }: { open: boolean; summary: React.ReactNode; onToggle: () => void; onDelete: () => void; children: React.ReactNode }) {
+function EditRow({ open, summary, onToggle, onDelete, middle, children }: { open: boolean; summary: React.ReactNode; onToggle: () => void; onDelete: () => void; middle?: React.ReactNode; children: React.ReactNode }) {
   if (!open) {
     return (
       <button type="button" className="flex w-full items-center gap-2 py-1 text-start" aria-expanded={false} onClick={onToggle}>
@@ -1876,11 +1913,12 @@ function EditRow({ open, summary, onToggle, onDelete, children }: { open: boolea
   return (
     <div>
       {children}
-      <div className="mt-3 flex items-center justify-between">
-        <button type="button" className="text-sm font-medium text-[var(--teal)]" aria-expanded={true} onClick={onToggle}>
+      <div className="mt-3" style={middle ? { display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center" } : { display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <button type="button" className="text-sm font-medium text-[var(--teal)]" style={middle ? { justifySelf: "start" } : undefined} aria-expanded={true} onClick={onToggle}>
           סגירה
         </button>
-        <button type="button" className="text-sm text-red-600" onClick={onDelete}>
+        {middle}
+        <button type="button" className="text-sm text-red-600" style={middle ? { justifySelf: "end" } : undefined} onClick={onDelete}>
           מחיקה
         </button>
       </div>
@@ -2066,7 +2104,6 @@ function InfoEditor({
   onCancel: () => void;
   onSave: (draft: EditDraft) => Promise<void>;
 }) {
-  const [title, setTitle] = useState(recipe.title);
   const [sourceText, setSourceText] = useState(recipe.document.source?.text ?? "");
   const [sourceUrl, setSourceUrl] = useState(recipe.document.source?.url ?? "");
   const [comments, setComments] = useState(() =>
@@ -2082,7 +2119,7 @@ function InfoEditor({
       onSubmit={(event) => {
         event.preventDefault();
         void onSave({
-          title,
+          title: recipe.title,
           sourceText,
           sourceUrl,
           notes: comments.trim() ? [comments.trim()] : [],
@@ -2092,7 +2129,6 @@ function InfoEditor({
     >
       <TabActions editing busy={busy} onCancel={onCancel} />
       <div className="px-4 pb-4">
-        <Field label="שם המתכון" value={title} onChange={setTitle} />
         <Field label="מקור" value={sourceText} onChange={setSourceText} />
         <Field label="קישור למקור" value={sourceUrl} onChange={setSourceUrl} />
         <label className="mt-4 block text-start">
@@ -2122,6 +2158,12 @@ function textRows(values: string[]) {
 
 function filledText(rows: TextRow[]) {
   return rows.map((row) => row.text.trim()).filter(Boolean);
+}
+
+function toggleIngredientKind(row: IngredientRow): IngredientRow {
+  const name = row.name.trim().replace(/:$/, "");
+  if (row.heading) return { ...row, heading: false, name, quantity: "", unit: "יחידה", note: "" };
+  return { ...row, heading: true, name, quantity: "", unit: "", note: "" };
 }
 
 function rowsToIngredients(rows: IngredientRow[]): RecipeIngredient[] {

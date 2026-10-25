@@ -14,13 +14,26 @@ export function closeInstalledApp() {
   // Browsers only honor close() for a window a script opened, or a session
   // whose history has a single entry. This runs inside the menu click.
   window.close();
-  if (window.history.length <= 1) {
+  const extra = window.history.length - 1;
+  if (extra <= 0) {
     window.history.back();
     return;
   }
-  if (isIos()) return;
-  // Android and desktop installs still block close() while older history
-  // entries exist. Opening this window onto itself clears that block.
-  const opened = window.open("", "_self");
-  opened?.close();
+  if (!isIos()) {
+    // Android and desktop installs still block close() while older history
+    // entries exist. Opening this window onto itself clears that block.
+    const opened = window.open("", "_self");
+    opened?.close();
+    return;
+  }
+  // iOS ignores close() once the installed app has history. Return to the
+  // launch entry, then step back once more so the system can leave the app.
+  window.addEventListener(
+    "popstate",
+    () => {
+      window.history.back();
+    },
+    { once: true },
+  );
+  window.history.go(-extra);
 }
