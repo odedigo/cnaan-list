@@ -43,7 +43,7 @@ This is a Hebrew right-to-left app. Every screen, dialog, label, and control fol
 Signed-in grocery, inventory, lists, and settings are switched in `components/app-shell.tsx`. The layout is `force-dynamic`, so a Next.js history call refetches it.
 
 - Capture the native `pushState` in `useLayoutEffect` and use it. Next.js patches the method, and a patched call refetches the layout.
-- An installed app (`display-mode: standalone` or `navigator.standalone`) uses that same `pushState`. The system back button then returns to the previous tab. `closeInstalledApp` still closes the window when that history is longer than one entry.
+- An installed app (`display-mode: standalone` or `navigator.standalone`) uses that same `pushState`. The system back button then returns to the previous tab.
 - `/lists` returns null; the shell renders `ChecklistPage`. `/recipes` returns null; the shell renders `RecipesPage`. Signed-in `/settings` returns null; the shell renders `SignedInSettings`, and that screen unmounts when the path leaves `/settings`.
 - Grocery, inventory, lists, and recipes stay mounted after the 250ms warm. Swipe only between grocery and inventory.
 - Bottom nav order, visually left to right: `/inventory` רשימת מוצרים, `/grocery` עגלת קניות, `/lists` רשימות, `/recipes` מתכונים, then עוד.... עוד... opens a menu above the button with ייצוא נתונים and ייבוא נתונים, then a separator, then רענון האפליקציה, then a separator, then הגדרות which opens `/settings`. The grocery badge is `grocery.length`, including purchased lines.

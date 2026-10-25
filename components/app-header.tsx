@@ -3,7 +3,6 @@
 /** Sticky page header with the action menu, search, about dialog, and refresh notice. */
 
 import {
-  useEffect,
   useLayoutEffect,
   useRef,
   useState,
@@ -22,7 +21,6 @@ import {
   SortIcon,
   TrashIcon,
 } from "@/components/icons";
-import { closeInstalledApp, isInstalledApp } from "@/lib/installed-app";
 
 export function AppHeader({
   title,
@@ -79,17 +77,9 @@ export function AppHeader({
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [creditOpen, setCreditOpen] = useState(false);
-  const [installed, setInstalled] = useState(false);
   const showMenu = Boolean(
     onAdd || onSort || onReorder,
   );
-  useEffect(() => {
-    const media = window.matchMedia("(display-mode: standalone)");
-    const sync = () => setInstalled(isInstalledApp());
-    sync();
-    media.addEventListener("change", sync);
-    return () => media.removeEventListener("change", sync);
-  }, []);
   const searchButton = onSearchToggle ? (
     <button
       type="button"
@@ -246,23 +236,6 @@ export function AppHeader({
                 >
                   <SortIcon className="size-5" />
                 </MenuItem>
-                {installed ? (
-                  <>
-                    <div
-                      role="separator"
-                      className="mx-3 my-1 h-px bg-neutral-200"
-                    />
-                    <MenuItem
-                      label="סגירת האפליקציה"
-                      onClick={() => {
-                        setMenuOpen(false);
-                        closeInstalledApp();
-                      }}
-                    >
-                      <CloseIcon className="size-5" />
-                    </MenuItem>
-                  </>
-                ) : null}
               </div>
             </>
           ) : null}
