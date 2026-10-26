@@ -66,6 +66,7 @@ An inventory click toggles grocery membership. The teal card (`bg-[#d7efe9]`) me
 - One store per account has `protected` set. It cannot be deleted. When store badges are on, show that store's current name too.
 - `cnaanlist-show-store-badge`: missing or any value other than `"0"` means on. The same flag controls inventory and grocery badges.
 - `cnaanlist-single-open-category` uses the same default-on pattern. Inventory treats a category as expanded when `collapsed[id] === false`.
+- `cnaanlist-recipe-advanced`: missing or any value other than `"1"` means off. When on, recipe ingredient and step rows show the move, subheader, and step actions on every screen. When off, those actions stay hidden.
 - These flags live in `localStorage` only. Write them and dispatch the matching event so both lists update.
 
 ## UI

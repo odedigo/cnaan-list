@@ -129,9 +129,9 @@ export function AppHeader({
               <ExportIcon className="size-6" />
             </HeaderButton>
           ) : null}
-          {onToggleCategories ? (
+          {onToggleCategories && !showMenu ? (
             <HeaderButton
-              label={categoriesExpanded ? "כווץ הכל" : "הרחב הכל"}
+              label={categoriesExpanded ? "כווץ את הקטגוריות" : "הרחב את הקטגוריות"}
               disabled={!actionsEnabled || reorderActive}
               pressed={categoriesExpanded}
               onClick={onToggleCategories}
@@ -236,6 +236,21 @@ export function AppHeader({
                 >
                   <SortIcon className="size-5" />
                 </MenuItem>
+                {onToggleCategories ? (
+                  <MenuItem
+                    label={categoriesExpanded ? "כווץ את הקטגוריות" : "הרחב את הקטגוריות"}
+                    pressed={categoriesExpanded}
+                    disabled={!actionsEnabled || reorderActive}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onToggleCategories();
+                    }}
+                  >
+                    <ChevronIcon
+                      className={`size-5 ${categoriesExpanded ? "" : "rotate-180"}`}
+                    />
+                  </MenuItem>
+                ) : null}
               </div>
             </>
           ) : null}

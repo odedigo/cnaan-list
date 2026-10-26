@@ -30,7 +30,7 @@ import {
 
 import { AppHeader } from "@/components/app-header";
 import { DetailsSheet, type Editor } from "@/components/details-sheet";
-import { DotsIcon, GripIcon, PlusIcon, TrashIcon } from "@/components/icons";
+import { DotsIcon, GripIcon, GroceryIcon, PlusIcon, TrashIcon } from "@/components/icons";
 import { ImageBubble, Lightbox } from "@/components/images";
 import {
   readSingleOpenCategory,
@@ -977,6 +977,15 @@ function EntityCard({
               >
                 <PlusIcon className="size-4" />
               </button>
+            ) : null}
+            {highlighted ? (
+              <GroceryIcon
+                className="size-4 shrink-0 text-[var(--teal)]"
+                style={{ marginInlineEnd: "0.5rem" }}
+                aria-hidden={false}
+                role="img"
+                aria-label="בעגלת הקניות"
+              />
             ) : null}
             <button
               type="button"

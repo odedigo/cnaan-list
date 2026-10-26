@@ -17,6 +17,7 @@ import { ChevronIcon, UserIcon } from "@/components/icons";
 import { useLists } from "@/components/lists-provider";
 import { colorHex } from "@/lib/colors";
 import { readKeepAwake, writeKeepAwake } from "@/lib/keep-awake";
+import { readRecipeAdvanced, writeRecipeAdvanced } from "@/lib/recipe-advanced";
 import {
   readSavedAccounts,
   savedAccountsEvent,
@@ -159,6 +160,7 @@ export function SignedInSettings({ username }: { username: string }) {
   const [switching, setSwitching] = useState(false);
   const [switchError, setSwitchError] = useState("");
   const [keepAwake, setKeepAwake] = useState(false);
+  const [recipeAdvanced, setRecipeAdvanced] = useState(false);
   const [singleCategory, setSingleCategory] = useState(true);
   const [showStoreBadge, setShowStoreBadge] = useState(true);
   const [accounts, setAccounts] = useState<SavedAccount[]>([]);
@@ -166,6 +168,7 @@ export function SignedInSettings({ username }: { username: string }) {
   const [accountEmail, setAccountEmail] = useState("");
   useEffect(() => {
     setKeepAwake(readKeepAwake());
+    setRecipeAdvanced(readRecipeAdvanced());
     setSingleCategory(readSingleOpenCategory());
     setShowStoreBadge(readShowStoreBadge());
     const sync = () => setAccounts(readSavedAccounts());
@@ -316,6 +319,19 @@ export function SignedInSettings({ username }: { username: string }) {
               className="size-5 accent-[var(--teal)]"
             />
             <span>הצגת תג החנות על הקטגוריה</span>
+          </label>
+          <label className="mt-3 flex items-center gap-3 text-sm">
+            <input
+              type="checkbox"
+              checked={recipeAdvanced}
+              onChange={(event) => {
+                const enabled = event.target.checked;
+                setRecipeAdvanced(enabled);
+                writeRecipeAdvanced(enabled);
+              }}
+              className="size-5 accent-[var(--teal)]"
+            />
+            <span>הצגת פעולות מתקדמות במתכונים</span>
           </label>
         </div>
         <StoresEditor />

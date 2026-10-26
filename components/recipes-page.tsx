@@ -21,6 +21,7 @@ import { ArrowIcon, CameraIcon, CheckIcon, ChevronIcon, ClearMarksIcon, CloseIco
 import { useLists } from "@/components/lists-provider";
 import { shrinkImage } from "@/lib/images";
 import { nameInsertIndex } from "@/lib/order";
+import { readRecipeAdvanced, recipeAdvancedEvent } from "@/lib/recipe-advanced";
 import {
   downloadRecipeFile,
   emptyDocument,
@@ -81,7 +82,7 @@ const tabs: { id: TabId; label: string }[] = [
 ];
 
 function ratingSearch(query: string) {
-  const match = query.match(/^צ(\d+)(\+)?$/);
+  const match = query.match(/^ד(\d+)(\+)?$/);
   if (!match) return null;
   return { exact: !match[2], value: Number(match[1]) };
 }
@@ -833,7 +834,7 @@ export function RecipesPage({ active }: { active: boolean }) {
         actionsEnabled
         searchOpen={searchOpen}
         searchValue={query}
-        searchPlaceholder="חיפוש מתכון, צ2 לדירוג 2, צ2+ לדירוג 2 ומעלה"
+        searchPlaceholder="חיפוש מתכון, ד2 לדירוג 2, ד2+ לדירוג 2 ומעלה"
         searchInputRef={searchInputRef}
         searchSide="end"
         plusAfterSearch
@@ -1562,6 +1563,13 @@ function RecipeDetail({
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(recipe.title);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [advanced, setAdvanced] = useState(false);
+  useEffect(() => {
+    const sync = () => setAdvanced(readRecipeAdvanced());
+    sync();
+    window.addEventListener(recipeAdvancedEvent, sync);
+    return () => window.removeEventListener(recipeAdvancedEvent, sync);
+  }, []);
   useEffect(() => {
     setEditing(false);
     setConfirmDelete(false);
@@ -1710,8 +1718,12 @@ function RecipeDetail({
               return isSubtitle(step.text) ? (
                 <div key={`${step.number}-${index}`} className="flex items-start gap-3 px-4 py-3">
                   <p className="min-w-0 flex-1 text-start font-semibold">{step.text}</p>
-                  <StepButton label={`הפיכת ${step.text.replace(/:$/, "")} לשלב`} disabled={busy} onClick={() => onMakeStepItem(index)} />
-                  <MoveAcrossButton label={`העברת ${step.text} למצרכים`} disabled={busy} onClick={() => onMoveStep(index)} />
+                  {advanced ? (
+                    <>
+                      <StepButton label={`הפיכת ${step.text.replace(/:$/, "")} לשלב`} disabled={busy} onClick={() => onMakeStepItem(index)} />
+                      <MoveAcrossButton label={`העברת ${step.text} למצרכים`} disabled={busy} onClick={() => onMoveStep(index)} />
+                    </>
+                  ) : null}
                 </div>
               ) : (
                 <div key={`${step.number}-${index}`} className="flex items-start gap-3 border-b border-neutral-200 px-4 py-3">
@@ -1726,8 +1738,12 @@ function RecipeDetail({
                     <span className="me-2">{itemNumber}.</span>
                     <span>{step.text}</span>
                   </p>
-                  <SubheaderButton label={`הפיכת שלב ${itemNumber} לכותרת`} disabled={busy} onClick={() => onMakeStepSubtitle(index)} />
-                  <MoveAcrossButton label={`העברת שלב ${itemNumber} למצרכים`} disabled={busy} onClick={() => onMoveStep(index)} />
+                  {advanced ? (
+                    <>
+                      <SubheaderButton label={`הפיכת שלב ${itemNumber} לכותרת`} disabled={busy} onClick={() => onMakeStepSubtitle(index)} />
+                      <MoveAcrossButton label={`העברת שלב ${itemNumber} למצרכים`} disabled={busy} onClick={() => onMoveStep(index)} />
+                    </>
+                  ) : null}
                 </div>
               );
             })}
@@ -1744,7 +1760,7 @@ function RecipeDetail({
               isSubtitle(ingredientName(ingredient)) ? (
                 <div key={`${ingredient.text}-${index}`} className="flex items-start gap-3 px-4 py-3">
                   <p className="min-w-0 flex-1 text-start font-semibold">{ingredientName(ingredient)}</p>
-                  <MoveAcrossButton label={`העברת ${ingredientName(ingredient)} להכנה`} disabled={busy} onClick={() => onMoveIngredient(index)} />
+                  {advanced ? <MoveAcrossButton label={`העברת ${ingredientName(ingredient)} להכנה`} disabled={busy} onClick={() => onMoveIngredient(index)} /> : null}
                 </div>
               ) : (
                 <div key={`${ingredient.text}-${index}`} className="flex items-start gap-3 border-b border-neutral-200 px-4 py-3">
@@ -1762,8 +1778,12 @@ function RecipeDetail({
                     </span>
                     <span className="shrink-0 text-neutral-700">{formatAmount(ingredient.quantity, ingredient.unit)}</span>
                   </p>
-                  <SubheaderButton label={`הפיכת ${ingredientName(ingredient)} לכותרת`} disabled={busy} onClick={() => onMakeIngredientSubtitle(index)} />
-                  <MoveAcrossButton label={`העברת ${ingredientName(ingredient)} להכנה`} disabled={busy} onClick={() => onMoveIngredient(index)} />
+                  {advanced ? (
+                    <>
+                      <SubheaderButton label={`הפיכת ${ingredientName(ingredient)} לכותרת`} disabled={busy} onClick={() => onMakeIngredientSubtitle(index)} />
+                      <MoveAcrossButton label={`העברת ${ingredientName(ingredient)} להכנה`} disabled={busy} onClick={() => onMoveIngredient(index)} />
+                    </>
+                  ) : null}
                 </div>
               ),
             )}
@@ -2284,7 +2304,7 @@ function filledText(rows: TextRow[]) {
 
 function DesktopRowButton({ label, disabled, onClick, children }: { label: string; disabled: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
-    <button type="button" className="desktop-only size-6 shrink-0 text-[var(--teal)] disabled:opacity-40" style={{ alignItems: "center", justifyContent: "center" }} aria-label={label} disabled={disabled} onClick={onClick}>
+    <button type="button" className="size-6 shrink-0 text-[var(--teal)] disabled:opacity-40" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center" }} aria-label={label} disabled={disabled} onClick={onClick}>
       {children}
     </button>
   );
