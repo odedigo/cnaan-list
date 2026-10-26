@@ -2,7 +2,7 @@
 
 /** Recipes browser, reader, editor, rating, and Hebrew text export. */
 
-import { useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent, type PointerEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent, type PointerEvent } from "react";
 import { createPortal } from "react-dom";
 import {
   closestCenter,
@@ -124,6 +124,11 @@ export function RecipesPage({ active }: { active: boolean }) {
   const [recipeReload, setRecipeReload] = useState(0);
 
   const byId = useMemo(() => new Map(categories.map((category) => [category.id, category])), [categories]);
+  const directRecipeCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const row of recipes) counts[row.leaf_category_id] = (counts[row.leaf_category_id] ?? 0) + 1;
+    return counts;
+  }, [recipes]);
 
   useEffect(() => {
     if (!opened) return;
@@ -874,6 +879,7 @@ export function RecipesPage({ active }: { active: boolean }) {
               <CategoryTiles
                 categories={childCategories}
                 images={categoryImages}
+                counts={directRecipeCounts}
                 onOpen={setFolderId}
                 onImage={setImageCategoryId}
                 onAdd={() => setAddingCategory(true)}
@@ -1081,6 +1087,7 @@ function dropBlob(images: Record<string, string>, id: string) {
 function CategoryTiles({
   categories,
   images,
+  counts,
   onOpen,
   onImage,
   onAdd,
@@ -1088,6 +1095,7 @@ function CategoryTiles({
 }: {
   categories: CategoryRow[];
   images: Record<string, string>;
+  counts: Record<string, number>;
   onOpen: (id: string) => void;
   onImage: (id: string) => void;
   onAdd: () => void;
@@ -1098,9 +1106,10 @@ function CategoryTiles({
     <div className="grid gap-2 px-3 pt-3" style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))" }}>
       {categories.map((category) => {
         const src = images[category.id];
+        const count = counts[category.id] ?? 0;
         return (
           <div key={category.id} className="relative" {...menuProps(category.id)}>
-            <button type="button" className="block w-full overflow-hidden rounded-lg border border-neutral-200 bg-white text-start shadow-sm" aria-label={category.name} onClick={() => onOpen(category.id)}>
+            <button type="button" className="block w-full overflow-hidden rounded-lg border border-neutral-200 bg-white text-start shadow-sm" aria-label={`${category.name}, ${count}`} onClick={() => onOpen(category.id)}>
               <span className="relative block aspect-square overflow-hidden bg-[var(--cream)] text-neutral-400">
                 {src ? (
                   <img src={src} alt="" className="absolute inset-0 size-full object-cover" />
@@ -1110,7 +1119,10 @@ function CategoryTiles({
                   </span>
                 )}
               </span>
-              <span className="block truncate px-1 py-1 text-center text-xs font-medium">{category.name}</span>
+              <span className="flex min-w-0 items-center justify-center gap-1 px-1 py-1">
+                <span className="min-w-0 truncate text-xs font-medium">{category.name}</span>
+                <span className="shrink-0 rounded-full bg-neutral-200 px-1 text-center text-[10px] font-semibold leading-4 text-neutral-600" style={{ minWidth: "1rem" }}>{count}</span>
+              </span>
             </button>
             <button
               type="button"
@@ -1404,7 +1416,10 @@ function RecipeTiles({
   if (rows.length === 0) return null;
   return (
     <section>
-      <h2 className="px-4 pt-4 text-start text-sm font-semibold">מתכונים</h2>
+      <h2 className="flex items-center gap-1 px-4 pt-4 text-start text-sm font-semibold">
+        <span>מתכונים</span>
+        <span className="shrink-0 rounded-full bg-neutral-200 px-1 text-center text-[10px] font-semibold leading-4 text-neutral-600" style={{ minWidth: "1rem" }}>{rows.length}</span>
+      </h2>
       <div className="grid gap-2 px-3 pt-2" style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))" }}>
       {rows.map((row) => {
         const src = images[row.id];
@@ -1868,6 +1883,10 @@ function IngredientEditor({
     })),
   );
   const [openKey, setOpenKey] = useState<string | null>(null);
+  const [focusKey, setFocusKey] = useState<string | null>(null);
+  useLayoutEffect(() => {
+    if (focusKey) setFocusKey(null);
+  }, [focusKey]);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 8 } }),
@@ -1902,7 +1921,14 @@ function IngredientEditor({
                 <EditRow
                   open={openKey === row.key}
                   summary={<IngredientSummary row={row} />}
-                  onToggle={() => setOpenKey((current) => (current === row.key ? null : row.key))}
+                  onToggle={() => {
+                    if (openKey === row.key) {
+                      setOpenKey(null);
+                      return;
+                    }
+                    setOpenKey(row.key);
+                    setFocusKey(row.key);
+                  }}
                   onDelete={() => {
                     setRows((current) => current.filter((item) => item.key !== row.key));
                     setOpenKey((current) => (current === row.key ? null : current));
@@ -1914,10 +1940,10 @@ function IngredientEditor({
                   }
                 >
                   {row.heading ? (
-                    <Field compact label="כותרת" value={row.name.replace(/:$/, "")} onChange={(name) => setRows((current) => current.map((item) => (item.key === row.key ? { ...item, name } : item)))} />
+                    <Field compact autoFocus={focusKey === row.key} label="כותרת" value={row.name.replace(/:$/, "")} onChange={(name) => setRows((current) => current.map((item) => (item.key === row.key ? { ...item, name } : item)))} />
                   ) : (
                     <>
-                      <Field compact label={`מצרך ${itemNumber}`} value={row.name} onChange={(name) => setRows((current) => current.map((item) => (item.key === row.key ? { ...item, name } : item)))} />
+                      <Field compact autoFocus={focusKey === row.key} label={`מצרך ${itemNumber}`} value={row.name} onChange={(name) => setRows((current) => current.map((item) => (item.key === row.key ? { ...item, name } : item)))} />
                       <div className="grid grid-cols-2 gap-2">
                         <Field compact label="כמות" value={row.quantity} onChange={(quantity) => setRows((current) => current.map((item) => (item.key === row.key ? { ...item, quantity } : item)))} />
                         <UnitField unit={row.unit} onChange={(unit) => setRows((current) => current.map((item) => (item.key === row.key ? { ...item, unit } : item)))} />
@@ -1938,6 +1964,7 @@ function IngredientEditor({
             const key = crypto.randomUUID();
             setRows((current) => [...current, { key, heading: false, name: "", quantity: "", unit: "יחידה", note: "" }]);
             setOpenKey(key);
+            setFocusKey(key);
           }}
         />
         <AddButton
@@ -1946,6 +1973,7 @@ function IngredientEditor({
             const key = crypto.randomUUID();
             setRows((current) => [...current, { key, heading: true, name: "", quantity: "", unit: "", note: "" }]);
             setOpenKey(key);
+            setFocusKey(key);
           }}
         />
       </div>
@@ -1966,6 +1994,10 @@ function StepEditor({
 }) {
   const [rows, setRows] = useState<StepRow[]>(() => steps.map((step) => ({ key: crypto.randomUUID(), heading: isSubtitle(step.text), text: step.text })));
   const [openKey, setOpenKey] = useState<string | null>(null);
+  const [focusKey, setFocusKey] = useState<string | null>(null);
+  useLayoutEffect(() => {
+    if (focusKey) setFocusKey(null);
+  }, [focusKey]);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 8 } }),
@@ -2000,19 +2032,23 @@ function StepEditor({
                 <EditRow
                   open={openKey === row.key}
                   summary={<StepSummary row={row} number={itemNumber} />}
-                  onToggle={() => setOpenKey((current) => (current === row.key ? null : row.key))}
+                  onToggle={() => {
+                    if (openKey === row.key) {
+                      setOpenKey(null);
+                      return;
+                    }
+                    setOpenKey(row.key);
+                    setFocusKey(row.key);
+                  }}
                   onDelete={() => {
                     setRows((current) => current.filter((item) => item.key !== row.key));
                     setOpenKey((current) => (current === row.key ? null : current));
                   }}
                 >
                   {row.heading ? (
-                    <Field compact label="כותרת" value={row.text.replace(/:$/, "")} onChange={(text) => setRows((current) => current.map((item) => (item.key === row.key ? { ...item, text } : item)))} />
+                    <Field compact autoFocus={focusKey === row.key} label="כותרת" value={row.text.replace(/:$/, "")} onChange={(text) => setRows((current) => current.map((item) => (item.key === row.key ? { ...item, text } : item)))} />
                   ) : (
-                    <label className="block text-start">
-                      <span className="mb-1 block text-sm">{`שלב ${itemNumber}`}</span>
-                      <textarea className="w-full rounded-xl border border-neutral-300 px-3 py-2" rows={3} value={row.text} onChange={(event) => setRows((current) => current.map((item) => (item.key === row.key ? { ...item, text: event.target.value } : item)))} />
-                    </label>
+                    <StepText label={`שלב ${itemNumber}`} value={row.text} autoFocus={focusKey === row.key} onChange={(text) => setRows((current) => current.map((item) => (item.key === row.key ? { ...item, text } : item)))} />
                   )}
                 </EditRow>
               </SortableStep>
@@ -2027,6 +2063,7 @@ function StepEditor({
             const key = crypto.randomUUID();
             setRows((current) => [...current, { key, heading: false, text: "" }]);
             setOpenKey(key);
+            setFocusKey(key);
           }}
         />
         <AddButton
@@ -2035,6 +2072,7 @@ function StepEditor({
             const key = crypto.randomUUID();
             setRows((current) => [...current, { key, heading: true, text: "" }]);
             setOpenKey(key);
+            setFocusKey(key);
           }}
         />
       </div>
@@ -2415,7 +2453,7 @@ function DeleteRow({ onClick }: { onClick: () => void }) {
   );
 }
 
-const recipeUnits = ["גרם", 'ק"ג', 'מ"ל', "ליטר", "כוס", "כף", "כפית", "שן", "חבילה", "שקית", "קופסה", "בקבוק", "קורט", "צרור", "יחידה"];
+const recipeUnits = ["גרם", 'ק"ג', 'מ"ל', "ליטר", "כוס", "כף", "כפית", "שן", "חבילה", "שקית", "קופסה", "בקבוק", "קורט", "צרור", "חופן", "יחידה"];
 
 const recipeUnitAliases: Record<string, string> = {
   כפות: "כף",
@@ -2430,6 +2468,7 @@ const recipeUnitAliases: Record<string, string> = {
   יחידות: "יחידה",
   קופסאות: "קופסה",
   צרורות: "צרור",
+  חופנים: "חופן",
   חבילת: "חבילה",
 };
 
@@ -2496,11 +2535,38 @@ function LinkedText({ text }: { text: string }) {
   );
 }
 
-function Field({ label, value, onChange, compact = false }: { label: string; value: string; onChange: (value: string) => void; compact?: boolean }) {
+function Field({ label, value, onChange, compact = false, autoFocus = false }: { label: string; value: string; onChange: (value: string) => void; compact?: boolean; autoFocus?: boolean }) {
+  const ref = useRef<HTMLInputElement>(null);
+  useLayoutEffect(() => {
+    if (!autoFocus || !ref.current) return;
+    const field = ref.current;
+    field.focus();
+    const end = field.value.length;
+    field.setSelectionRange(end, end);
+    field.scrollIntoView({ block: "center" });
+  }, [autoFocus]);
   return (
     <label className={`${compact ? "mt-2" : "mt-3"} block text-start`}>
       <span className="mb-1 block text-sm">{label}</span>
-      <input className="w-full rounded-xl border border-neutral-300 px-3 py-2" value={value} onChange={(event) => onChange(event.target.value)} />
+      <input ref={ref} className="w-full rounded-xl border border-neutral-300 px-3 py-2" value={value} onChange={(event) => onChange(event.target.value)} />
+    </label>
+  );
+}
+
+function StepText({ label, value, onChange, autoFocus = false }: { label: string; value: string; onChange: (value: string) => void; autoFocus?: boolean }) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    if (!autoFocus || !ref.current) return;
+    const field = ref.current;
+    field.focus();
+    const end = field.value.length;
+    field.setSelectionRange(end, end);
+    field.scrollIntoView({ block: "center" });
+  }, [autoFocus]);
+  return (
+    <label className="block text-start">
+      <span className="mb-1 block text-sm">{label}</span>
+      <textarea ref={ref} className="w-full rounded-xl border border-neutral-300 px-3 py-2" rows={3} value={value} onChange={(event) => onChange(event.target.value)} />
     </label>
   );
 }
