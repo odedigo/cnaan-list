@@ -43,7 +43,6 @@ export function AppHeader({
   clearGroceryEnabled = false,
   onPlus,
   plusLabel = "הוספת שורה",
-  plusAfterSearch = false,
   onExportFile,
   exportFileEnabled = true,
   showCredit = false,
@@ -69,7 +68,6 @@ export function AppHeader({
   clearGroceryEnabled?: boolean;
   onPlus?: () => void;
   plusLabel?: string;
-  plusAfterSearch?: boolean;
   onExportFile?: () => void;
   exportFileEnabled?: boolean;
   showCredit?: boolean;
@@ -77,9 +75,7 @@ export function AppHeader({
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [creditOpen, setCreditOpen] = useState(false);
-  const showMenu = Boolean(
-    onAdd || onSort || onReorder,
-  );
+  const showMenu = Boolean(onAdd || onSort || onReorder || onPlus || onExportFile);
   const searchButton = onSearchToggle ? (
     <button
       type="button"
@@ -120,15 +116,6 @@ export function AppHeader({
         className="grid h-14 grid-cols-[minmax(max-content,1fr)_minmax(0,max-content)_minmax(max-content,1fr)] items-center px-1"
       >
         <div className="flex items-center justify-self-start">
-          {onExportFile ? (
-            <HeaderButton
-              label="ייצוא מתכון"
-              disabled={!actionsEnabled || !exportFileEnabled}
-              onClick={onExportFile}
-            >
-              <ExportIcon className="size-6" />
-            </HeaderButton>
-          ) : null}
           {onToggleCategories && !showMenu ? (
             <HeaderButton
               label={categoriesExpanded ? "כווץ את הקטגוריות" : "הרחב את הקטגוריות"}
@@ -171,25 +158,7 @@ export function AppHeader({
               <MenuIcon className="size-6" />
             </HeaderButton>
           ) : null}
-          {onPlus && !plusAfterSearch ? (
-            <HeaderButton
-              label={plusLabel}
-              disabled={!actionsEnabled}
-              onClick={onPlus}
-            >
-              <PlusIcon className="size-7" />
-            </HeaderButton>
-          ) : null}
           {searchSide === "end" ? searchButton : null}
-          {onPlus && plusAfterSearch ? (
-            <HeaderButton
-              label={plusLabel}
-              disabled={!actionsEnabled}
-              onClick={onPlus}
-            >
-              <PlusIcon className="size-7" />
-            </HeaderButton>
-          ) : null}
           {menuOpen && showMenu ? (
             <>
               <button
@@ -203,39 +172,69 @@ export function AppHeader({
                 role="menu"
                 className="absolute right-0 top-12 z-30 w-52 overflow-hidden rounded-xl bg-white py-1 text-start shadow-lg"
               >
-                <MenuItem
-                  label="הוספת קטגוריה"
-                  disabled={!actionsEnabled || !onAdd}
-                  onClick={() => {
-                    setMenuOpen(false);
-                    onAdd?.();
-                  }}
-                >
-                  <PlusIcon className="size-5" />
-                </MenuItem>
-                <MenuItem
-                  label={reorderActive ? "שמירת הסדר" : "גרירה לשינוי סדר"}
-                  pressed={reorderActive}
-                  disabled={!actionsEnabled || !onReorder}
-                  onClick={() => {
-                    setMenuOpen(false);
-                    onReorder?.();
-                  }}
-                >
-                  <ReorderIcon
-                    className={`size-5 ${reorderActive ? "text-[var(--teal)]" : ""}`}
-                  />
-                </MenuItem>
-                <MenuItem
-                  label="מיון אלפביתי"
-                  disabled={!actionsEnabled || !onSort}
-                  onClick={() => {
-                    setMenuOpen(false);
-                    onSort?.();
-                  }}
-                >
-                  <SortIcon className="size-5" />
-                </MenuItem>
+                {onAdd ? (
+                  <MenuItem
+                    label="הוספת קטגוריה"
+                    disabled={!actionsEnabled}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onAdd();
+                    }}
+                  >
+                    <PlusIcon className="size-5" />
+                  </MenuItem>
+                ) : null}
+                {onReorder ? (
+                  <MenuItem
+                    label={reorderActive ? "שמירת הסדר" : "גרירה לשינוי סדר"}
+                    pressed={reorderActive}
+                    disabled={!actionsEnabled}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onReorder();
+                    }}
+                  >
+                    <ReorderIcon
+                      className={`size-5 ${reorderActive ? "text-[var(--teal)]" : ""}`}
+                    />
+                  </MenuItem>
+                ) : null}
+                {onSort ? (
+                  <MenuItem
+                    label="מיון אלפביתי"
+                    disabled={!actionsEnabled}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onSort();
+                    }}
+                  >
+                    <SortIcon className="size-5" />
+                  </MenuItem>
+                ) : null}
+                {onExportFile ? (
+                  <MenuItem
+                    label="ייצוא מתכון"
+                    disabled={!actionsEnabled || !exportFileEnabled}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onExportFile();
+                    }}
+                  >
+                    <ExportIcon className="size-5" />
+                  </MenuItem>
+                ) : null}
+                {onPlus ? (
+                  <MenuItem
+                    label={plusLabel}
+                    disabled={!actionsEnabled}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onPlus();
+                    }}
+                  >
+                    <PlusIcon className="size-5" />
+                  </MenuItem>
+                ) : null}
                 {onToggleCategories ? (
                   <MenuItem
                     label={categoriesExpanded ? "כווץ את הקטגוריות" : "הרחב את הקטגוריות"}

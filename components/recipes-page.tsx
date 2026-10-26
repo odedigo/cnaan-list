@@ -836,8 +836,7 @@ export function RecipesPage({ active }: { active: boolean }) {
         searchValue={query}
         searchPlaceholder="חיפוש מתכון, ד2 לדירוג 2, ד2+ לדירוג 2 ומעלה"
         searchInputRef={searchInputRef}
-        searchSide="end"
-        plusAfterSearch
+        searchSide="start"
         plusLabel="מתכון חדש"
         onSearchToggle={() => {
           setSearchOpen((current) => !current);
