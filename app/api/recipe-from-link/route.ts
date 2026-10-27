@@ -92,12 +92,18 @@ export async function POST(request: Request) {
 }
 
 async function readPage(url: URL) {
+  const [caption, pageText] = await Promise.all([instagramCaption(url).catch(() => ""), readDocument(url).catch(() => "")]);
+  if (caption && !pageText.includes(caption)) return [caption, pageText].filter(Boolean).join("\n\n").slice(0, 12000);
+  return pageText;
+}
+
+async function readDocument(url: URL) {
   let current = url;
   for (let hop = 0; hop < 4; hop += 1) {
     await assertPublic(current);
     const response = await fetch(current, {
       redirect: "manual",
-      headers: { accept: "text/html,application/xhtml+xml", "user-agent": "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36" },
+      headers: pageHeaders(current),
       signal: AbortSignal.timeout(12000),
     });
     if (response.status >= 300 && response.status < 400) {
@@ -110,9 +116,40 @@ async function readPage(url: URL) {
     const type = response.headers.get("content-type") ?? "";
     if (type && !/text\/html|application\/xhtml|text\/plain|application\/json/i.test(type)) return "";
     const html = await response.text();
-    return pageRecipeText(html.slice(0, 400000));
+    const limit = isInstagram(current) ? 1_500_000 : 400_000;
+    return pageRecipeText(html.slice(0, limit));
   }
   return "";
+}
+
+async function instagramCaption(url: URL) {
+  if (!isInstagram(url) || !/^\/(?:reel|p|tv)\/[^/]+/i.test(url.pathname)) return "";
+  const endpoint = new URL("https://www.instagram.com/api/v1/oembed/");
+  endpoint.searchParams.set("url", `${url.origin}${url.pathname}`);
+  await assertPublic(endpoint);
+  const response = await fetch(endpoint, {
+    headers: { accept: "application/json", "user-agent": pageHeaders(endpoint)["user-agent"] },
+    signal: AbortSignal.timeout(12000),
+  });
+  if (!response.ok) return "";
+  const body = (await response.json().catch(() => null)) as { title?: unknown } | null;
+  const title = typeof body?.title === "string" ? body.title.replace(/\r\n/g, "\n").trim() : "";
+  return title.length >= 20 ? title.slice(0, 8000) : "";
+}
+
+function pageHeaders(url: URL) {
+  const desktop = isInstagram(url);
+  return {
+    accept: "text/html,application/xhtml+xml",
+    "accept-language": "he,en;q=0.8",
+    "user-agent": desktop
+      ? "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+      : "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36",
+  };
+}
+
+function isInstagram(url: URL) {
+  return /(^|\.)instagram\.com$/i.test(url.hostname);
 }
 
 async function assertPublic(url: URL) {

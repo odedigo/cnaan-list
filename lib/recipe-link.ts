@@ -97,9 +97,11 @@ export function pageRecipeText(html: string) {
   const structured = recipeBlocks(html);
   const title = metaContent(html, "og:title") || tagText(html, "title");
   const description = metaContent(html, "og:description") || metaContent(html, "description");
-  const extra = [title, description].filter((part) => part && !structured.includes(part));
+  const caption = embeddedCaption(html);
+  const descriptionText = caption && (caption.includes(description) || description.includes(caption)) ? "" : description;
+  const extra = [title, descriptionText, caption].filter((part) => part && !structured.includes(part));
   const joined = [structured, ...extra].filter(Boolean).join("\n\n");
-  if (joined.length >= 400) return joined.slice(0, 12000);
+  if (caption.length >= 80 || joined.length >= 400) return joined.slice(0, 12000);
   const visible = visibleText(html).slice(0, 6000);
   return [joined, visible].filter(Boolean).join("\n\n").slice(0, 12000);
 }
@@ -194,6 +196,71 @@ function metaContent(html: string, name: string) {
 function tagText(html: string, tag: string) {
   const match = html.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`, "i"));
   return match?.[1] ? cleanLine(decode(match[1].replace(/<[^>]+>/g, " "))) : "";
+}
+
+/** Caption text embedded in a public page script, such as an Instagram reel. */
+function embeddedCaption(html: string) {
+  let best = "";
+  for (const match of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)) {
+    const raw = match[1] ?? "";
+    if (!/caption/i.test(raw)) continue;
+    const versions = raw.includes('\\"') ? [raw, raw.replace(/\\+"/g, '"').replace(/\\\\/g, "\\")] : [raw];
+    for (const body of versions) {
+      const text = captionNear(body);
+      if (text.length > best.length) best = text;
+    }
+  }
+  return best.slice(0, 8000);
+}
+
+function captionNear(body: string) {
+  let best = "";
+  for (const key of ['"edge_media_to_caption"', '"caption"']) {
+    let from = 0;
+    while (from < body.length) {
+      const at = body.indexOf(key, from);
+      if (at < 0) break;
+      const text = firstText(body.slice(at + key.length, at + key.length + 8000));
+      if (text.length > best.length) best = text;
+      from = at + key.length;
+    }
+  }
+  return best.length >= 20 ? best : "";
+}
+
+function firstText(source: string) {
+  const at = source.indexOf('"text"');
+  if (at < 0) return "";
+  const quote = source.indexOf('"', at + 6);
+  if (quote < 0) return "";
+  return captionBlock(readJsonString(source, quote));
+}
+
+function readJsonString(source: string, start: number) {
+  if (source[start] !== '"') return "";
+  let out = "";
+  for (let i = start + 1; i < source.length && out.length < 8000; i += 1) {
+    const char = source[i];
+    if (char === "\\") {
+      const next = source[i + 1] ?? "";
+      if (next === "u" && /^[0-9a-fA-F]{4}/.test(source.slice(i + 2, i + 6))) {
+        out += String.fromCharCode(Number.parseInt(source.slice(i + 2, i + 6), 16));
+        i += 5;
+        continue;
+      }
+      const escaped: Record<string, string> = { n: "\n", r: "\r", t: "\t", '"': '"', "\\": "\\", "/": "/" };
+      out += escaped[next] ?? next;
+      i += 1;
+      continue;
+    }
+    if (char === '"') return out;
+    out += char;
+  }
+  return "";
+}
+
+function captionBlock(value: string) {
+  return value.replace(/\r\n/g, "\n").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
 function visibleText(html: string) {
