@@ -14,6 +14,7 @@ import {
   ChevronIcon,
   CloseIcon,
   ExportIcon,
+  CameraIcon,
   LinkIcon,
   MenuIcon,
   PasteIcon,
@@ -47,6 +48,7 @@ export function AppHeader({
   plusLabel = "הוספת שורה",
   onLink,
   onPasteRecipe,
+  onPhotoRecipe,
   onExportFile,
   exportFileEnabled = true,
   showCredit = false,
@@ -74,6 +76,7 @@ export function AppHeader({
   plusLabel?: string;
   onLink?: () => void;
   onPasteRecipe?: () => void;
+  onPhotoRecipe?: () => void;
   onExportFile?: () => void;
   exportFileEnabled?: boolean;
   showCredit?: boolean;
@@ -81,7 +84,7 @@ export function AppHeader({
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [creditOpen, setCreditOpen] = useState(false);
-  const showMenu = Boolean(onAdd || onSort || onReorder || onPlus || onLink || onPasteRecipe || onExportFile);
+  const showMenu = Boolean(onAdd || onSort || onReorder || onPlus || onLink || onPasteRecipe || onPhotoRecipe || onExportFile);
   const searchButton = onSearchToggle ? (
     <button
       type="button"
@@ -266,6 +269,18 @@ export function AppHeader({
                     }}
                   >
                     <PasteIcon className="size-5" />
+                  </MenuItem>
+                ) : null}
+                {onPhotoRecipe ? (
+                  <MenuItem
+                    label="מתכון מתמונה"
+                    disabled={!actionsEnabled}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onPhotoRecipe();
+                    }}
+                  >
+                    <CameraIcon className="size-5" />
                   </MenuItem>
                 ) : null}
                 {onToggleCategories ? (

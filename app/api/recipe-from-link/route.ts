@@ -1,4 +1,4 @@
-/** Reads a shared link, or pasted recipe text, and turns a recipe in it into editor fields. */
+/** Reads a shared link, pasted recipe text, or a photo of a recipe, and turns it into editor fields. */
 
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
@@ -23,8 +23,10 @@ export async function POST(request: Request) {
   let shared: SharedLink = { title: "", text: "", url: "" };
   let categories: CategoryChoice[] = [];
   let textOnly = false;
+  let imageType = "";
+  let imageData = "";
   try {
-    const body = (await request.json()) as { title?: unknown; text?: unknown; url?: unknown; textOnly?: unknown; categories?: unknown };
+    const body = (await request.json()) as { title?: unknown; text?: unknown; url?: unknown; textOnly?: unknown; categories?: unknown; imageType?: unknown; imageData?: unknown };
     shared = {
       title: typeof body.title === "string" ? body.title.trim().slice(0, 300) : "",
       text: typeof body.text === "string" ? body.text.trim().slice(0, maxText) : "",
@@ -32,9 +34,12 @@ export async function POST(request: Request) {
     };
     textOnly = body.textOnly === true;
     categories = readCategories(body.categories);
+    imageType = typeof body.imageType === "string" ? body.imageType : "";
+    imageData = typeof body.imageData === "string" ? body.imageData : "";
   } catch {
     return Response.json({ error: "לא ניתן לקרוא את הקישור" }, { status: 400 });
   }
+  if (imageData.trim()) return recipeFromPhoto(imageType, imageData, categories, key, model);
 
   const emptyMessage = textOnly ? "הטקסט אינו מכיל מתכון" : "הקישור אינו מכיל מתכון";
   const pageUrl = textOnly ? null : (safePageUrl(shared.url) ?? safePageUrl(findHttpUrl(shared.text)) ?? safePageUrl(findHttpUrl(shared.title)));
@@ -360,6 +365,101 @@ function readCategories(value: unknown): CategoryChoice[] {
   return choices;
 }
 
+async function recipeFromPhoto(imageType: string, imageData: string, categories: CategoryChoice[], key: string, model: string) {
+  const image = photoBytes(imageType, imageData);
+  if (!image) return Response.json({ error: "לא ניתן לקרוא את התמונה" }, { status: 400 });
+  let response: Response;
+  try {
+    response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-goog-api-key": key },
+      body: JSON.stringify({
+        contents: [{ parts: [{ inlineData: { mimeType: image.media, data: image.data } }, { text: imagePrompt(categories) }] }],
+        generationConfig: {
+          temperature: 0,
+          responseFormat: { text: { mimeType: "APPLICATION_JSON", schema: recipeSchema(categories, true) } },
+        },
+      }),
+      signal: AbortSignal.timeout(55000),
+    });
+  } catch {
+    return Response.json({ error: "לא ניתן להתחבר ל-Gemini" }, { status: 502 });
+  }
+  if (!response.ok) return geminiError(response, "לא ניתן לקרוא את התמונה");
+  const payload = await response.json().catch(() => null);
+  const usage = tokenUsage(payload);
+  const parsed = jsonText(payload);
+  if (!parsed || typeof parsed !== "object") return Response.json({ error: "Gemini לא החזיר תוצאה", usage }, { status: 502 });
+  const record = parsed as Record<string, unknown>;
+  if (record.recipe === false) return Response.json({ error: "התמונה אינה מכילה מתכון", usage }, { status: 422 });
+  const title = typeof record.title === "string" ? record.title.trim().slice(0, 200) : "";
+  const ingredients = normalizeIngredients(record.ingredients ? { rows: record.ingredients } : record);
+  const steps = normalizeSteps(record.steps ? { rows: record.steps } : record);
+  if (!title || (ingredients.length === 0 && steps.length === 0)) return Response.json({ error: "התמונה אינה מכילה מתכון", usage }, { status: 422 });
+  const categoryIds = matchCategoryIds(record.categoryNames, categories);
+  const newCategory = categoryIds.length > 0 ? "" : typeof record.newCategory === "string" ? record.newCategory.trim().slice(0, 80) : "";
+  return Response.json({
+    title,
+    sourceText: "",
+    sourceUrl: "",
+    notes: typeof record.notes === "string" ? record.notes.trim().slice(0, 2000) : "",
+    ingredients,
+    steps,
+    categoryIds,
+    newCategory,
+    hasDishImage: record.hasDishImage === true,
+    dishBox: record.hasDishImage === true ? dishBox(record.dishBox) : null,
+    usage,
+  });
+}
+
+function photoBytes(type: string, data: string) {
+  const media = type === "image/jpg" ? "image/jpeg" : type.trim().toLowerCase();
+  if (media !== "image/jpeg" && media !== "image/png" && media !== "image/webp") return null;
+  const cleaned = data.replace(/\s/g, "");
+  if (!cleaned || cleaned.length > 3_400_000 || !/^[A-Za-z0-9+/]+={0,2}$/.test(cleaned)) return null;
+  const bytes = Buffer.from(cleaned, "base64");
+  if (bytes.byteLength < 800 || bytes.byteLength > 2_500_000) return null;
+  if (sniffedImageType(bytes) !== media) return null;
+  return { media, data: cleaned };
+}
+
+function dishBox(value: unknown) {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const ymin = Number(record.ymin);
+  const xmin = Number(record.xmin);
+  const ymax = Number(record.ymax);
+  const xmax = Number(record.xmax);
+  if (![ymin, xmin, ymax, xmax].every((item) => Number.isFinite(item))) return null;
+  const top = Math.min(1000, Math.max(0, Math.min(ymin, ymax)));
+  const bottom = Math.min(1000, Math.max(0, Math.max(ymin, ymax)));
+  const left = Math.min(1000, Math.max(0, Math.min(xmin, xmax)));
+  const right = Math.min(1000, Math.max(0, Math.max(xmin, xmax)));
+  if (bottom - top < 80 || right - left < 80) return null;
+  return { ymin: top, xmin: left, ymax: bottom, xmax: right };
+}
+
+function imagePrompt(categories: CategoryChoice[]) {
+  const names = categories.map((category) => (category.parentName ? `${category.parentName} / ${category.name}` : category.name));
+  const list = names.length > 0 ? names.map((name) => `- ${name}`).join("\n") : "- (none)";
+  return `Extract one recipe from this photo or screenshot.
+If it is not a recipe, set recipe to false and leave the other fields empty.
+Keep the original wording and order. Do not invent ingredients, steps, or comments.
+A section title is a heading. Remove leading step numbers.
+Map חצי to 1/2, רבע to 1/4, שליש to 1/3, and שני שליש to 2/3.
+Put servings, time, and extra remarks in notes.
+Leave sourceText empty.
+categoryNames must be copied from this list when one or more fit. Prefer the most specific. If none fit, leave categoryNames empty and set newCategory to a short Hebrew category name. Otherwise newCategory is empty.
+If the image contains a photograph of the finished dish, set hasDishImage to true and dishBox to that photograph only. Coordinates are 0 to 1000: ymin, xmin, ymax, xmax.
+Do not include the title, the ingredient list, logos, or hands holding a phone in the box.
+If the dish photograph fills the image, set dishBox to 0, 0, 1000, 1000.
+If there is no dish photograph, set hasDishImage to false and every dishBox value to 0.
+
+Categories:
+${list}`;
+}
+
 function prompt(material: string, categories: CategoryChoice[], textOnly: boolean) {
   const names = categories.map((category) => (category.parentName ? `${category.parentName} / ${category.name}` : category.name));
   const list = names.length > 0 ? names.map((name) => `- ${name}`).join("\n") : "- (none)";
@@ -381,7 +481,7 @@ ${list}
 ${material}`;
 }
 
-function recipeSchema(categories: CategoryChoice[]) {
+function recipeSchema(categories: CategoryChoice[], withDish = false) {
   const names = [...new Set(categories.map((category) => (category.parentName ? `${category.parentName} / ${category.name}` : category.name)))];
   return {
     type: "object",
@@ -392,6 +492,21 @@ function recipeSchema(categories: CategoryChoice[]) {
       notes: { type: "string" },
       categoryNames: { type: "array", items: names.length > 0 ? { type: "string", enum: names } : { type: "string" } },
       newCategory: { type: "string" },
+      ...(withDish
+        ? {
+            hasDishImage: { type: "boolean" },
+            dishBox: {
+              type: "object",
+              properties: {
+                ymin: { type: "number" },
+                xmin: { type: "number" },
+                ymax: { type: "number" },
+                xmax: { type: "number" },
+              },
+              required: ["ymin", "xmin", "ymax", "xmax"],
+            },
+          }
+        : {}),
       ingredients: {
         type: "array",
         items: {
@@ -418,7 +533,7 @@ function recipeSchema(categories: CategoryChoice[]) {
         },
       },
     },
-    required: ["recipe", "title", "sourceText", "notes", "categoryNames", "newCategory", "ingredients", "steps"],
+    required: ["recipe", "title", "sourceText", "notes", "categoryNames", "newCategory", "ingredients", "steps", ...(withDish ? ["hasDishImage", "dishBox"] : [])],
   };
 }
 
@@ -448,12 +563,12 @@ function jsonText(payload: unknown) {
   }
 }
 
-async function geminiError(response: Response) {
+async function geminiError(response: Response, fallback = "לא ניתן להמיר את הטקסט") {
   const body = (await response.json().catch(() => null)) as { error?: { message?: string } } | null;
   const message = body?.error?.message ?? "";
   if (response.status === 401 || response.status === 403) return Response.json({ error: "מפתח Gemini אינו תקין" }, { status: 503 });
   if (response.status === 429 || /quota|rate/i.test(message)) return Response.json({ error: "חריגה ממכסת Gemini" }, { status: 429 });
-  return Response.json({ error: "לא ניתן להמיר את הטקסט" }, { status: 502 });
+  return Response.json({ error: fallback }, { status: 502 });
 }
 
 async function requireUser() {

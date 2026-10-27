@@ -2,7 +2,7 @@
 
 /** Recipes browser, reader, editor, rating, and Hebrew text export. */
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent, type PointerEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type MouseEvent, type PointerEvent } from "react";
 import { createPortal } from "react-dom";
 import {
   closestCenter,
@@ -19,7 +19,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { AppHeader } from "@/components/app-header";
 import { ArrowIcon, CameraIcon, CheckIcon, ChevronIcon, ClearMarksIcon, CloseIcon, GripIcon, ImageIcon, MoveAcrossIcon, PenIcon, PlusIcon, StepIcon, SubheaderIcon } from "@/components/icons";
 import { useLists } from "@/components/lists-provider";
-import { shrinkImage } from "@/lib/images";
+import { dishPhotoFile, separateDishBox, shrinkImage, type NormBox } from "@/lib/images";
 import { nameInsertIndex } from "@/lib/order";
 import { readRecipeAdvanced, recipeAdvancedEvent } from "@/lib/recipe-advanced";
 import type { CategoryChoice, ImportedRecipe, SharedLink } from "@/lib/recipe-link";
@@ -126,6 +126,7 @@ export function RecipesPage({ active }: { active: boolean }) {
   const [recipeReload, setRecipeReload] = useState(0);
   const [linkOpen, setLinkOpen] = useState(false);
   const [textOpen, setTextOpen] = useState(false);
+  const [photoOpen, setPhotoOpen] = useState(false);
   const [sharedLink, setSharedLink] = useState<SharedLink | null>(null);
 
   const byId = useMemo(() => new Map(categories.map((category) => [category.id, category])), [categories]);
@@ -521,17 +522,18 @@ export function RecipesPage({ active }: { active: boolean }) {
       const { error: labelError } = await supabase.from("recipe_labels").insert(labelIds.map((categoryId) => ({ recipe_id: data.id, category_id: categoryId })));
       if (labelError) throw labelError;
       const row = data as RecipeRow;
-      const file = importedImageFile(imported);
-      if (file) {
-        let uploaded: RecipeImage | null = null;
+      const files = importedImageFiles(imported);
+      if (files.length > 0) {
+        const uploaded: RecipeImage[] = [];
         try {
-          uploaded = await uploadRecipeImage(supabase, lists.accountId, row.id, file);
-          document.images = [uploaded];
+          for (const file of files) uploaded.push(await uploadRecipeImage(supabase, lists.accountId, row.id, file));
+          document.images = uploaded;
           const { error: imageError } = await supabase.from("recipes").update({ document }).eq("id", row.id);
           if (imageError) throw imageError;
         } catch {
           document.images = [];
-          if (uploaded?.storagePath) await supabase.storage.from("recipe-images").remove([uploaded.storagePath]);
+          const paths = uploaded.flatMap((image) => (image.storagePath ? [image.storagePath] : []));
+          if (paths.length > 0) await supabase.storage.from("recipe-images").remove(paths);
         }
       }
       setRecipes((current) => [...current.map((item) => (shifted.some((shiftedRow) => shiftedRow.id === item.id) ? { ...item, sort_order: item.sort_order + 1 } : item)), row]);
@@ -795,7 +797,30 @@ export function RecipesPage({ active }: { active: boolean }) {
       await saveDocument(open, { ...open.document, images: next });
       if (removed.length > 0) await supabase.storage.from("recipe-images").remove(removed);
       await refreshCover(open.id, visibleImages(next)[0]?.storagePath ?? null);
-      setImageEdit({ id: nextId });
+      const visible = visibleImages(next);
+      const at = visible.findIndex((image) => image.id === nextId);
+      if (at >= 0) setSlide(at);
+      setImageEdit(null);
+    } catch {
+      setError("לא ניתן לשמור את התמונה.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function makeCoverImage(imageId: string) {
+    if (!open) return;
+    const images = [...open.document.images];
+    const index = images.findIndex((image) => image.id === imageId);
+    if (index <= 0) return;
+    const chosen = images[index];
+    const next = [chosen, ...images.filter((image) => image.id !== imageId)];
+    setBusy(true);
+    setError(null);
+    try {
+      await saveDocument(open, { ...open.document, images: next });
+      await refreshCover(open.id, visibleImages(next)[0]?.storagePath ?? null);
+      setSlide(0);
     } catch {
       setError("לא ניתן לשמור את התמונה.");
     } finally {
@@ -970,6 +995,7 @@ export function RecipesPage({ active }: { active: boolean }) {
         onSearchChange={setQuery}
         onLink={!loading && !open && !searching ? () => setLinkOpen(true) : undefined}
         onPasteRecipe={!loading && !open && !searching ? () => setTextOpen(true) : undefined}
+        onPhotoRecipe={!loading && !open && !searching ? () => setPhotoOpen(true) : undefined}
         onExportFile={() => {
           if (!open) return;
           downloadRecipeFile(open.title, recipeExportText({ title: open.title, rating: open.rating, createdAt: open.createdAt, document: open.document }));
@@ -1048,6 +1074,8 @@ export function RecipesPage({ active }: { active: boolean }) {
           onMakeStepItem={(index) => void makeStepItem(index)}
           onSaveInfo={saveRecipeEdits}
           onImage={(id) => setImageEdit({ id })}
+          onDeleteImage={(id) => void changeRecipeImage(id, null)}
+          onMakeCover={(id) => void makeCoverImage(id)}
           onDelete={deleteRecipe}
         />
       ) : null}
@@ -1085,6 +1113,20 @@ export function RecipesPage({ active }: { active: boolean }) {
           }}
         />
       ) : null}
+      {photoOpen ? (
+        <LinkRecipeDialog
+          kind="image"
+          shared={null}
+          categories={categories}
+          depth={depth}
+          onClose={() => setPhotoOpen(false)}
+          onDone={async (imported) => {
+            const message = await saveImported(imported);
+            if (!message) setPhotoOpen(false);
+            return message;
+          }}
+        />
+      ) : null}
       {creating ? (
         <NewRecipeDialog
           categories={categories}
@@ -1108,7 +1150,7 @@ export function RecipesPage({ active }: { active: boolean }) {
       ) : null}
       {imageEdit && open ? (
         <RecipeImageDialog
-          title={open.title}
+          title={imageEdit.id ? "החלפת תמונה" : "הוספת תמונה"}
           src={imageEdit.id ? (slides.find((item) => item.id === imageEdit.id)?.url ?? null) : null}
           busy={busy}
           onClose={() => setImageEdit(null)}
@@ -1717,6 +1759,8 @@ function RecipeDetail({
   onMakeStepItem,
   onSaveInfo,
   onImage,
+  onDeleteImage,
+  onMakeCover,
   onDelete,
 }: {
   recipe: OpenRecipe;
@@ -1743,6 +1787,8 @@ function RecipeDetail({
   onMakeStepItem: (index: number) => void;
   onSaveInfo: (draft: EditDraft) => Promise<boolean>;
   onImage: (id: string | null) => void;
+  onDeleteImage: (id: string) => void;
+  onMakeCover: (id: string) => void;
   onDelete: () => Promise<void>;
 }) {
   const [editing, setEditing] = useState(false);
@@ -1836,22 +1882,45 @@ function RecipeDetail({
                       <ImageIcon className="size-10" />
                     </span>
                   )}
+                  {current ? (
+                    <button
+                      type="button"
+                      className="absolute grid size-8 place-items-center rounded-full shadow-sm"
+                      style={{ top: "0.4rem", insetInlineStart: "0.4rem", background: "rgba(255,255,255,0.92)" }}
+                      aria-label={slide === 0 ? "התמונה הראשית" : "סימון כתמונה ראשית"}
+                      aria-pressed={slide === 0}
+                      disabled={busy}
+                      onClick={() => {
+                        if (slide === 0) return;
+                        onMakeCover(current.id);
+                      }}
+                    >
+                      <StarIcon filled={slide === 0} />
+                    </button>
+                  ) : null}
                   {slides.length > 1 ? (
                     <>
                       <ArrowButton label="התמונה הקודמת" side="left" disabled={slide === 0} onClick={() => onSlide(slide - 1)} />
                       <ArrowButton label="התמונה הבאה" side="right" disabled={slide === slides.length - 1} onClick={() => onSlide(slide + 1)} />
+                      <span className="absolute rounded-full px-2 py-0.5 text-sm text-neutral-800 shadow-sm" style={{ bottom: "0.4rem", left: "50%", transform: "translateX(-50%)", background: "rgba(255,255,255,0.92)" }}>
+                        {slide + 1} מתוך {slides.length}
+                      </span>
                     </>
                   ) : null}
-                  <button
-                    type="button"
-                    className="absolute grid size-6 place-items-center rounded-full text-neutral-800 shadow-sm"
-                    style={{ top: "0.2rem", insetInlineEnd: "0.2rem", background: "rgba(255,255,255,0.92)" }}
-                    aria-label="תמונה"
-                    onClick={() => onImage(current?.id ?? null)}
-                  >
-                    <CameraIcon className="size-3" />
-                  </button>
                 </div>
+                <button type="button" className="mt-3 w-full rounded-xl bg-[var(--teal)] py-3 font-medium text-white disabled:opacity-40" disabled={busy} onClick={() => onImage(null)}>
+                  הוספת תמונה
+                </button>
+                {current ? (
+                  <div className="mt-2 flex gap-2">
+                    <button type="button" className="flex-1 rounded-xl bg-neutral-100 py-3 font-medium disabled:opacity-40" disabled={busy} onClick={() => onImage(current.id)}>
+                      החלפת תמונה
+                    </button>
+                    <button type="button" className="flex-1 rounded-xl py-3 font-medium text-red-600 disabled:opacity-40" disabled={busy} onClick={() => onDeleteImage(current.id)}>
+                      מחיקת תמונה
+                    </button>
+                  </div>
+                ) : null}
                 {source?.url ? (
                   <p className="mt-4 text-start">
                     <a href={source.url} target="_blank" rel="noreferrer" style={{ color: "#1d4ed8", textDecoration: "underline" }}>
@@ -2512,7 +2581,7 @@ function LinkRecipeDialog({
   onClose,
   onDone,
 }: {
-  kind: "link" | "text";
+  kind: "link" | "text" | "image";
   shared: SharedLink | null;
   categories: CategoryRow[];
   depth: (id: string) => number;
@@ -2520,6 +2589,8 @@ function LinkRecipeDialog({
   onDone: (recipe: ImportedRecipe) => Promise<string | null>;
 }) {
   const [text, setText] = useState("");
+  const [photo, setPhoto] = useState<File | null>(null);
+  const [photoUrl, setPhotoUrl] = useState("");
   const [error, setError] = useState("");
   const [usage, setUsage] = useState<TokenUsage | null>(null);
   const [pending, setPending] = useState(false);
@@ -2527,11 +2598,14 @@ function LinkRecipeDialog({
   const [seconds, setSeconds] = useState(0);
   const [draft, setDraft] = useState<ImportedRecipe | null>(null);
   const [approvedTitle, setApprovedTitle] = useState("");
+  const [sourceName, setSourceName] = useState("");
   const [categoryIds, setCategoryIds] = useState<string[]>([]);
   const [newCategory, setNewCategory] = useState("");
   const [createNew, setCreateNew] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const startedRef = useRef(false);
+  const cameraRef = useRef<HTMLInputElement>(null);
+  const libraryRef = useRef<HTMLInputElement>(null);
   const ordered = categoryTree(categories);
   useEffect(() => {
     if (!pending) return;
@@ -2540,6 +2614,15 @@ function LinkRecipeDialog({
     return () => window.clearInterval(timer);
   }, [pending]);
   useEffect(() => () => abortRef.current?.abort(), []);
+  useEffect(() => {
+    if (!photo) {
+      setPhotoUrl("");
+      return;
+    }
+    const url = URL.createObjectURL(photo);
+    setPhotoUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [photo]);
   async function convert(source: SharedLink) {
     if (pending) return;
     const controller = new AbortController();
@@ -2582,6 +2665,84 @@ function LinkRecipeDialog({
       setPending(false);
     }
   }
+  async function convertPhoto() {
+    if (!photo || pending) return;
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setError("");
+    setUsage(null);
+    setPending(true);
+    try {
+      const compressed = await shrinkImage(photo, 1280, 0.75);
+      const imageData = await blobToBase64(compressed.blob);
+      const choices: CategoryChoice[] = categories.map((category) => ({
+        id: category.id,
+        name: category.name,
+        parentName: category.parent_id ? (categories.find((row) => row.id === category.parent_id)?.name ?? "") : "",
+      }));
+      const response = await fetch("/api/recipe-from-link", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ imageType: compressed.contentType, imageData, categories: choices }),
+        signal: controller.signal,
+      });
+      const body = (await response.json().catch(() => null)) as (ImportedRecipe & { error?: string; usage?: TokenUsage | null; hasDishImage?: boolean; dishBox?: NormBox | null }) | null;
+      if (body?.usage) setUsage(body.usage);
+      if (!response.ok || !body?.title) {
+        setError(body?.error || "לא ניתן לקרוא את התמונה");
+        return;
+      }
+      let dishType = "";
+      let dishData = "";
+      if (body.hasDishImage && body.dishBox && separateDishBox(body.dishBox)) {
+        try {
+          const dish = await dishPhotoFile(photo, body.dishBox);
+          if (dish) {
+            dishType = dish.contentType;
+            dishData = await blobToBase64(dish.blob);
+          }
+        } catch {
+          dishType = "";
+          dishData = "";
+        }
+      }
+      const known = body.categoryIds.filter((id) => categories.some((category) => category.id === id));
+      const suggested = body.newCategory.trim();
+      const named = suggested ? categories.find((category) => category.name.trim() === suggested) : undefined;
+      const selected = named && !known.includes(named.id) ? [...known, named.id] : known;
+      setApprovedTitle(body.title);
+      setSourceName("");
+      setCategoryIds(selected);
+      setNewCategory(selected.length === 0 ? suggested : "");
+      setCreateNew(categories.length > 0 && selected.length === 0 && Boolean(suggested));
+      setDraft({
+        ...body,
+        sourceText: "",
+        sourceUrl: "",
+        imageType: dishData ? dishType : compressed.contentType,
+        imageData: dishData || imageData,
+        pageImageType: dishData ? compressed.contentType : "",
+        pageImageData: dishData ? imageData : "",
+      });
+    } catch (caught) {
+      if (caught instanceof DOMException && caught.name === "AbortError") return;
+      setError(caught instanceof Error && caught.message === "התמונה גדולה מדי" ? caught.message : "לא ניתן לקרוא את התמונה");
+    } finally {
+      if (abortRef.current === controller) abortRef.current = null;
+      setPending(false);
+    }
+  }
+  function pickPhoto(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setError("בחרו קובץ תמונה");
+      return;
+    }
+    setError("");
+    setPhoto(file);
+  }
   useEffect(() => {
     if (!shared || startedRef.current) return;
     startedRef.current = true;
@@ -2599,6 +2760,8 @@ function LinkRecipeDialog({
     const message = await onDone({
       ...draft,
       title: approvedTitle.trim(),
+      sourceText: kind === "image" ? sourceName.trim() : draft.sourceText,
+      sourceUrl: kind === "image" ? "" : draft.sourceUrl,
       categoryIds,
       newCategory: adding ? newCategory.trim() : "",
     });
@@ -2610,16 +2773,23 @@ function LinkRecipeDialog({
   const clock = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
   const pasted = text.trim();
   const adding = categories.length === 0 || createNew;
-  const canSave = Boolean(approvedTitle.trim()) && (categoryIds.length > 0 || (adding && newCategory.trim()));
+  const canSave = Boolean(approvedTitle.trim()) && (kind !== "image" || Boolean(sourceName.trim())) && (categoryIds.length > 0 || (adding && newCategory.trim()));
   if (draft) {
     return (
       <Overlay label="אישור המתכון" onClose={close}>
         <h3 className="text-start text-lg font-semibold">אישור המתכון</h3>
-        <p className="mt-1 text-start text-sm text-neutral-600">אשרו את שם המתכון ובחרו קטגוריות לשמירה.</p>
-        {dishPreviewUrl(draft) ? (
-          <img alt="תמונת המנה" src={dishPreviewUrl(draft)} className="mt-3 w-full rounded-xl" style={{ height: 180, objectFit: "cover" }} />
+        <p className="mt-1 text-start text-sm text-neutral-600">
+          {kind === "image" ? "אשרו את שם המתכון, כתבו את המקור, ובחרו קטגוריות לשמירה." : "אשרו את שם המתכון ובחרו קטגוריות לשמירה."}
+        </p>
+        {importPreviews(draft).length > 0 ? (
+          <div className="mt-3 flex gap-2">
+            {importPreviews(draft).map((shot) => (
+              <img key={shot.label} alt={shot.label} src={shot.src} className="min-w-0 flex-1 rounded-xl" style={{ height: 180, objectFit: "cover" }} />
+            ))}
+          </div>
         ) : null}
         <Field label="שם המתכון" value={approvedTitle} onChange={setApprovedTitle} autoFocus />
+        {kind === "image" ? <Field label="מקור" value={sourceName} onChange={setSourceName} placeholder="למשל ספר, ערוץ או שם" /> : null}
         {ordered.length > 0 ? (
           <>
             <p className="mb-1 mt-4 text-start text-sm font-semibold">קטגוריות</p>
@@ -2667,7 +2837,43 @@ function LinkRecipeDialog({
       </Overlay>
     );
   }
-  const title = kind === "text" ? "מתכון מטקסט" : "מתכון מקישור";
+  const title = kind === "text" ? "מתכון מטקסט" : kind === "image" ? "מתכון מתמונה" : "מתכון מקישור";
+  if (kind === "image") {
+    return (
+      <Overlay label={title} onClose={close}>
+        <h3 className="text-start text-lg font-semibold">{title}</h3>
+        <p className="mt-1 text-start text-sm text-neutral-600">צלמו דף מתכון, או בחרו תמונה שכוללת את המתכון.</p>
+        <input ref={cameraRef} type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={pickPhoto} />
+        <input ref={libraryRef} type="file" accept="image/*" style={{ display: "none" }} onChange={pickPhoto} />
+        {photoUrl ? <img alt="התמונה שנבחרה" src={photoUrl} className="mt-3 w-full rounded-xl" style={{ height: 180, objectFit: "cover" }} /> : null}
+        {error ? <p className="mt-2 text-start text-sm text-red-700">{error}</p> : null}
+        {usage && !pending ? <TokenNote usage={usage} className="mt-2 text-start text-sm text-neutral-600" /> : null}
+        {pending ? (
+          <div className="mt-4 flex items-center justify-center gap-3 py-3" role="status">
+            <span aria-hidden className="inline-block size-5 rounded-full border-2 border-neutral-200" style={{ borderTopColor: "var(--teal)", animation: "cnaan-spin 0.8s linear infinite" }} />
+            <span>קורא את התמונה · {clock}</span>
+          </div>
+        ) : (
+          <>
+            <button type="button" className="mt-4 w-full rounded-xl bg-[var(--teal)] py-3 font-medium text-white" onClick={() => cameraRef.current?.click()}>
+              צילום
+            </button>
+            <button type="button" className="mt-2 w-full rounded-xl bg-neutral-100 py-3 font-medium" onClick={() => libraryRef.current?.click()}>
+              בחירה מהמכשיר
+            </button>
+            {photo ? (
+              <button type="button" className="mt-2 w-full rounded-xl bg-[var(--teal)] py-3 font-medium text-white" onClick={() => void convertPhoto()}>
+                המרה
+              </button>
+            ) : null}
+          </>
+        )}
+        <button type="button" className="mt-2 w-full rounded-xl bg-neutral-100 py-3 font-medium" onClick={close}>
+          ביטול
+        </button>
+      </Overlay>
+    );
+  }
   return (
     <Overlay label={title} onClose={close}>
       <h3 className="text-start text-lg font-semibold">{title}</h3>
@@ -3056,7 +3262,7 @@ function LinkedText({ text }: { text: string }) {
   );
 }
 
-function Field({ label, value, onChange, compact = false, autoFocus = false }: { label: string; value: string; onChange: (value: string) => void; compact?: boolean; autoFocus?: boolean }) {
+function Field({ label, value, onChange, compact = false, autoFocus = false, placeholder = "" }: { label: string; value: string; onChange: (value: string) => void; compact?: boolean; autoFocus?: boolean; placeholder?: string }) {
   const ref = useRef<HTMLInputElement>(null);
   useLayoutEffect(() => {
     if (!autoFocus || !ref.current) return;
@@ -3069,7 +3275,7 @@ function Field({ label, value, onChange, compact = false, autoFocus = false }: {
   return (
     <label className={`${compact ? "mt-2" : "mt-3"} block text-start`}>
       <span className="mb-1 block text-sm">{label}</span>
-      <input ref={ref} className="w-full rounded-xl border border-neutral-300 px-3 py-2" value={value} onChange={(event) => onChange(event.target.value)} />
+      <input ref={ref} className="w-full rounded-xl border border-neutral-300 px-3 py-2" value={value} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} />
     </label>
   );
 }
@@ -3211,21 +3417,47 @@ function readChecks(recipeId: string): Checks {
   }
 }
 
-function dishPreviewUrl(recipe: ImportedRecipe) {
-  const type = recipe.imageType;
-  if (!recipe.imageData || (type !== "image/jpeg" && type !== "image/png" && type !== "image/webp")) return "";
-  return `data:${type};base64,${recipe.imageData}`;
+function importPreviews(recipe: ImportedRecipe) {
+  const first = previewUrl(recipe.imageType, recipe.imageData);
+  const second = previewUrl(recipe.pageImageType, recipe.pageImageData);
+  const shots = [
+    first ? { src: first, label: second ? "תמונת המנה" : "התמונה שצולמה" } : null,
+    second ? { src: second, label: "התמונה שצולמה" } : null,
+  ];
+  return shots.filter((shot): shot is { src: string; label: string } => shot != null);
 }
 
-function importedImageFile(recipe: ImportedRecipe) {
-  const type = recipe.imageType;
-  const data = recipe.imageData;
+function previewUrl(type: string | undefined, data: string | undefined) {
+  if (!data || (type !== "image/jpeg" && type !== "image/png" && type !== "image/webp")) return "";
+  return `data:${type};base64,${data}`;
+}
+
+function blobToBase64(blob: Blob) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result ?? "");
+      const comma = result.indexOf(",");
+      resolve(comma >= 0 ? result.slice(comma + 1) : result);
+    };
+    reader.onerror = () => reject(reader.error ?? new Error("לא ניתן לקרוא את התמונה"));
+    reader.readAsDataURL(blob);
+  });
+}
+
+function importedImageFiles(recipe: ImportedRecipe) {
+  const first = imageFile(recipe.imageType, recipe.imageData, "dish");
+  const second = imageFile(recipe.pageImageType, recipe.pageImageData, "page");
+  return [first, second].filter((file): file is File => file != null);
+}
+
+function imageFile(type: string | undefined, data: string | undefined, name: string) {
   if (!data || (type !== "image/jpeg" && type !== "image/png" && type !== "image/webp")) return null;
   try {
     const binary = atob(data);
     const bytes = new Uint8Array(binary.length);
     for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
-    return new File([bytes], "dish", { type });
+    return new File([bytes], name, { type });
   } catch {
     return null;
   }

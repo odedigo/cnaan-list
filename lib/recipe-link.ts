@@ -27,6 +27,8 @@ export type ImportedRecipe = {
   newCategory: string;
   imageType?: string;
   imageData?: string;
+  pageImageType?: string;
+  pageImageData?: string;
 };
 
 export function clipShare(value: unknown, max: number) {
