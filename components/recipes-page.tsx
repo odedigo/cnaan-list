@@ -521,6 +521,19 @@ export function RecipesPage({ active }: { active: boolean }) {
       const { error: labelError } = await supabase.from("recipe_labels").insert(labelIds.map((categoryId) => ({ recipe_id: data.id, category_id: categoryId })));
       if (labelError) throw labelError;
       const row = data as RecipeRow;
+      const file = importedImageFile(imported);
+      if (file) {
+        let uploaded: RecipeImage | null = null;
+        try {
+          uploaded = await uploadRecipeImage(supabase, lists.accountId, row.id, file);
+          document.images = [uploaded];
+          const { error: imageError } = await supabase.from("recipes").update({ document }).eq("id", row.id);
+          if (imageError) throw imageError;
+        } catch {
+          document.images = [];
+          if (uploaded?.storagePath) await supabase.storage.from("recipe-images").remove([uploaded.storagePath]);
+        }
+      }
       setRecipes((current) => [...current.map((item) => (shifted.some((shiftedRow) => shiftedRow.id === item.id) ? { ...item, sort_order: item.sort_order + 1 } : item)), row]);
       setLabels((current) => [...current, ...labelIds.map((categoryId) => ({ recipe_id: row.id, category_id: categoryId }))]);
       setSearchOpen(false);
@@ -2603,6 +2616,9 @@ function LinkRecipeDialog({
       <Overlay label="אישור המתכון" onClose={close}>
         <h3 className="text-start text-lg font-semibold">אישור המתכון</h3>
         <p className="mt-1 text-start text-sm text-neutral-600">אשרו את שם המתכון ובחרו קטגוריות לשמירה.</p>
+        {dishPreviewUrl(draft) ? (
+          <img alt="תמונת המנה" src={dishPreviewUrl(draft)} className="mt-3 w-full rounded-xl" style={{ height: 180, objectFit: "cover" }} />
+        ) : null}
         <Field label="שם המתכון" value={approvedTitle} onChange={setApprovedTitle} autoFocus />
         {ordered.length > 0 ? (
           <>
@@ -3192,6 +3208,26 @@ function readChecks(recipeId: string): Checks {
     };
   } catch {
     return { ingredients: [], steps: [] };
+  }
+}
+
+function dishPreviewUrl(recipe: ImportedRecipe) {
+  const type = recipe.imageType;
+  if (!recipe.imageData || (type !== "image/jpeg" && type !== "image/png" && type !== "image/webp")) return "";
+  return `data:${type};base64,${recipe.imageData}`;
+}
+
+function importedImageFile(recipe: ImportedRecipe) {
+  const type = recipe.imageType;
+  const data = recipe.imageData;
+  if (!data || (type !== "image/jpeg" && type !== "image/png" && type !== "image/webp")) return null;
+  try {
+    const binary = atob(data);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+    return new File([bytes], "dish", { type });
+  } catch {
+    return null;
   }
 }
 

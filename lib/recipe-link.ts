@@ -25,6 +25,8 @@ export type ImportedRecipe = {
   steps: ParsedStep[];
   categoryIds: string[];
   newCategory: string;
+  imageType?: string;
+  imageData?: string;
 };
 
 export function clipShare(value: unknown, max: number) {
@@ -193,6 +195,82 @@ function metaContent(html: string, name: string) {
   return "";
 }
 
+export function pageImageUrl(html: string) {
+  return metaContent(html, "og:image") || metaContent(html, "twitter:image") || linkedImage(html);
+}
+
+/** Largest photo in a public embed, such as a Facebook video plugin. */
+export function pluginImageUrl(html: string) {
+  let best = "";
+  let bestArea = 0;
+  for (const match of html.matchAll(/<img\b[^>]*>/gi)) {
+    const tag = match[0];
+    const src = decode(tag.match(/\bsrc=["']([^"']+)["']/i)?.[1] ?? "");
+    if (!/^https:\/\//i.test(src) || /emoji\.php/i.test(src)) continue;
+    let host = "";
+    try {
+      host = new URL(src).host;
+    } catch {
+      continue;
+    }
+    if (/^static\./i.test(host)) continue;
+    const width = Number(tag.match(/\bwidth=["'](\d+)/i)?.[1] ?? 0);
+    const height = Number(tag.match(/\bheight=["'](\d+)/i)?.[1] ?? 0);
+    if ((width > 0 && width < 200) || (height > 0 && height < 200)) continue;
+    const area = width > 0 && height > 0 ? width * height : 1;
+    if (area > bestArea) {
+      best = src;
+      bestArea = area;
+    }
+  }
+  return best;
+}
+
+function linkedImage(html: string) {
+  for (const block of html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) {
+    try {
+      const found = recipeImage(JSON.parse(decode(block[1])));
+      if (found) return found;
+    } catch {
+      continue;
+    }
+  }
+  return "";
+}
+
+function recipeImage(value: unknown): string {
+  if (!value || typeof value !== "object") return "";
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = recipeImage(item);
+      if (found) return found;
+    }
+    return "";
+  }
+  const record = value as Record<string, unknown>;
+  const type = record["@type"];
+  const types = Array.isArray(type) ? type : [type];
+  if (types.some((item) => String(item).toLowerCase() === "recipe")) {
+    const found = imageAddress(record.image);
+    if (found) return found;
+  }
+  if (Array.isArray(record["@graph"])) return recipeImage(record["@graph"]);
+  return "";
+}
+
+function imageAddress(value: unknown): string {
+  if (typeof value === "string" && /^https?:\/\//i.test(value)) return value;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = imageAddress(item);
+      if (found) return found;
+    }
+    return "";
+  }
+  if (value && typeof value === "object") return imageAddress((value as { url?: unknown }).url);
+  return "";
+}
+
 function tagText(html: string, tag: string) {
   const match = html.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`, "i"));
   return match?.[1] ? cleanLine(decode(match[1].replace(/<[^>]+>/g, " "))) : "";
@@ -274,6 +352,26 @@ function visibleText(html: string) {
 
 function cleanLine(value: string) {
   return value.replace(/\s+/g, " ").trim();
+}
+
+/** Display name of the Facebook page that owns a public plugin embed. */
+export function facebookChannelName(html: string) {
+  const skipped = /^(?:stories|help|hashtag|reel|reels|videos|watch|posts|permalink|photo|photos|share|sharer|plugins|login|dialog|privacy|policies|settings|recover|l\.php)$/i;
+  for (const match of html.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi)) {
+    const href = decode(match[1].match(/\bhref=["']([^"']+)["']/i)?.[1] ?? "");
+    const text = cleanLine(match[2].replace(/<[^>]+>/g, " "));
+    if (!text || text.length > 80 || text.startsWith("#") || /^[\d\s.,]+$/.test(text)) continue;
+    let parts: string[] = [];
+    try {
+      parts = new URL(href, "https://www.facebook.com").pathname.split("/").filter(Boolean);
+    } catch {
+      continue;
+    }
+    const root = parts[0] ?? "";
+    if (!root || skipped.test(root)) continue;
+    if (parts.length === 1 || /^(?:pages|people|groups)$/i.test(root)) return text.slice(0, 80);
+  }
+  return "";
 }
 
 /** Post text from Facebook's public video plugin, including the expanded caption. */

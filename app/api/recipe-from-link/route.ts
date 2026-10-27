@@ -5,7 +5,7 @@ import { isIP } from "node:net";
 
 import { createClient } from "@/lib/supabase/server";
 import { normalizeIngredients, normalizeSteps, recipeUnits, type TokenUsage } from "@/lib/recipe-parse";
-import { blockedHost, facebookPostText, findHttpUrl, matchCategoryIds, pageRecipeText, safePageUrl, type CategoryChoice, type SharedLink } from "@/lib/recipe-link";
+import { blockedHost, facebookChannelName, facebookPostText, findHttpUrl, matchCategoryIds, pageImageUrl, pageRecipeText, pluginImageUrl, safePageUrl, type CategoryChoice, type SharedLink } from "@/lib/recipe-link";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -39,9 +39,15 @@ export async function POST(request: Request) {
   const emptyMessage = textOnly ? "הטקסט אינו מכיל מתכון" : "הקישור אינו מכיל מתכון";
   const pageUrl = textOnly ? null : (safePageUrl(shared.url) ?? safePageUrl(findHttpUrl(shared.text)) ?? safePageUrl(findHttpUrl(shared.title)));
   let pageText = "";
+  let imageUrl = "";
+  let sourceName = "";
   if (pageUrl) {
-    pageText = await readPage(pageUrl).catch(() => "");
+    const page = await readPage(pageUrl).catch(() => emptyPage);
+    pageText = page.text;
+    imageUrl = page.imageUrl;
+    sourceName = page.sourceName;
   }
+  const imagePromise = readDishImage(imageUrl, pageUrl);
   const material = (textOnly ? shared.text : [shared.title, shared.text, pageText].filter(Boolean).join("\n\n")).slice(0, maxText);
   if (!material) return Response.json({ error: textOnly ? "הדביקו טקסט של מתכון" : "לא ניתן לקרוא את הקישור" }, { status: 422 });
 
@@ -78,32 +84,44 @@ export async function POST(request: Request) {
 
   const categoryIds = matchCategoryIds(record.categoryNames, categories);
   const newCategory = categoryIds.length > 0 ? "" : typeof record.newCategory === "string" ? record.newCategory.trim().slice(0, 80) : "";
+  const image = await imagePromise;
+  const geminiSource = typeof record.sourceText === "string" ? record.sourceText.trim().slice(0, 200) : "";
   return Response.json({
     title,
-    sourceText: typeof record.sourceText === "string" ? record.sourceText.trim().slice(0, 200) : "",
+    sourceText: sourceName || geminiSource,
     sourceUrl: pageUrl?.toString() ?? (textOnly ? (safePageUrl(findHttpUrl(shared.text))?.toString() ?? "") : ""),
     notes: typeof record.notes === "string" ? record.notes.trim().slice(0, 2000) : "",
     ingredients,
     steps,
     categoryIds,
     newCategory,
+    imageType: image?.mediaType ?? "",
+    imageData: image?.data ?? "",
     usage,
   });
 }
 
-async function readPage(url: URL) {
+type PageBits = { text: string; imageUrl: string; sourceName: string };
+
+const emptyPage: PageBits = { text: "", imageUrl: "", sourceName: "" };
+
+async function readPage(url: URL): Promise<PageBits> {
   const target = needsFacebookResolve(url) ? await resolvePublic(url).catch(() => url) : url;
-  const [caption, pageText] = await Promise.all([socialCaption(target).catch(() => ""), readDocument(target).catch(() => "")]);
-  if (caption && !pageText.includes(caption)) return [caption, pageText].filter(Boolean).join("\n\n").slice(0, 12000);
-  return pageText;
+  const [caption, page] = await Promise.all([socialCaption(target).catch(() => emptyPage), readDocument(target).catch(() => emptyPage)]);
+  const text = caption.text && !page.text.includes(caption.text) ? [caption.text, page.text].filter(Boolean).join("\n\n") : page.text || caption.text;
+  return { text: text.slice(0, 12000), imageUrl: caption.imageUrl || page.imageUrl, sourceName: caption.sourceName };
 }
 
-async function socialCaption(url: URL) {
-  const [instagram, facebook] = await Promise.all([instagramCaption(url).catch(() => ""), facebookCaption(url).catch(() => "")]);
-  return [instagram, facebook].filter(Boolean).join("\n\n");
+async function socialCaption(url: URL): Promise<PageBits> {
+  const [instagram, facebook] = await Promise.all([instagramCaption(url).catch(() => emptyPage), facebookCaption(url).catch(() => emptyPage)]);
+  return {
+    text: [instagram.text, facebook.text].filter(Boolean).join("\n\n"),
+    imageUrl: instagram.imageUrl || facebook.imageUrl,
+    sourceName: instagram.sourceName || facebook.sourceName,
+  };
 }
 
-async function readDocument(url: URL) {
+async function readDocument(url: URL): Promise<PageBits> {
   let current = url;
   for (let hop = 0; hop < 4; hop += 1) {
     await assertPublic(current);
@@ -114,22 +132,23 @@ async function readDocument(url: URL) {
     });
     if (response.status >= 300 && response.status < 400) {
       const location = response.headers.get("location");
-      if (!location) return "";
+      if (!location) return emptyPage;
       current = new URL(location, current);
       continue;
     }
-    if (!response.ok) return "";
+    if (!response.ok) return emptyPage;
     const type = response.headers.get("content-type") ?? "";
-    if (type && !/text\/html|application\/xhtml|text\/plain|application\/json/i.test(type)) return "";
+    if (type && !/text\/html|application\/xhtml|text\/plain|application\/json/i.test(type)) return emptyPage;
     const html = await response.text();
     const limit = isInstagram(current) ? 1_500_000 : 400_000;
-    return pageRecipeText(html.slice(0, limit));
+    const sliced = html.slice(0, limit);
+    return { text: pageRecipeText(sliced), imageUrl: httpsImage(pageImageUrl(sliced), current), sourceName: "" };
   }
-  return "";
+  return emptyPage;
 }
 
-async function instagramCaption(url: URL) {
-  if (!isInstagram(url) || !/^\/(?:reel|p|tv)\/[^/]+/i.test(url.pathname)) return "";
+async function instagramCaption(url: URL): Promise<PageBits> {
+  if (!isInstagram(url) || !/^\/(?:reel|p|tv)\/[^/]+/i.test(url.pathname)) return emptyPage;
   const endpoint = new URL("https://www.instagram.com/api/v1/oembed/");
   endpoint.searchParams.set("url", `${url.origin}${url.pathname}`);
   await assertPublic(endpoint);
@@ -137,21 +156,24 @@ async function instagramCaption(url: URL) {
     headers: { accept: "application/json", "user-agent": pageHeaders(endpoint)["user-agent"] },
     signal: AbortSignal.timeout(12000),
   });
-  if (!response.ok) return "";
-  const body = (await response.json().catch(() => null)) as { title?: unknown } | null;
+  if (!response.ok) return emptyPage;
+  const body = (await response.json().catch(() => null)) as { title?: unknown; thumbnail_url?: unknown; author_name?: unknown } | null;
   const title = typeof body?.title === "string" ? body.title.replace(/\r\n/g, "\n").trim() : "";
-  return title.length >= 20 ? title.slice(0, 8000) : "";
+  const thumb = typeof body?.thumbnail_url === "string" ? body.thumbnail_url.trim() : "";
+  const author = typeof body?.author_name === "string" ? body.author_name : "";
+  return { text: title.length >= 20 ? title.slice(0, 8000) : "", imageUrl: httpsImage(thumb), sourceName: socialSource(author, "instagram") };
 }
 
-async function facebookCaption(url: URL) {
-  if (!isFacebook(url)) return "";
+async function facebookCaption(url: URL): Promise<PageBits> {
+  if (!isFacebook(url)) return emptyPage;
   const video = await facebookPlugin(url, "video");
-  if (video.length >= 80) return video;
+  if (video.text.length >= 80) return video;
   const post = await facebookPlugin(url, "post");
-  return post.length > video.length ? post : video;
+  if (post.text.length > video.text.length) return { text: post.text, imageUrl: post.imageUrl || video.imageUrl, sourceName: post.sourceName || video.sourceName };
+  return video.text ? { ...video, sourceName: video.sourceName || post.sourceName } : { text: post.text, imageUrl: post.imageUrl || video.imageUrl, sourceName: post.sourceName || video.sourceName };
 }
 
-async function facebookPlugin(url: URL, kind: "video" | "post") {
+async function facebookPlugin(url: URL, kind: "video" | "post"): Promise<PageBits> {
   const endpoint = new URL(`https://www.facebook.com/plugins/${kind}.php`);
   endpoint.searchParams.set("href", facebookHref(url));
   endpoint.searchParams.set("show_text", "true");
@@ -160,9 +182,91 @@ async function facebookPlugin(url: URL, kind: "video" | "post") {
     headers: pageHeaders(endpoint, true),
     signal: AbortSignal.timeout(12000),
   });
-  if (!response.ok) return "";
-  const text = facebookPostText(await response.text());
-  return text.length >= 20 ? text : "";
+  if (!response.ok) return emptyPage;
+  const html = await response.text();
+  const text = facebookPostText(html);
+  return { text: text.length >= 20 ? text : "", imageUrl: httpsImage(pluginImageUrl(html)), sourceName: socialSource(facebookChannelName(html), "facebook") };
+}
+
+function socialSource(channel: string, service: "facebook" | "instagram") {
+  const name = channel.replace(/\s+/g, " ").trim().slice(0, 80);
+  if (!name || name.toLowerCase() === service) return service;
+  return `${name} ${service}`;
+}
+
+async function readDishImage(value: string, page: URL | null) {
+  const start = httpsImage(value);
+  if (!start) return null;
+  try {
+    let current = new URL(start);
+    for (let hop = 0; hop < 3; hop += 1) {
+      await assertPublic(current);
+      const headers: Record<string, string> = {
+        accept: "image/avif,image/webp,image/apng,image/jpeg,image/png,image/*;q=0.8",
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+      };
+      if (page) headers.referer = page.href;
+      const response = await fetch(current, { redirect: "manual", headers, signal: AbortSignal.timeout(12000) });
+      if (response.status >= 300 && response.status < 400) {
+        await response.body?.cancel().catch(() => undefined);
+        const location = response.headers.get("location");
+        const next = location ? httpsImage(new URL(location, current).toString()) : "";
+        if (!next) return null;
+        current = new URL(next);
+        continue;
+      }
+      if (!response.ok) {
+        await response.body?.cancel().catch(() => undefined);
+        return null;
+      }
+      const length = Number(response.headers.get("content-length") ?? 0);
+      if (length > 2_500_000) {
+        await response.body?.cancel().catch(() => undefined);
+        return null;
+      }
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      if (bytes.byteLength < 800 || bytes.byteLength > 2_500_000) return null;
+      const mediaType = sniffedImageType(bytes);
+      if (!mediaType) return null;
+      return { mediaType, data: Buffer.from(bytes).toString("base64") };
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function httpsImage(value: string, base?: URL) {
+  const text = value.trim();
+  if (!text) return "";
+  try {
+    const url = base ? new URL(text, base) : new URL(text);
+    if (url.protocol !== "https:") return "";
+    if (url.username || url.password) return "";
+    if (blockedHost(url.hostname)) return "";
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
+function sniffedImageType(bytes: Uint8Array) {
+  if (bytes.length > 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg";
+  if (bytes.length > 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return "image/png";
+  if (
+    bytes.length > 12 &&
+    bytes[0] === 0x52 &&
+    bytes[1] === 0x49 &&
+    bytes[2] === 0x46 &&
+    bytes[3] === 0x46 &&
+    bytes[8] === 0x57 &&
+    bytes[9] === 0x45 &&
+    bytes[10] === 0x42 &&
+    bytes[11] === 0x50
+  ) {
+    return "image/webp";
+  }
+  return "";
 }
 
 function facebookHref(url: URL) {
