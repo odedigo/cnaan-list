@@ -20,7 +20,6 @@ import { AppHeader } from "@/components/app-header";
 import { ArrowIcon, CameraIcon, CheckIcon, ChevronIcon, ClearMarksIcon, CloseIcon, GripIcon, ImageIcon, MoveAcrossIcon, PenIcon, PlusIcon, StepIcon, SubheaderIcon } from "@/components/icons";
 import { useLists } from "@/components/lists-provider";
 import { shrinkImage } from "@/lib/images";
-import { isAndroidInstalled } from "@/lib/installed-app";
 import { nameInsertIndex } from "@/lib/order";
 import { readRecipeAdvanced, recipeAdvancedEvent } from "@/lib/recipe-advanced";
 import type { CategoryChoice, ImportedRecipe, SharedLink } from "@/lib/recipe-link";
@@ -125,7 +124,6 @@ export function RecipesPage({ active }: { active: boolean }) {
   const [searchThumbs, setSearchThumbs] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [recipeReload, setRecipeReload] = useState(0);
-  const [androidPwa, setAndroidPwa] = useState<boolean | null>(null);
   const [linkOpen, setLinkOpen] = useState(false);
   const [textOpen, setTextOpen] = useState(false);
   const [sharedLink, setSharedLink] = useState<SharedLink | null>(null);
@@ -179,10 +177,6 @@ export function RecipesPage({ active }: { active: boolean }) {
     };
     window.addEventListener(recipesImportedEvent, onImported);
     return () => window.removeEventListener(recipesImportedEvent, onImported);
-  }, []);
-
-  useEffect(() => {
-    setAndroidPwa(isAndroidInstalled());
   }, []);
 
   useEffect(() => {
@@ -952,7 +946,7 @@ export function RecipesPage({ active }: { active: boolean }) {
           setQuery("");
         }}
         onSearchChange={setQuery}
-        onLink={!loading && !open && !searching && androidPwa === false ? () => setLinkOpen(true) : undefined}
+        onLink={!loading && !open && !searching ? () => setLinkOpen(true) : undefined}
         onPasteRecipe={!loading && !open && !searching ? () => setTextOpen(true) : undefined}
         onExportFile={() => {
           if (!open) return;

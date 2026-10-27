@@ -4,10 +4,6 @@ export function isInstalledApp() {
   return window.matchMedia("(display-mode: standalone)").matches || nav.standalone === true;
 }
 
-export function isAndroidInstalled() {
-  return isInstalledApp() && /Android/i.test(navigator.userAgent);
-}
-
 function isIos() {
   const ua = navigator.userAgent;
   if (/iPad|iPhone|iPod/.test(ua)) return true;

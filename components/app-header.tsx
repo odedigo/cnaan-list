@@ -242,16 +242,19 @@ export function AppHeader({
                   </MenuItem>
                 ) : null}
                 {onLink ? (
-                  <MenuItem
-                    label="מתכון מקישור"
-                    disabled={!actionsEnabled}
-                    onClick={() => {
-                      setMenuOpen(false);
-                      onLink();
-                    }}
-                  >
-                    <LinkIcon className="size-5" />
-                  </MenuItem>
+                  <>
+                    <div role="separator" className="mx-3 my-1 h-px bg-neutral-200" />
+                    <MenuItem
+                      label="מתכון מקישור"
+                      disabled={!actionsEnabled}
+                      onClick={() => {
+                        setMenuOpen(false);
+                        onLink();
+                      }}
+                    >
+                      <LinkIcon className="size-5" />
+                    </MenuItem>
+                  </>
                 ) : null}
                 {onPasteRecipe ? (
                   <MenuItem

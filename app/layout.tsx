@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import { Rubik } from "next/font/google";
 
+import { ShareWorker } from "@/components/share-worker";
+
 import "./globals.css";
 
 const rubik = Rubik({ subsets: ["hebrew", "latin"], variable: "--font-rubik" });
@@ -30,6 +32,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang="he" dir="rtl">
       <body className={`${rubik.variable} font-[family-name:var(--font-rubik)] antialiased`}>
+        <ShareWorker />
         <div className="mx-auto min-h-dvh w-full max-w-[480px] bg-[var(--cream)]">{children}</div>
       </body>
     </html>
