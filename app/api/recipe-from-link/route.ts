@@ -5,7 +5,7 @@ import { isIP } from "node:net";
 
 import { createClient } from "@/lib/supabase/server";
 import { normalizeIngredients, normalizeSteps, recipeUnits, type TokenUsage } from "@/lib/recipe-parse";
-import { blockedHost, findHttpUrl, matchCategoryIds, pageRecipeText, safePageUrl, type CategoryChoice, type SharedLink } from "@/lib/recipe-link";
+import { blockedHost, facebookPostText, findHttpUrl, matchCategoryIds, pageRecipeText, safePageUrl, type CategoryChoice, type SharedLink } from "@/lib/recipe-link";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -92,9 +92,15 @@ export async function POST(request: Request) {
 }
 
 async function readPage(url: URL) {
-  const [caption, pageText] = await Promise.all([instagramCaption(url).catch(() => ""), readDocument(url).catch(() => "")]);
+  const target = needsFacebookResolve(url) ? await resolvePublic(url).catch(() => url) : url;
+  const [caption, pageText] = await Promise.all([socialCaption(target).catch(() => ""), readDocument(target).catch(() => "")]);
   if (caption && !pageText.includes(caption)) return [caption, pageText].filter(Boolean).join("\n\n").slice(0, 12000);
   return pageText;
+}
+
+async function socialCaption(url: URL) {
+  const [instagram, facebook] = await Promise.all([instagramCaption(url).catch(() => ""), facebookCaption(url).catch(() => "")]);
+  return [instagram, facebook].filter(Boolean).join("\n\n");
 }
 
 async function readDocument(url: URL) {
@@ -137,19 +143,87 @@ async function instagramCaption(url: URL) {
   return title.length >= 20 ? title.slice(0, 8000) : "";
 }
 
-function pageHeaders(url: URL) {
-  const desktop = isInstagram(url);
-  return {
+async function facebookCaption(url: URL) {
+  if (!isFacebook(url)) return "";
+  const video = await facebookPlugin(url, "video");
+  if (video.length >= 80) return video;
+  const post = await facebookPlugin(url, "post");
+  return post.length > video.length ? post : video;
+}
+
+async function facebookPlugin(url: URL, kind: "video" | "post") {
+  const endpoint = new URL(`https://www.facebook.com/plugins/${kind}.php`);
+  endpoint.searchParams.set("href", facebookHref(url));
+  endpoint.searchParams.set("show_text", "true");
+  await assertPublic(endpoint);
+  const response = await fetch(endpoint, {
+    headers: pageHeaders(endpoint, true),
+    signal: AbortSignal.timeout(12000),
+  });
+  if (!response.ok) return "";
+  const text = facebookPostText(await response.text());
+  return text.length >= 20 ? text : "";
+}
+
+function facebookHref(url: URL) {
+  const next = new URL(url.href);
+  next.hash = "";
+  next.protocol = "https:";
+  if (/(^|\.)(?:facebook|fb)\.com$/i.test(next.hostname)) next.hostname = "www.facebook.com";
+  return next.toString();
+}
+
+function needsFacebookResolve(url: URL) {
+  if (!isFacebook(url) || url.hostname === "fb.watch" || url.pathname.startsWith("/share/")) return isFacebook(url);
+  return !/\/(reel|reels|videos|watch|posts|permalink|photo|photos|story)(?:\/|$)/i.test(url.pathname) && !url.searchParams.has("v") && !url.searchParams.has("story_fbid") && !url.searchParams.has("fbid");
+}
+
+async function resolvePublic(url: URL) {
+  let current = url;
+  for (let hop = 0; hop < 4; hop += 1) {
+    await assertPublic(current);
+    const response = await fetch(current, {
+      redirect: "manual",
+      headers: pageHeaders(current),
+      signal: AbortSignal.timeout(12000),
+    });
+    if (response.status >= 300 && response.status < 400) {
+      await response.body?.cancel().catch(() => undefined);
+      const location = response.headers.get("location");
+      if (!location) return current;
+      current = new URL(location, current);
+      continue;
+    }
+    await response.body?.cancel().catch(() => undefined);
+    return current;
+  }
+  return current;
+}
+
+function pageHeaders(url: URL, desktopPlugin = false) {
+  const desktop = desktopPlugin || isInstagram(url);
+  const headers: Record<string, string> = {
     accept: "text/html,application/xhtml+xml",
     "accept-language": "he,en;q=0.8",
     "user-agent": desktop
       ? "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
       : "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36",
   };
+  if (isFacebook(url) || desktopPlugin) {
+    headers["sec-fetch-dest"] = "document";
+    headers["sec-fetch-mode"] = "navigate";
+    headers["upgrade-insecure-requests"] = "1";
+  }
+  return headers;
 }
 
 function isInstagram(url: URL) {
   return /(^|\.)instagram\.com$/i.test(url.hostname);
+}
+
+function isFacebook(url: URL) {
+  const host = url.hostname.toLowerCase();
+  return host === "fb.watch" || host === "fb.com" || host.endsWith(".fb.com") || host === "facebook.com" || host.endsWith(".facebook.com");
 }
 
 async function assertPublic(url: URL) {

@@ -276,8 +276,45 @@ function cleanLine(value: string) {
   return value.replace(/\s+/g, " ").trim();
 }
 
+/** Post text from Facebook's public video plugin, including the expanded caption. */
+export function facebookPostText(html: string) {
+  const classAt = html.search(/class=["'][^"']*\buserContent\b/);
+  if (classAt < 0) return "";
+  const open = html.lastIndexOf("<div", classAt);
+  if (open < 0) return "";
+  const block = balancedDiv(html, open);
+  const shown = block.replace(/<span\b[^>]*class=["'][^"']*\btext_exposed_hide\b[^"']*["'][^>]*>[\s\S]*?<\/span>/gi, "");
+  return shown
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/\u00a0/g, " ")
+    .split("\n")
+    .map((line) => cleanLine(decode(line)))
+    .filter(Boolean)
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()
+    .slice(0, 8000);
+}
+
+function balancedDiv(html: string, open: number) {
+  let depth = 0;
+  const tag = /<\/?div\b[^>]*>/gi;
+  tag.lastIndex = open;
+  let match: RegExpExecArray | null;
+  while ((match = tag.exec(html))) {
+    if (match[0].startsWith("</")) depth -= 1;
+    else depth += 1;
+    if (depth === 0) return html.slice(open, tag.lastIndex);
+  }
+  return "";
+}
+
 function decode(value: string) {
   return value
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) => fromCode(Number.parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, digits: string) => fromCode(Number(digits)))
     .replace(/&nbsp;/gi, " ")
     .replace(/&amp;/gi, "&")
     .replace(/&lt;/gi, "<")
@@ -285,6 +322,11 @@ function decode(value: string) {
     .replace(/&quot;/gi, '"')
     .replace(/&#0*39;/g, "'")
     .replace(/&#x0*27;/gi, "'");
+}
+
+function fromCode(code: number) {
+  if (!Number.isInteger(code) || code < 0 || code > 0x10ffff) return "";
+  return String.fromCodePoint(code);
 }
 
 function normalizeName(value: string) {

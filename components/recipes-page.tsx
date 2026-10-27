@@ -462,20 +462,26 @@ export function RecipesPage({ active }: { active: boolean }) {
     }
   }
 
-  async function saveImported(imported: ImportedRecipe) {
+  async function saveImported(imported: ImportedRecipe): Promise<string | null> {
     setBusy(true);
     setError(null);
     try {
       let categoryIds = imported.categoryIds.filter((id) => byId.has(id));
-      if (categoryIds.length === 0) {
-        const name = imported.newCategory.trim() || "כללי";
+      const name = imported.newCategory.trim();
+      if (name) {
         const existing = categories.find((category) => category.name.trim() === name);
-        if (existing) categoryIds = [existing.id];
-        else {
+        if (existing) {
+          if (!categoryIds.includes(existing.id)) categoryIds = [...categoryIds, existing.id];
+        } else {
           const created = await createCategory(name, null);
-          if (!created) return;
-          categoryIds = [created];
+          if (!created) return "לא ניתן ליצור קטגוריה.";
+          categoryIds = [...categoryIds, created];
         }
+      }
+      if (categoryIds.length === 0) {
+        const message = "בחרו קטגוריה.";
+        setError(message);
+        return message;
       }
       const leaf = chooseLeaf(categoryIds, categoryIds[0], depth);
       const labelIds = [...new Set([...(chain(leaf).length > 0 ? chain(leaf) : [leaf]), ...categoryIds])];
@@ -530,8 +536,11 @@ export function RecipesPage({ active }: { active: boolean }) {
         createdAt: row.created_at,
         document,
       });
+      return null;
     } catch {
-      setError("לא ניתן לשמור את המתכון.");
+      const message = "לא ניתן לשמור את המתכון.";
+      setError(message);
+      return message;
     } finally {
       setBusy(false);
     }
@@ -1033,15 +1042,19 @@ export function RecipesPage({ active }: { active: boolean }) {
         <LinkRecipeDialog
           kind="link"
           shared={sharedLink}
-          categories={categories.map((category) => ({ id: category.id, name: category.name, parentName: category.parent_id ? (byId.get(category.parent_id)?.name ?? "") : "" }))}
+          categories={categories}
+          depth={depth}
           onClose={() => {
             setLinkOpen(false);
             setSharedLink(null);
           }}
-          onDone={(imported) => {
-            setLinkOpen(false);
-            setSharedLink(null);
-            void saveImported(imported);
+          onDone={async (imported) => {
+            const message = await saveImported(imported);
+            if (!message) {
+              setLinkOpen(false);
+              setSharedLink(null);
+            }
+            return message;
           }}
         />
       ) : null}
@@ -1049,11 +1062,13 @@ export function RecipesPage({ active }: { active: boolean }) {
         <LinkRecipeDialog
           kind="text"
           shared={null}
-          categories={categories.map((category) => ({ id: category.id, name: category.name, parentName: category.parent_id ? (byId.get(category.parent_id)?.name ?? "") : "" }))}
+          categories={categories}
+          depth={depth}
           onClose={() => setTextOpen(false)}
-          onDone={(imported) => {
-            setTextOpen(false);
-            void saveImported(imported);
+          onDone={async (imported) => {
+            const message = await saveImported(imported);
+            if (!message) setTextOpen(false);
+            return message;
           }}
         />
       ) : null}
@@ -2480,22 +2495,31 @@ function LinkRecipeDialog({
   kind,
   shared,
   categories,
+  depth,
   onClose,
   onDone,
 }: {
   kind: "link" | "text";
   shared: SharedLink | null;
-  categories: CategoryChoice[];
+  categories: CategoryRow[];
+  depth: (id: string) => number;
   onClose: () => void;
-  onDone: (recipe: ImportedRecipe) => void;
+  onDone: (recipe: ImportedRecipe) => Promise<string | null>;
 }) {
   const [text, setText] = useState("");
   const [error, setError] = useState("");
   const [usage, setUsage] = useState<TokenUsage | null>(null);
   const [pending, setPending] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [seconds, setSeconds] = useState(0);
+  const [draft, setDraft] = useState<ImportedRecipe | null>(null);
+  const [approvedTitle, setApprovedTitle] = useState("");
+  const [categoryIds, setCategoryIds] = useState<string[]>([]);
+  const [newCategory, setNewCategory] = useState("");
+  const [createNew, setCreateNew] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const startedRef = useRef(false);
+  const ordered = categoryTree(categories);
   useEffect(() => {
     if (!pending) return;
     setSeconds(0);
@@ -2511,10 +2535,15 @@ function LinkRecipeDialog({
     setUsage(null);
     setPending(true);
     try {
+      const choices: CategoryChoice[] = categories.map((category) => ({
+        id: category.id,
+        name: category.name,
+        parentName: category.parent_id ? (categories.find((row) => row.id === category.parent_id)?.name ?? "") : "",
+      }));
       const response = await fetch("/api/recipe-from-link", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ...source, textOnly: kind === "text", categories }),
+        body: JSON.stringify({ ...source, textOnly: kind === "text", categories: choices }),
         signal: controller.signal,
       });
       const body = (await response.json().catch(() => null)) as (ImportedRecipe & { error?: string; usage?: TokenUsage | null }) | null;
@@ -2523,7 +2552,15 @@ function LinkRecipeDialog({
         setError(body?.error || (kind === "text" ? "לא ניתן להמיר את הטקסט" : "לא ניתן לקרוא את הקישור"));
         return;
       }
-      onDone(body);
+      const known = body.categoryIds.filter((id) => categories.some((category) => category.id === id));
+      const suggested = body.newCategory.trim();
+      const named = suggested ? categories.find((category) => category.name.trim() === suggested) : undefined;
+      const selected = named && !known.includes(named.id) ? [...known, named.id] : known;
+      setApprovedTitle(body.title);
+      setCategoryIds(selected);
+      setNewCategory(selected.length === 0 ? suggested : "");
+      setCreateNew(categories.length > 0 && selected.length === 0 && Boolean(suggested));
+      setDraft(body);
     } catch (caught) {
       if (caught instanceof DOMException && caught.name === "AbortError") return;
       setError(kind === "text" ? "לא ניתן להמיר את הטקסט" : "לא ניתן לקרוא את הקישור");
@@ -2541,8 +2578,79 @@ function LinkRecipeDialog({
     abortRef.current?.abort();
     onClose();
   }
+  async function approve() {
+    if (!draft || saving) return;
+    setSaving(true);
+    setError("");
+    const adding = categories.length === 0 || createNew;
+    const message = await onDone({
+      ...draft,
+      title: approvedTitle.trim(),
+      categoryIds,
+      newCategory: adding ? newCategory.trim() : "",
+    });
+    if (message) {
+      setError(message);
+      setSaving(false);
+    }
+  }
   const clock = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
   const pasted = text.trim();
+  const adding = categories.length === 0 || createNew;
+  const canSave = Boolean(approvedTitle.trim()) && (categoryIds.length > 0 || (adding && newCategory.trim()));
+  if (draft) {
+    return (
+      <Overlay label="אישור המתכון" onClose={close}>
+        <h3 className="text-start text-lg font-semibold">אישור המתכון</h3>
+        <p className="mt-1 text-start text-sm text-neutral-600">אשרו את שם המתכון ובחרו קטגוריות לשמירה.</p>
+        <Field label="שם המתכון" value={approvedTitle} onChange={setApprovedTitle} autoFocus />
+        {ordered.length > 0 ? (
+          <>
+            <p className="mb-1 mt-4 text-start text-sm font-semibold">קטגוריות</p>
+            {ordered.map((category) => (
+              <label key={category.id} className="flex items-center gap-2 py-1 text-start" style={{ paddingInlineStart: depth(category.id) * 16 }}>
+                <input
+                  type="checkbox"
+                  className="size-5"
+                  checked={categoryIds.includes(category.id)}
+                  disabled={saving}
+                  onChange={() => {
+                    const checked = categoryIds.includes(category.id);
+                    setCategoryIds(checked ? categoryIds.filter((id) => id !== category.id) : [...categoryIds, category.id]);
+                    if (!checked) setCreateNew(false);
+                  }}
+                />
+                <span>{category.name}</span>
+              </label>
+            ))}
+            <label className="mt-2 flex items-center gap-2 py-1 text-start">
+              <input type="checkbox" className="size-5" checked={createNew} disabled={saving} onChange={() => setCreateNew((current) => !current)} />
+              <span>קטגוריה חדשה</span>
+            </label>
+            {createNew ? (
+              <input
+                className="mt-2 w-full rounded-xl border border-neutral-300 px-3 py-2"
+                value={newCategory}
+                aria-label="שם הקטגוריה החדשה"
+                disabled={saving}
+                onChange={(event) => setNewCategory(event.target.value)}
+              />
+            ) : null}
+          </>
+        ) : (
+          <Field label="קטגוריה חדשה" value={newCategory} onChange={setNewCategory} />
+        )}
+        {error ? <p className="mt-2 text-start text-sm text-red-700">{error}</p> : null}
+        {usage ? <TokenNote usage={usage} className="mt-2 text-start text-sm text-neutral-600" /> : null}
+        <button type="button" className="mt-4 w-full rounded-xl bg-[var(--teal)] py-3 font-medium text-white disabled:opacity-40" disabled={!canSave || saving} onClick={() => void approve()}>
+          {saving ? "שומר…" : "שמירה"}
+        </button>
+        <button type="button" className="mt-2 w-full rounded-xl bg-neutral-100 py-3 font-medium" disabled={saving} onClick={close}>
+          ביטול
+        </button>
+      </Overlay>
+    );
+  }
   const title = kind === "text" ? "מתכון מטקסט" : "מתכון מקישור";
   return (
     <Overlay label={title} onClose={close}>
@@ -3044,6 +3152,27 @@ async function fetchRows<T>(load: (from: number, to: number) => PromiseLike<{ da
     rows.push(...(data ?? []));
     if (!data || data.length < 1000) return { data: rows, error: null };
   }
+}
+
+function categoryTree(categories: CategoryRow[]) {
+  const ids = new Set(categories.map((category) => category.id));
+  const children = new Map<string | null, CategoryRow[]>();
+  for (const category of categories) {
+    const parentId = category.parent_id && ids.has(category.parent_id) ? category.parent_id : null;
+    const list = children.get(parentId) ?? [];
+    list.push(category);
+    children.set(parentId, list);
+  }
+  for (const list of children.values()) list.sort((a, b) => a.sort_order - b.sort_order);
+  const ordered: CategoryRow[] = [];
+  function walk(parentId: string | null) {
+    for (const category of children.get(parentId) ?? []) {
+      ordered.push(category);
+      walk(category.id);
+    }
+  }
+  walk(null);
+  return ordered;
 }
 
 function chooseLeaf(selected: string[], previous: string, depth: (id: string) => number) {
