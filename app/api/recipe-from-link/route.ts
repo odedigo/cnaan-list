@@ -184,7 +184,7 @@ async function resolvePublic(url: URL) {
     await assertPublic(current);
     const response = await fetch(current, {
       redirect: "manual",
-      headers: pageHeaders(current),
+      headers: resolveHeaders(current),
       signal: AbortSignal.timeout(12000),
     });
     if (response.status >= 300 && response.status < 400) {
@@ -198,6 +198,15 @@ async function resolvePublic(url: URL) {
     return current;
   }
   return current;
+}
+
+function resolveHeaders(url: URL) {
+  const headers = pageHeaders(url, isFacebook(url));
+  if (isFacebook(url)) {
+    headers["sec-fetch-site"] = "none";
+    headers["sec-fetch-user"] = "?1";
+  }
+  return headers;
 }
 
 function pageHeaders(url: URL, desktopPlugin = false) {
