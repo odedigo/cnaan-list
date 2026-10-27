@@ -315,6 +315,27 @@ export function DownloadIcon(props: IconProps) {
   );
 }
 
+export function BookmarkIcon({
+  filled,
+  ...props
+}: IconProps & { filled?: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill={filled ? "currentColor" : "none"}
+      stroke="currentColor"
+      strokeWidth="1.8"
+      aria-hidden="true"
+      {...props}
+    >
+      <path
+        d="M7 4.5h10a1 1 0 0 1 1 1V20l-6-3.2L6 20V5.5a1 1 0 0 1 1-1Z"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export function FlagIcon(props: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true" {...props}>

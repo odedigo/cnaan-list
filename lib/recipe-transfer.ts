@@ -243,7 +243,7 @@ export async function importRecipes(
   try {
     onProgress?.(0.01);
     if (mode === "replace") {
-      const { error } = await supabase.from("recipe_categories").delete().eq("account_id", accountId).is("parent_id", null);
+      const { error } = await supabase.from("recipe_categories").delete().eq("account_id", accountId).is("parent_id", null).neq("name", "מועדפים");
       if (error) throw error;
       let listed = 0;
       await removeAccountImages(supabase, accountId, () => {
@@ -420,7 +420,7 @@ export async function importRecipes(
     onProgress?.(1);
   } catch {
     if (mode === "replace") {
-      await supabase.from("recipe_categories").delete().eq("account_id", accountId).is("parent_id", null);
+      await supabase.from("recipe_categories").delete().eq("account_id", accountId).is("parent_id", null).neq("name", "מועדפים");
       await removeAccountImages(supabase, accountId);
     } else if (uploaded.length > 0) {
       for (let offset = 0; offset < uploaded.length; offset += 100) {

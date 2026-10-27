@@ -84,6 +84,7 @@ create table if not exists public.recipe_categories (
   name text not null,
   image_path text,
   sort_order integer not null default 0,
+  protected boolean not null default false,
   constraint recipe_categories_name_length check (char_length(btrim(name)) between 1 and 120),
   constraint recipe_categories_image_path_length check (image_path is null or char_length(btrim(image_path)) between 1 and 500),
   constraint recipe_categories_parent_not_self check (parent_id is null or parent_id <> id)
@@ -117,8 +118,12 @@ create index if not exists categories_account_sort_idx on public.categories (acc
 create index if not exists items_account_category_sort_idx on public.items (account_id, category_id, sort_order);
 create unique index if not exists grocery_account_item_idx on public.grocery_items (account_id, item_id);
 create index if not exists checklist_rows_account_sort_idx on public.checklist_rows (account_id, sort_order);
+alter table public.recipe_categories add column if not exists protected boolean not null default false;
+
 create unique index if not exists recipe_categories_sibling_name_idx
   on public.recipe_categories (account_id, coalesce(parent_id, '00000000-0000-0000-0000-000000000000'::uuid), name);
+create unique index if not exists recipe_categories_one_protected_idx
+  on public.recipe_categories (account_id) where protected;
 create index if not exists recipe_categories_account_parent_sort_idx
   on public.recipe_categories (account_id, parent_id, sort_order);
 create index if not exists recipes_account_leaf_sort_idx
@@ -499,6 +504,64 @@ create trigger categories_assign_store
   before insert or update of store_id, account_id on public.categories
   for each row execute function public.categories_assign_store();
 
+create or replace function public.seed_account_favorites(target_account uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  update public.recipe_categories
+  set protected = true,
+      parent_id = null,
+      name = 'מועדפים'
+  where account_id = target_account
+    and parent_id is null
+    and btrim(name) = 'מועדפים'
+    and not protected;
+
+  if not exists (
+    select 1
+    from public.recipe_categories
+    where account_id = target_account
+      and protected
+  ) then
+    insert into public.recipe_categories (account_id, parent_id, name, sort_order, protected)
+    select target_account,
+      null,
+      'מועדפים',
+      coalesce((
+        select min(category.sort_order) - 1
+        from public.recipe_categories as category
+        where category.account_id = target_account
+          and category.parent_id is null
+      ), 0),
+      true;
+  end if;
+
+  update public.recipe_categories as chosen
+  set sort_order = (
+    select min(other.sort_order) - 1
+    from public.recipe_categories as other
+    where other.account_id = chosen.account_id
+      and other.parent_id is null
+      and other.id <> chosen.id
+  )
+  where chosen.account_id = target_account
+    and chosen.protected
+    and exists (
+      select 1
+      from public.recipe_categories as other
+      where other.account_id = chosen.account_id
+        and other.parent_id is null
+        and other.id <> chosen.id
+        and other.sort_order <= chosen.sort_order
+    );
+end;
+$$;
+
+revoke all on function public.seed_account_favorites(uuid) from public, anon, authenticated;
+
 create or replace function public.handle_new_user()
 returns trigger
 language plpgsql
@@ -519,6 +582,7 @@ begin
   values (new.id)
   returning id into account;
   perform public.seed_account_stores(account);
+  perform public.seed_account_favorites(account);
   return new;
 end;
 $$;
@@ -642,6 +706,61 @@ drop trigger if exists recipe_labels_enforce_account on public.recipe_labels;
 create trigger recipe_labels_enforce_account
   before insert or update on public.recipe_labels
   for each row execute function public.recipe_labels_enforce_account();
+
+create or replace function public.recipe_categories_keep_protected()
+returns trigger
+language plpgsql
+security invoker
+set search_path = public
+as $$
+begin
+  if old.protected then
+    new.protected := true;
+    new.parent_id := null;
+    new.name := 'מועדפים';
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function public.recipe_categories_keep_protected() from public, anon;
+grant execute on function public.recipe_categories_keep_protected() to authenticated;
+
+create or replace function public.prevent_protected_recipe_category_delete()
+returns trigger
+language plpgsql
+security invoker
+set search_path = public
+as $$
+begin
+  if old.protected then
+    raise exception 'favorites category cannot be deleted';
+  end if;
+  return old;
+end;
+$$;
+
+revoke all on function public.prevent_protected_recipe_category_delete() from public, anon;
+grant execute on function public.prevent_protected_recipe_category_delete() to authenticated;
+
+drop trigger if exists recipe_categories_keep_protected on public.recipe_categories;
+create trigger recipe_categories_keep_protected
+  before update on public.recipe_categories
+  for each row execute function public.recipe_categories_keep_protected();
+
+drop trigger if exists prevent_protected_recipe_category_delete on public.recipe_categories;
+create trigger prevent_protected_recipe_category_delete
+  before delete on public.recipe_categories
+  for each row execute function public.prevent_protected_recipe_category_delete();
+
+do $$
+declare
+  account uuid;
+begin
+  for account in select id from public.accounts loop
+    perform public.seed_account_favorites(account);
+  end loop;
+end $$;
 
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values (

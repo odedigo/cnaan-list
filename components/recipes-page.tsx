@@ -36,6 +36,7 @@ import { ImageAdjust } from "@/components/image-adjust";
 import { RecipeCrop } from "@/components/recipe-crop";
 import {
   ArrowIcon,
+  BookmarkIcon,
   CameraIcon,
   CheckIcon,
   ChevronIcon,
@@ -131,6 +132,18 @@ const tabs: { id: TabId; label: string }[] = [
   { id: "info", label: "מידע" },
 ];
 
+const favoritesCategoryName = "מועדפים";
+
+function isFavoritesCategory(category: { parent_id: string | null; name: string }) {
+  return category.parent_id === null && category.name.trim() === favoritesCategoryName;
+}
+
+function compareCategories(a: CategoryRow, b: CategoryRow) {
+  const pin = Number(isFavoritesCategory(b)) - Number(isFavoritesCategory(a));
+  if (pin !== 0) return pin;
+  return a.sort_order - b.sort_order;
+}
+
 function ratingSearch(query: string) {
   const match = query.match(/^ד(\d+)(\+)?$/);
   if (!match) return null;
@@ -185,12 +198,42 @@ export function RecipesPage({ active }: { active: boolean }) {
     () => new Map(categories.map((category) => [category.id, category])),
     [categories],
   );
+  const favoritesCategory = useMemo(
+    () => categories.find(isFavoritesCategory) ?? null,
+    [categories],
+  );
+  const favoriteBranchIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (!favoritesCategory) return ids;
+    const pending = [favoritesCategory.id];
+    ids.add(favoritesCategory.id);
+    while (pending.length > 0) {
+      const id = pending.pop() as string;
+      for (const category of categories) {
+        if (category.parent_id === id && !ids.has(category.id)) {
+          ids.add(category.id);
+          pending.push(category.id);
+        }
+      }
+    }
+    return ids;
+  }, [categories, favoritesCategory]);
   const directRecipeCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const row of recipes)
       counts[row.leaf_category_id] = (counts[row.leaf_category_id] ?? 0) + 1;
+    if (favoritesCategory) {
+      const ids = new Set<string>();
+      for (const row of recipes) {
+        if (favoriteBranchIds.has(row.leaf_category_id)) ids.add(row.id);
+      }
+      for (const label of labels) {
+        if (label.category_id === favoritesCategory.id) ids.add(label.recipe_id);
+      }
+      counts[favoritesCategory.id] = ids.size;
+    }
     return counts;
-  }, [recipes]);
+  }, [favoriteBranchIds, favoritesCategory, labels, recipes]);
 
   useEffect(() => {
     if (!opened) return;
@@ -233,7 +276,13 @@ export function RecipesPage({ active }: { active: boolean }) {
         setLoading(false);
         return;
       }
-      setCategories(categoryResult.data ?? []);
+      const nextCategories = await ensureFavoritesCategory(
+        supabase,
+        lists.accountId,
+        categoryResult.data ?? [],
+      );
+      if (cancel) return;
+      setCategories(nextCategories);
       setRecipes(recipeResult.data ?? []);
       setLabels(labelResult.data ?? []);
       setLoading(false);
@@ -357,8 +406,22 @@ export function RecipesPage({ active }: { active: boolean }) {
     };
   }, [categoryImageKey, supabase]);
 
+  const viewingFavorites =
+    favoritesCategory != null && folderId === favoritesCategory.id;
   const folderRecipes = recipes
-    .filter((row) => row.leaf_category_id === folderId)
+    .filter((row) => {
+      if (viewingFavorites && favoritesCategory) {
+        return (
+          favoriteBranchIds.has(row.leaf_category_id) ||
+          labels.some(
+            (label) =>
+              label.recipe_id === row.id &&
+              label.category_id === favoritesCategory.id,
+          )
+        );
+      }
+      return row.leaf_category_id === folderId;
+    })
     .sort((a, b) => a.sort_order - b.sort_order);
   const coverKey = folderRecipes.map((row) => row.id).join("|");
   const coverIdsRef = useRef(folderRecipes);
@@ -499,9 +562,59 @@ export function RecipesPage({ active }: { active: boolean }) {
     if (saveError) setError("לא ניתן לשמור את הדירוג.");
   }
 
+  async function toggleFavorite() {
+    if (!open || !favoritesCategory) return;
+    const marked =
+      open.leafCategoryId === favoritesCategory.id ||
+      labels.some(
+        (label) =>
+          label.recipe_id === open.id &&
+          label.category_id === favoritesCategory.id,
+      );
+    if (marked && open.leafCategoryId === favoritesCategory.id) {
+      setError("כדי להסיר ממועדפים, העבירו את המתכון לקטגוריה אחרת.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      if (marked) {
+        const { error: deleteError } = await supabase
+          .from("recipe_labels")
+          .delete()
+          .eq("recipe_id", open.id)
+          .eq("category_id", favoritesCategory.id);
+        if (deleteError) throw deleteError;
+        setLabels((current) =>
+          current.filter(
+            (label) =>
+              label.recipe_id !== open.id ||
+              label.category_id !== favoritesCategory.id,
+          ),
+        );
+      } else {
+        const { error: insertError } = await supabase
+          .from("recipe_labels")
+          .insert({
+            recipe_id: open.id,
+            category_id: favoritesCategory.id,
+          });
+        if (insertError) throw insertError;
+        setLabels((current) => [
+          ...current,
+          { recipe_id: open.id, category_id: favoritesCategory.id },
+        ]);
+      }
+    } catch {
+      setError(marked ? "לא ניתן להסיר ממועדפים." : "לא ניתן להוסיף למועדפים.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function createRecipe(title: string, leafCategoryId: string) {
     const trimmed = title.trim();
-    if (!trimmed) return;
+    if (!trimmed || favoriteBranchIds.has(leafCategoryId)) return;
     setBusy(true);
     setError(null);
     try {
@@ -588,12 +701,16 @@ export function RecipesPage({ active }: { active: boolean }) {
 
   async function createCategory(name: string, parentId: string | null = null) {
     const trimmed = name.trim();
-    if (!trimmed) return null;
+    if (!trimmed || (parentId != null && favoriteBranchIds.has(parentId)))
+      return null;
     setBusy(true);
     setError(null);
     try {
       const siblings = categories
-        .filter((category) => category.parent_id === parentId)
+        .filter(
+          (category) =>
+            category.parent_id === parentId && !isFavoritesCategory(category),
+        )
         .sort((a, b) => a.sort_order - b.sort_order);
       const index = nameInsertIndex(
         siblings.map((category) => category.name),
@@ -823,6 +940,7 @@ export function RecipesPage({ active }: { active: boolean }) {
   }
 
   async function removeCategory(category: CategoryRow) {
+    if (isFavoritesCategory(category)) return;
     setBusy(true);
     setError(null);
     try {
@@ -1402,7 +1520,7 @@ export function RecipesPage({ active }: { active: boolean }) {
     : undefined;
   const childCategories = categories
     .filter((category) => category.parent_id === folderId)
-    .sort((a, b) => a.sort_order - b.sort_order);
+    .sort(compareCategories);
 
   return (
     <div aria-hidden={!active}>
@@ -1473,24 +1591,34 @@ export function RecipesPage({ active }: { active: boolean }) {
                   <span>{folder.name}</span>
                 </button>
               ) : null}
-              <CategoryTiles
-                categories={childCategories}
-                images={categoryImages}
-                counts={directRecipeCounts}
-                onOpen={setFolderId}
-                onImage={setImageCategoryId}
-                onAdd={() => setAddingCategory(true)}
-                onMenu={setCategoryMenuId}
-              />
+              {viewingFavorites ? null : (
+                <CategoryTiles
+                  categories={childCategories}
+                  images={categoryImages}
+                  counts={directRecipeCounts}
+                  onOpen={setFolderId}
+                  onImage={setImageCategoryId}
+                  onAdd={() => setAddingCategory(true)}
+                  onMenu={(id) => {
+                    const category = byId.get(id);
+                    if (category && isFavoritesCategory(category)) return;
+                    setCategoryMenuId(id);
+                  }}
+                />
+              )}
               <RecipeTiles
                 rows={folderRecipes}
                 images={recipeCovers}
                 onOpen={(row) => void openRecipe(row)}
                 onMenu={setRecipeMenuId}
-                onAdd={folderId ? () => setCreating(true) : undefined}
+                onAdd={
+                  folderId && !viewingFavorites
+                    ? () => setCreating(true)
+                    : undefined
+                }
               />
-              {!folderId &&
-              childCategories.length === 0 &&
+              {((!folderId && childCategories.length === 0) ||
+                viewingFavorites) &&
               folderRecipes.length === 0 ? (
                 <p className="px-6 pt-10 text-center text-neutral-500">
                   אין כאן מתכונים.
@@ -1517,6 +1645,18 @@ export function RecipesPage({ active }: { active: boolean }) {
           onSlide={setSlide}
           onBack={() => setOpen(null)}
           onRate={(value) => void rate(value)}
+          favorite={
+            favoritesCategory != null &&
+            (open.leafCategoryId === favoritesCategory.id ||
+              labels.some(
+                (label) =>
+                  label.recipe_id === open.id &&
+                  label.category_id === favoritesCategory.id,
+              ))
+          }
+          onToggleFavorite={
+            favoritesCategory ? () => void toggleFavorite() : null
+          }
           onToggle={(kind, index) => {
             const current = checks[kind];
             const next = current.includes(index)
@@ -1835,19 +1975,24 @@ function CategoryTiles({
       {categories.map((category) => {
         const src = images[category.id];
         const count = counts[category.id] ?? 0;
+        const favorites = isFavoritesCategory(category);
         return (
           <div
             key={category.id}
             className="relative"
-            {...menuProps(category.id)}
+            {...(favorites ? {} : menuProps(category.id))}
           >
             <button
               type="button"
               className="block w-full overflow-hidden rounded-lg border border-neutral-200 bg-white text-start shadow-sm"
+              style={favorites ? { background: "#f6e4a8" } : undefined}
               aria-label={`${category.name}, ${count}`}
               onClick={() => onOpen(category.id)}
             >
-              <span className="relative block aspect-square overflow-hidden bg-[var(--cream)] text-neutral-400">
+              <span
+                className="relative block aspect-square overflow-hidden bg-[var(--cream)] text-neutral-400"
+                style={favorites && !src ? { background: "#e8c56a" } : undefined}
+              >
                 {src ? (
                   <img
                     src={src}
@@ -2531,6 +2676,8 @@ function RecipeDetail({
   onSlide,
   onBack,
   onRate,
+  favorite,
+  onToggleFavorite,
   onToggle,
   onClear,
   onSaveIngredients,
@@ -2559,6 +2706,8 @@ function RecipeDetail({
   onSlide: (index: number) => void;
   onBack: () => void;
   onRate: (value: number) => void;
+  favorite: boolean;
+  onToggleFavorite: (() => void) | null;
   onToggle: (kind: "ingredients" | "steps", index: number) => void;
   onClear: (kind: "ingredients" | "steps") => void;
   onSaveIngredients: (
@@ -2631,7 +2780,20 @@ function RecipeDetail({
             </h2>
           )}
         </div>
-        <div dir="ltr" className="flex shrink-0">
+        <div dir="ltr" className="flex shrink-0 items-center">
+          {onToggleFavorite ? (
+            <button
+              type="button"
+              className="grid size-8 place-items-center"
+              style={{ color: favorite ? "#b45309" : "#a3a3a3" }}
+              aria-label={favorite ? "הסרה ממועדפים" : "הוספה למועדפים"}
+              aria-pressed={favorite}
+              disabled={busy}
+              onClick={onToggleFavorite}
+            >
+              <BookmarkIcon className="size-5" filled={favorite} />
+            </button>
+          ) : null}
           {[1, 2, 3, 4, 5].map((value) => (
             <button
               key={value}
@@ -5236,6 +5398,46 @@ async function fetchRows<T>(
   }
 }
 
+async function ensureFavoritesCategory(
+  supabase: ReturnType<typeof createClient>,
+  accountId: string,
+  rows: CategoryRow[],
+) {
+  if (rows.some(isFavoritesCategory)) return rows;
+  const roots = rows.filter((row) => row.parent_id === null);
+  const sortOrder =
+    roots.length === 0
+      ? 0
+      : Math.min(...roots.map((row) => row.sort_order)) - 1;
+  const select = "id, parent_id, name, image_path, sort_order";
+  const base = {
+    account_id: accountId,
+    parent_id: null,
+    name: favoritesCategoryName,
+    sort_order: sortOrder,
+  };
+  let result = await supabase
+    .from("recipe_categories")
+    .insert({ ...base, protected: true })
+    .select(select)
+    .single();
+  const message = result.error?.message ?? "";
+  if (
+    result.error &&
+    (result.error.code === "PGRST204" ||
+      result.error.code === "42703" ||
+      /protected/i.test(message))
+  ) {
+    result = await supabase
+      .from("recipe_categories")
+      .insert(base)
+      .select(select)
+      .single();
+  }
+  if (result.error || !result.data) return rows;
+  return [...rows, result.data as CategoryRow];
+}
+
 function categoryTree(categories: CategoryRow[]) {
   const ids = new Set(categories.map((category) => category.id));
   const children = new Map<string | null, CategoryRow[]>();
@@ -5248,8 +5450,7 @@ function categoryTree(categories: CategoryRow[]) {
     list.push(category);
     children.set(parentId, list);
   }
-  for (const list of children.values())
-    list.sort((a, b) => a.sort_order - b.sort_order);
+  for (const list of children.values()) list.sort(compareCategories);
   const ordered: CategoryRow[] = [];
   function walk(parentId: string | null) {
     for (const category of children.get(parentId) ?? []) {

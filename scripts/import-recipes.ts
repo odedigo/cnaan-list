@@ -203,7 +203,7 @@ function collectFiles(root: string, node: DirNode, categoryKey: string | null = 
 async function ensureCategories(client: SupabaseClient, accountId: string, wanted: CategoryRow[], wipe: boolean) {
   if (wipe) {
     await removeFolder(client, accountId);
-    const { error } = await client.from("recipe_categories").delete().eq("account_id", accountId);
+    const { error } = await client.from("recipe_categories").delete().eq("account_id", accountId).neq("name", "מועדפים");
     if (error) throw error;
   }
   const { data: existing, error } = await client.from("recipe_categories").select("id, parent_id, name").eq("account_id", accountId);
