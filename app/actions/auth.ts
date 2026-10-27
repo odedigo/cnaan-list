@@ -3,6 +3,7 @@
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 
+import { signupPasswordAllowed } from "@/lib/signup-gate";
 import { createAdminClient, hasServiceEnv } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { emailError, passwordError, usernameError } from "@/lib/validation";
@@ -51,7 +52,16 @@ export async function logout() {
   }
 }
 
+export async function checkSignupPassword(_state: AuthState, formData: FormData): Promise<AuthState> {
+  const gateState = await signupGateState(String(formData.get("gate") ?? ""));
+  return gateState ?? { ok: true };
+}
+
 export async function signup(_state: AuthState, formData: FormData): Promise<AuthState> {
+  const gate = String(formData.get("gate") ?? "");
+  const gateState = await signupGateState(gate);
+  if (gateState) return gateState;
+
   const username = String(formData.get("username") ?? "").trim();
   const email = String(formData.get("email") ?? "").trim();
   const password = String(formData.get("password") ?? "");
@@ -121,6 +131,13 @@ export async function updatePassword(_state: AuthState, formData: FormData): Pro
   const { error } = await supabase.auth.updateUser({ password });
   if (error) return { error: "לא ניתן לעדכן את הסיסמה. פתחו שוב את הקישור מהמייל." };
   redirect("/settings");
+}
+
+async function signupGateState(gate: string): Promise<AuthState> {
+  const gateResult = await signupPasswordAllowed(gate);
+  if (gateResult === "unconfigured") return { error: "השרת לא מוגדר. בדקו את משתני הסביבה." };
+  if (gateResult !== "ok") return { error: "הסיסמה הראשית שגויה" };
+  return null;
 }
 
 async function requestOrigin() {
