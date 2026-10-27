@@ -40,6 +40,8 @@ export type GroceryLine = {
   checked: boolean;
 };
 
+export type ChecklistPriority = "immediate" | "high" | "medium" | "low";
+
 export type ChecklistRow = {
   id: string;
   account_id: string;
@@ -47,6 +49,7 @@ export type ChecklistRow = {
   indent: 0 | 1;
   checked: boolean;
   sort_order: number;
+  priority: ChecklistPriority | null;
 };
 
 export type ListsData = {

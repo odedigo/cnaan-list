@@ -1,4 +1,6 @@
+import { checklistPriority } from "@/lib/checklist";
 import { colorHex } from "@/lib/colors";
+import type { ChecklistPriority } from "@/lib/types";
 import { isUnitId, parseQuantity, type UnitId } from "@/lib/units";
 import { unzip } from "@/lib/zip";
 
@@ -41,6 +43,7 @@ export type ImportedChecklistRow = {
   indent: 0 | 1;
   checked: boolean;
   sortOrder: number;
+  priority: ChecklistPriority | null;
 };
 
 export type ImportedGroceryLine = {
@@ -148,6 +151,7 @@ function readChecklistRow(value: unknown, index: number): ImportedChecklistRow {
     indent: row.indent === 1 ? 1 : 0,
     checked: row.checked === true,
     sortOrder: order(row.sortOrder, index),
+    priority: checklistPriority(row.priority),
   };
 }
 

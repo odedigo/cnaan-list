@@ -153,6 +153,7 @@ export async function downloadInventoryZip(
         indent: row.indent,
         checked: row.checked,
         sortOrder: row.sort_order,
+        priority: row.priority,
       }));
   }
   const archive = [...files];

@@ -82,6 +82,7 @@ type ListsContextValue = {
   setChecklistIndent: (id: string, direction: "increase" | "decrease") => Promise<void>;
   moveChecklist: (activeId: string, overId: string) => Promise<void>;
   setChecklistChecked: (id: string, checked: boolean) => Promise<void>;
+  setChecklistPriority: (id: string, priority: ChecklistRow["priority"]) => Promise<void>;
   deleteChecklistRow: (id: string) => Promise<void>;
   uploadImage: (kind: "item" | "category", id: string, file: File) => Promise<void>;
   removeImage: (kind: "item" | "category", id: string) => Promise<void>;
@@ -317,7 +318,7 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
       const updates = next.filter((row) => {
         const old = prevById.get(row.id);
         if (!old) return false;
-        return old.body !== row.body || old.indent !== row.indent || old.checked !== row.checked || old.sort_order !== row.sort_order;
+        return old.body !== row.body || old.indent !== row.indent || old.checked !== row.checked || old.sort_order !== row.sort_order || old.priority !== row.priority;
       });
       for (const row of inserts) pendingIds.current.add(row.id);
       for (const row of deletes) pendingDeletes.current.add(row.id);
@@ -330,6 +331,7 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
             indent: row.indent,
             checked: row.checked,
             sort_order: row.sort_order,
+            priority: row.priority,
           }),
         ),
         ...updates.map((row) =>
@@ -340,6 +342,7 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
               indent: row.indent,
               checked: row.checked,
               sort_order: row.sort_order,
+              priority: row.priority,
             })
             .eq("id", row.id),
         ),
@@ -381,6 +384,7 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
         indent: source?.indent ?? 0,
         checked: false,
         sort_order: index,
+        priority: null,
       };
       void commitChecklist(previous, insertChecklistRow(previous, row, index));
       return row.id;
@@ -437,6 +441,17 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
       const current = previous.find((row) => row.id === id);
       if (!current || current.checked === checked) return Promise.resolve();
       const next = previous.map((row) => (row.id === id ? { ...row, checked } : row));
+      return commitChecklist(previous, next);
+    },
+    [commitChecklist],
+  );
+
+  const setChecklistPriority = useCallback(
+    (id: string, priority: ChecklistRow["priority"]) => {
+      const previous = sortChecklist(checklistRef.current);
+      const current = previous.find((row) => row.id === id);
+      if (!current || current.priority === priority) return Promise.resolve();
+      const next = previous.map((row) => (row.id === id ? { ...row, priority } : row));
       return commitChecklist(previous, next);
     },
     [commitChecklist],
@@ -1090,6 +1105,7 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
       setChecklistIndent,
       moveChecklist,
       setChecklistChecked,
+      setChecklistPriority,
       deleteChecklistRow,
     };
   }, [
@@ -1112,6 +1128,7 @@ export function ListsProvider({ initial, children }: { initial: ListsData; child
     saving,
     setChecklistBody,
     setChecklistChecked,
+    setChecklistPriority,
     moveChecklist,
     setChecklistIndent,
   ]);

@@ -17,15 +17,24 @@ import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, ty
 import { flushSync } from "react-dom";
 
 import { AppHeader } from "@/components/app-header";
-import { ArrowIcon, CheckIcon, CloseIcon, GripIcon } from "@/components/icons";
+import { ArrowIcon, CheckIcon, CloseIcon, FlagIcon, GripIcon } from "@/components/icons";
 import { useLists } from "@/components/lists-provider";
 import { activeEntries, changeIndent, doneEntries, type ChecklistEntry } from "@/lib/checklist";
+import type { ChecklistPriority } from "@/lib/types";
+
+const priorities: { id: ChecklistPriority; label: string; background: string; color: string }[] = [
+  { id: "immediate", label: "מיידי", background: "#000000", color: "#ffffff" },
+  { id: "high", label: "גבוה", background: "#f8d0d0", color: "#000000" },
+  { id: "medium", label: "בינוני", background: "#ffd7b5", color: "#000000" },
+  { id: "low", label: "נמוך", background: "#e5e5e5", color: "#000000" },
+];
 
 const placeholder = "טקסט כלשהו";
 
 export function ChecklistPage({ active = true }: { active?: boolean }) {
   const lists = useLists();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [menuId, setMenuId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const draftRef = useRef(draft);
   const selectedRef = useRef(selectedId);
@@ -48,7 +57,19 @@ export function ChecklistPage({ active = true }: { active?: boolean }) {
   }, [lists.checklist, selectedId]);
 
   useEffect(() => {
+    if (!menuId) return;
+    function onPointerDown(event: PointerEvent) {
+      const target = event.target;
+      if (target instanceof Element && target.closest("[data-priority-menu]")) return;
+      setMenuId(null);
+    }
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => document.removeEventListener("pointerdown", onPointerDown, true);
+  }, [menuId]);
+
+  useEffect(() => {
     if (active) return;
+    setMenuId(null);
     const id = selectedRef.current;
     if (!id) return;
     window.clearTimeout(saveTimer.current);
@@ -131,13 +152,28 @@ export function ChecklistPage({ active = true }: { active?: boolean }) {
   function remove(id: string) {
     window.clearTimeout(saveTimer.current);
     setSelectedId(null);
+    setMenuId(null);
     void lists.deleteChecklistRow(id);
+  }
+
+  function toggleMenu(id: string) {
+    setMenuId((current) => (current === id ? null : id));
+  }
+
+  function choosePriority(id: string, priority: ChecklistPriority) {
+    const row = lists.checklist.find((entry) => entry.id === id);
+    setMenuId(null);
+    void lists.setChecklistPriority(id, row?.priority === priority ? null : priority);
   }
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 8 } }),
   );
+
+  function onDragStart() {
+    setMenuId(null);
+  }
 
   function onDragEnd(event: DragEndEvent) {
     const overId = event.over ? String(event.over.id) : "";
@@ -166,6 +202,9 @@ export function ChecklistPage({ active = true }: { active?: boolean }) {
       moved.current = true;
       void lists.setChecklistIndent(id, direction);
     },
+    menuId,
+    onToggleMenu: toggleMenu,
+    onPriority: choosePriority,
   };
 
   return (
@@ -174,7 +213,7 @@ export function ChecklistPage({ active = true }: { active?: boolean }) {
       {lists.checklistError ? (
         <p className="mx-3 mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{lists.checklistError}</p>
       ) : null}
-      <DndContext id="checklist" sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+      <DndContext id="checklist" sensors={sensors} collisionDetection={closestCenter} onDragStart={onDragStart} onDragEnd={onDragEnd}>
         <div className="pb-4 pt-3">
           <SortableContext items={openRows.map((entry) => entry.row.id)} strategy={verticalListSortingStrategy}>
             {openRows.map((entry, index) => (
@@ -226,12 +265,15 @@ function SortableChecklistLine({
   onChecked: (id: string, checked: boolean) => void;
   onSwipe: (id: string, direction: "increase" | "decrease") => void;
   onGestureStart: () => void;
+  menuId: string | null;
+  onToggleMenu: (id: string) => void;
+  onPriority: (id: string, priority: ChecklistPriority) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: props.entry.row.id });
   return (
     <div
       ref={setNodeRef}
-      style={{ marginTop: gap, transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.75 : 1, position: "relative", zIndex: isDragging ? 2 : undefined }}
+      style={{ marginTop: gap, transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.75 : 1, position: "relative", zIndex: isDragging ? 2 : props.menuId === props.entry.row.id ? 4 : undefined }}
     >
       <ChecklistLine {...props} gap="" dragHandle={{ ...attributes, ...listeners }} />
     </div>
@@ -253,6 +295,9 @@ function ChecklistLine({
   onChecked,
   onSwipe,
   onGestureStart,
+  menuId,
+  onToggleMenu,
+  onPriority,
   dragHandle,
 }: {
   entry: ChecklistEntry;
@@ -269,6 +314,9 @@ function ChecklistLine({
   onChecked: (id: string, checked: boolean) => void;
   onSwipe: (id: string, direction: "increase" | "decrease") => void;
   onGestureStart: () => void;
+  menuId: string | null;
+  onToggleMenu: (id: string) => void;
+  onPriority: (id: string, priority: ChecklistPriority) => void;
   dragHandle?: object;
 }) {
   const handleProps = dragHandle as { onPointerDown?: (event: ReactPointerEvent<HTMLButtonElement>) => void } | undefined;
@@ -277,7 +325,9 @@ function ChecklistLine({
   const row = entry.row;
   const selected = !copy && selectedId === row.id;
   const indent = !copy && row.indent === 1;
-  const gray = copy || row.checked;
+  const tone = priorities.find((item) => item.id === row.priority);
+  const gray = (copy || row.checked) && !tone;
+  const menuOpen = !copy && menuId === row.id;
   const indentDirection = row.indent === 1 ? "decrease" : "increase";
   const indentEnabled = !copy && changeIndent(lists.checklist, row.id, indentDirection) !== null;
   useEffect(() => {
@@ -315,8 +365,8 @@ function ChecklistLine({
         }}
       >
         <div
-          className={`flex items-center gap-1 rounded-lg px-1 ${gray ? "bg-neutral-200 text-neutral-500" : "bg-white"} ${indent ? "" : "border"} ${copy ? "pointer-events-none" : ""}`}
-          style={indent ? undefined : { borderColor: "#000" }}
+          className={`flex items-center gap-1 rounded-lg px-1 ${gray ? "bg-neutral-200 text-neutral-500" : tone ? "" : "bg-white"} ${indent ? "" : "border"} ${copy ? "pointer-events-none" : ""}`}
+          style={{ ...(indent ? {} : { borderColor: "#000" }), ...(tone ? { backgroundColor: tone.background, color: tone.color } : {}) }}
           aria-disabled={copy || undefined}
         >
           <CheckBox
@@ -334,7 +384,8 @@ function ChecklistLine({
               maxLength={400}
               placeholder={placeholder}
               aria-label="טקסט השורה"
-              className={`min-w-0 flex-1 resize-none overflow-hidden bg-transparent px-1 py-1 outline-none ${gray ? "text-neutral-500" : ""}`}
+              className={`min-w-0 flex-1 resize-none overflow-hidden bg-transparent px-1 outline-none ${gray ? "text-neutral-500" : ""}`}
+              style={{ paddingTop: 3, paddingBottom: 3, lineHeight: "20px" }}
               onClick={(event) => event.stopPropagation()}
               onChange={(event) => onDraft(row.id, event.target.value)}
               onBlur={(event) => onCommit(row.id, event.target.value)}
@@ -345,13 +396,14 @@ function ChecklistLine({
               }}
             />
           ) : (
-            <span className={`min-w-0 flex-1 whitespace-pre-wrap break-words px-1 py-1 ${row.body ? "" : "text-neutral-400"}`}>{row.body || placeholder}</span>
+            <span className={`min-w-0 flex-1 whitespace-pre-wrap break-words px-1 ${row.body ? "" : "text-neutral-400"}`} style={{ paddingTop: 3, paddingBottom: 3, lineHeight: "20px" }}>{row.body || placeholder}</span>
           )}
           {copy ? null : (
             <>
               <button
                 type="button"
                 className="grid size-8 shrink-0 place-items-center text-neutral-500 disabled:opacity-30"
+                style={{ height: 26 }}
                 aria-label={indentDirection === "increase" ? "הזחה פנימה" : "הזחה החוצה"}
                 disabled={!indentEnabled}
                 onClick={(event) => {
@@ -364,6 +416,7 @@ function ChecklistLine({
               <button
                 type="button"
                 className="grid size-8 shrink-0 cursor-grab touch-none place-items-center text-neutral-400 active:cursor-grabbing"
+                style={{ height: 26 }}
                 aria-label="גרירה"
                 {...handleProps}
                 onPointerDown={(event) => {
@@ -377,11 +430,52 @@ function ChecklistLine({
           )}
         </div>
       </div>
-      <div className="me-2 grid size-9 shrink-0 place-items-center">
+      <div className="me-2 flex shrink-0 items-center">
+        {copy ? (
+          <span className="inline-block size-9" style={{ height: 28 }} />
+        ) : (
+          <div className="relative" data-priority-menu="">
+            <button
+              type="button"
+              className="grid size-9 place-items-center text-neutral-500"
+              style={{ height: 28 }}
+              aria-label="עדיפות"
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              onClick={(event) => {
+                event.stopPropagation();
+                onToggleMenu(row.id);
+              }}
+            >
+              <FlagIcon className="size-5" />
+            </button>
+            {menuOpen ? (
+              <div role="menu" aria-label="עדיפות" className="absolute z-30 mt-1 overflow-hidden rounded-xl border border-neutral-200 bg-white py-1 text-neutral-800 shadow-lg" style={{ insetInlineEnd: 0, top: "100%", minWidth: "8.5rem" }}>
+                {priorities.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={row.priority === item.id}
+                    className={`flex w-full items-center gap-2 px-3 py-2 text-start ${row.priority === item.id ? "font-semibold" : ""}`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onPriority(row.id, item.id);
+                    }}
+                  >
+                    <span className="size-4 shrink-0 rounded-[3px] border" style={{ backgroundColor: item.background, borderColor: "#000" }} />
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        )}
         {selected ? (
           <button
             type="button"
-            className="grid size-9 place-items-center"
+            className="grid size-9 shrink-0 place-items-center"
+            style={{ height: 28 }}
             aria-label="מחיקה"
             onClick={(event) => {
               event.stopPropagation();
@@ -412,7 +506,7 @@ function CheckBox({
       {checked ? <CheckIcon className={`size-3.5 ${disabled ? "text-neutral-400" : ""}`} /> : null}
     </span>
   );
-  if (!onToggle) return <span className="grid size-8 place-items-center">{box}</span>;
+  if (!onToggle) return <span className="grid size-8 place-items-center" style={{ height: 26 }}>{box}</span>;
   return (
     <button
       type="button"
@@ -420,6 +514,7 @@ function CheckBox({
       aria-checked={checked}
       aria-label={label ? `${checked ? "ביטול סימון" : "סימון"} ${label}` : checked ? "ביטול סימון" : "סימון"}
       className="grid size-8 shrink-0 place-items-center"
+      style={{ height: 26 }}
       onClick={(event) => {
         event.stopPropagation();
         onToggle();

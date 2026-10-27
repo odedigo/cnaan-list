@@ -1,4 +1,9 @@
-import type { ChecklistRow } from "@/lib/types";
+import type { ChecklistPriority, ChecklistRow } from "@/lib/types";
+
+export function checklistPriority(value: unknown): ChecklistPriority | null {
+  if (value === "immediate" || value === "high" || value === "medium" || value === "low") return value;
+  return null;
+}
 
 export function normalizeChecklist(row: {
   id: string;
@@ -7,6 +12,7 @@ export function normalizeChecklist(row: {
   indent: number;
   checked: boolean;
   sort_order: number;
+  priority?: string | null;
 }): ChecklistRow {
   return {
     id: row.id,
@@ -15,6 +21,7 @@ export function normalizeChecklist(row: {
     indent: row.indent === 1 ? 1 : 0,
     checked: Boolean(row.checked),
     sort_order: Number(row.sort_order) || 0,
+    priority: checklistPriority(row.priority),
   };
 }
 

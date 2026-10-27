@@ -72,7 +72,9 @@ create table if not exists public.checklist_rows (
   indent smallint not null default 0,
   checked boolean not null default false,
   sort_order integer not null default 0,
-  constraint checklist_rows_indent_check check (indent in (0, 1))
+  priority text,
+  constraint checklist_rows_indent_check check (indent in (0, 1)),
+  constraint checklist_rows_priority_check check (priority is null or priority in ('immediate', 'high', 'medium', 'low'))
 );
 
 create table if not exists public.recipe_categories (
@@ -544,6 +546,17 @@ alter table public.categories alter column store_id set not null;
 alter table public.categories add column if not exists separator_after boolean not null default false;
 
 alter table public.categories add column if not exists separator_text text not null default '';
+
+alter table public.checklist_rows add column if not exists priority text;
+
+do $$
+begin
+  alter table public.checklist_rows
+    add constraint checklist_rows_priority_check
+    check (priority is null or priority in ('immediate', 'high', 'medium', 'low'));
+exception
+  when duplicate_object then null;
+end $$;
 
 drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created

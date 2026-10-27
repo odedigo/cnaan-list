@@ -75,7 +75,8 @@ select jsonb_pretty(
             'body', row.body,
             'indent', row.indent,
             'checked', row.checked,
-            'sort_order', row.sort_order
+            'sort_order', row.sort_order,
+            'priority', row.priority
           )
           order by row.sort_order
         )

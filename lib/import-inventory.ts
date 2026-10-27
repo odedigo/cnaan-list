@@ -74,6 +74,7 @@ export async function replaceInventory(
       indent: row.indent,
       checked: row.checked,
       sort_order: row.sortOrder,
+      priority: row.priority,
     })) ?? null;
   const steps = Math.max(
     1,

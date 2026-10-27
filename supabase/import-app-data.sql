@@ -150,14 +150,18 @@ begin
   for checklist in
     select jsonb_array_elements(coalesce(payload->'checklist_rows', '[]'::jsonb))
   loop
-    insert into public.checklist_rows (id, account_id, body, indent, checked, sort_order)
+    insert into public.checklist_rows (id, account_id, body, indent, checked, sort_order, priority)
     values (
       gen_random_uuid(),
       target_account,
       coalesce(checklist->>'body', ''),
       case when (checklist->>'indent')::integer = 1 then 1 else 0 end,
       coalesce((checklist->>'checked')::boolean, false),
-      coalesce((checklist->>'sort_order')::integer, 0)
+      coalesce((checklist->>'sort_order')::integer, 0),
+      case
+        when checklist->>'priority' in ('immediate', 'high', 'medium', 'low') then checklist->>'priority'
+        else null
+      end
     );
   end loop;
 end $$;
