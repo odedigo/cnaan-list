@@ -20,8 +20,11 @@ import { AppHeader } from "@/components/app-header";
 import { ArrowIcon, CameraIcon, CheckIcon, ChevronIcon, ClearMarksIcon, CloseIcon, GripIcon, ImageIcon, MoveAcrossIcon, PenIcon, PlusIcon, StepIcon, SubheaderIcon } from "@/components/icons";
 import { useLists } from "@/components/lists-provider";
 import { shrinkImage } from "@/lib/images";
+import { isAndroidInstalled } from "@/lib/installed-app";
 import { nameInsertIndex } from "@/lib/order";
 import { readRecipeAdvanced, recipeAdvancedEvent } from "@/lib/recipe-advanced";
+import type { CategoryChoice, ImportedRecipe, SharedLink } from "@/lib/recipe-link";
+import type { ParsedIngredient, ParsedStep, TokenUsage } from "@/lib/recipe-parse";
 import {
   downloadRecipeFile,
   emptyDocument,
@@ -122,6 +125,10 @@ export function RecipesPage({ active }: { active: boolean }) {
   const [searchThumbs, setSearchThumbs] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [recipeReload, setRecipeReload] = useState(0);
+  const [androidPwa, setAndroidPwa] = useState<boolean | null>(null);
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [textOpen, setTextOpen] = useState(false);
+  const [sharedLink, setSharedLink] = useState<SharedLink | null>(null);
 
   const byId = useMemo(() => new Map(categories.map((category) => [category.id, category])), [categories]);
   const directRecipeCounts = useMemo(() => {
@@ -173,6 +180,29 @@ export function RecipesPage({ active }: { active: boolean }) {
     window.addEventListener(recipesImportedEvent, onImported);
     return () => window.removeEventListener(recipesImportedEvent, onImported);
   }, []);
+
+  useEffect(() => {
+    setAndroidPwa(isAndroidInstalled());
+  }, []);
+
+  useEffect(() => {
+    if (!opened || loading) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("share") !== "1") return;
+    params.delete("share");
+    const next = `${window.location.pathname}${params.size > 0 ? `?${params}` : ""}${window.location.hash}`;
+    window.history.replaceState(null, "", next);
+    let cancel = false;
+    void fetch("/api/recipe-share")
+      .then((response) => response.json())
+      .then((body: SharedLink | null) => {
+        if (!cancel && body && (body.url || body.text || body.title)) setSharedLink(body);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancel = true;
+    };
+  }, [opened, loading]);
 
   const openId = open?.id ?? null;
   const shownImages = open ? visibleImages(open.document.images) : [];
@@ -433,6 +463,81 @@ export function RecipesPage({ active }: { active: boolean }) {
     } catch {
       setError("לא ניתן ליצור קטגוריה.");
       return null;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveImported(imported: ImportedRecipe) {
+    setBusy(true);
+    setError(null);
+    try {
+      let categoryIds = imported.categoryIds.filter((id) => byId.has(id));
+      if (categoryIds.length === 0) {
+        const name = imported.newCategory.trim() || "כללי";
+        const existing = categories.find((category) => category.name.trim() === name);
+        if (existing) categoryIds = [existing.id];
+        else {
+          const created = await createCategory(name, null);
+          if (!created) return;
+          categoryIds = [created];
+        }
+      }
+      const leaf = chooseLeaf(categoryIds, categoryIds[0], depth);
+      const labelIds = [...new Set([...(chain(leaf).length > 0 ? chain(leaf) : [leaf]), ...categoryIds])];
+      const title = imported.title.trim();
+      const ingredients = rowsToIngredients(
+        imported.ingredients.map((row) => ({
+          key: row.name,
+          heading: row.heading,
+          name: row.name,
+          quantity: row.quantity,
+          unit: row.heading ? "" : row.unit || "יחידה",
+          note: row.note,
+        })),
+      );
+      const steps = rowsToSteps(imported.steps.map((row) => ({ key: row.text, heading: row.heading, text: row.text })));
+      const sourceUrl = imported.sourceUrl.trim();
+      const sourceText = imported.sourceText.trim();
+      const document: RecipeDocument = {
+        ...emptyDocument(title),
+        title,
+        source: sourceText || sourceUrl ? { text: sourceText || sourceUrl, url: sourceUrl || null, linkLabel: null } : null,
+        ingredients,
+        steps,
+        notes: imported.notes.trim() ? [imported.notes.trim()] : [],
+      };
+      const siblings = recipes.filter((row) => row.leaf_category_id === leaf).sort((a, b) => a.sort_order - b.sort_order);
+      const index = nameInsertIndex(siblings.map((row) => row.title), title);
+      const sortOrder = siblings.length === 0 ? 0 : index === 0 ? siblings[0].sort_order - 1 : siblings[index - 1].sort_order + 1;
+      const shifted = siblings.filter((row) => row.sort_order >= sortOrder);
+      await Promise.all(shifted.map((row) => supabase.from("recipes").update({ sort_order: row.sort_order + 1 }).eq("id", row.id)));
+      const { data, error: insertError } = await supabase
+        .from("recipes")
+        .insert({ account_id: lists.accountId, title, leaf_category_id: leaf, document, sort_order: sortOrder })
+        .select("id, title, leaf_category_id, source_path, sort_order, rating, created_at")
+        .single();
+      if (insertError || !data) throw insertError ?? new Error("insert failed");
+      const { error: labelError } = await supabase.from("recipe_labels").insert(labelIds.map((categoryId) => ({ recipe_id: data.id, category_id: categoryId })));
+      if (labelError) throw labelError;
+      const row = data as RecipeRow;
+      setRecipes((current) => [...current.map((item) => (shifted.some((shiftedRow) => shiftedRow.id === item.id) ? { ...item, sort_order: item.sort_order + 1 } : item)), row]);
+      setLabels((current) => [...current, ...labelIds.map((categoryId) => ({ recipe_id: row.id, category_id: categoryId }))]);
+      setSearchOpen(false);
+      setQuery("");
+      setFolderId(leaf);
+      setTab("ingredients");
+      setOpen({
+        id: row.id,
+        title: row.title,
+        leafCategoryId: row.leaf_category_id,
+        sourcePath: row.source_path,
+        rating: row.rating,
+        createdAt: row.created_at,
+        document,
+      });
+    } catch {
+      setError("לא ניתן לשמור את המתכון.");
     } finally {
       setBusy(false);
     }
@@ -842,13 +947,13 @@ export function RecipesPage({ active }: { active: boolean }) {
         searchPlaceholder="חיפוש מתכון, ד2 לדירוג 2, ד2+ לדירוג 2 ומעלה"
         searchInputRef={searchInputRef}
         searchSide="start"
-        plusLabel="מתכון חדש"
         onSearchToggle={() => {
           setSearchOpen((current) => !current);
           setQuery("");
         }}
         onSearchChange={setQuery}
-        onPlus={() => setCreating(true)}
+        onLink={!loading && !open && !searching && androidPwa === false ? () => setLinkOpen(true) : undefined}
+        onPasteRecipe={!loading && !open && !searching ? () => setTextOpen(true) : undefined}
         onExportFile={() => {
           if (!open) return;
           downloadRecipeFile(open.title, recipeExportText({ title: open.title, rating: open.rating, createdAt: open.createdAt, document: open.document }));
@@ -885,8 +990,14 @@ export function RecipesPage({ active }: { active: boolean }) {
                 onAdd={() => setAddingCategory(true)}
                 onMenu={setCategoryMenuId}
               />
-              <RecipeTiles rows={folderRecipes} images={recipeCovers} onOpen={(row) => void openRecipe(row)} onMenu={setRecipeMenuId} />
-              {childCategories.length === 0 && folderRecipes.length === 0 ? <p className="px-6 pt-10 text-center text-neutral-500">אין כאן מתכונים.</p> : null}
+              <RecipeTiles
+                rows={folderRecipes}
+                images={recipeCovers}
+                onOpen={(row) => void openRecipe(row)}
+                onMenu={setRecipeMenuId}
+                onAdd={folderId ? () => setCreating(true) : undefined}
+              />
+              {!folderId && childCategories.length === 0 && folderRecipes.length === 0 ? <p className="px-6 pt-10 text-center text-neutral-500">אין כאן מתכונים.</p> : null}
             </>
           )}
         </div>
@@ -922,6 +1033,34 @@ export function RecipesPage({ active }: { active: boolean }) {
           onSaveInfo={saveRecipeEdits}
           onImage={(id) => setImageEdit({ id })}
           onDelete={deleteRecipe}
+        />
+      ) : null}
+      {linkOpen || sharedLink ? (
+        <LinkRecipeDialog
+          kind="link"
+          shared={sharedLink}
+          categories={categories.map((category) => ({ id: category.id, name: category.name, parentName: category.parent_id ? (byId.get(category.parent_id)?.name ?? "") : "" }))}
+          onClose={() => {
+            setLinkOpen(false);
+            setSharedLink(null);
+          }}
+          onDone={(imported) => {
+            setLinkOpen(false);
+            setSharedLink(null);
+            void saveImported(imported);
+          }}
+        />
+      ) : null}
+      {textOpen ? (
+        <LinkRecipeDialog
+          kind="text"
+          shared={null}
+          categories={categories.map((category) => ({ id: category.id, name: category.name, parentName: category.parent_id ? (byId.get(category.parent_id)?.name ?? "") : "" }))}
+          onClose={() => setTextOpen(false)}
+          onDone={(imported) => {
+            setTextOpen(false);
+            void saveImported(imported);
+          }}
         />
       ) : null}
       {creating ? (
@@ -1406,14 +1545,16 @@ function RecipeTiles({
   images,
   onOpen,
   onMenu,
+  onAdd,
 }: {
   rows: RecipeRow[];
   images: Record<string, string>;
   onOpen: (row: RecipeRow) => void;
   onMenu: (id: string) => void;
+  onAdd?: () => void;
 }) {
   const menuProps = useHoldMenu(onMenu);
-  if (rows.length === 0) return null;
+  if (rows.length === 0 && !onAdd) return null;
   return (
     <section>
       <h2 className="flex items-center gap-1 px-4 pt-4 text-start text-sm font-semibold">
@@ -1448,6 +1589,14 @@ function RecipeTiles({
           </button>
         );
       })}
+      {onAdd ? (
+        <button type="button" className="block w-full overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-sm" aria-label="מתכון חדש" onClick={onAdd}>
+          <span className="grid aspect-square bg-[var(--cream)] text-[var(--teal)]" style={{ placeItems: "center" }}>
+            <PlusIcon className="size-8" />
+          </span>
+          <span className="block px-1 py-1 text-xs">&nbsp;</span>
+        </button>
+      ) : null}
       </div>
     </section>
   );
@@ -1884,6 +2033,8 @@ function IngredientEditor({
   );
   const [openKey, setOpenKey] = useState<string | null>(null);
   const [focusKey, setFocusKey] = useState<string | null>(null);
+  const [pasteOpen, setPasteOpen] = useState(false);
+  const [usage, setUsage] = useState<TokenUsage | null>(null);
   useLayoutEffect(() => {
     if (focusKey) setFocusKey(null);
   }, [focusKey]);
@@ -1976,7 +2127,29 @@ function IngredientEditor({
             setFocusKey(key);
           }}
         />
+        <PasteButton onClick={() => setPasteOpen(true)} />
       </div>
+      {usage ? <TokenNote usage={usage} /> : null}
+      {pasteOpen ? (
+        <PasteRecipeDialog
+          kind="ingredients"
+          onClose={() => setPasteOpen(false)}
+          onApply={(parsed, nextUsage) => {
+            const next = (parsed as ParsedIngredient[]).map((row) => ({
+              key: crypto.randomUUID(),
+              heading: row.heading,
+              name: row.name,
+              quantity: row.quantity,
+              unit: row.heading ? "" : row.unit || "יחידה",
+              note: row.note,
+            }));
+            setRows(next);
+            setUsage(nextUsage);
+            setOpenKey(null);
+            setPasteOpen(false);
+          }}
+        />
+      ) : null}
     </form>
   );
 }
@@ -1995,6 +2168,8 @@ function StepEditor({
   const [rows, setRows] = useState<StepRow[]>(() => steps.map((step) => ({ key: crypto.randomUUID(), heading: isSubtitle(step.text), text: step.text })));
   const [openKey, setOpenKey] = useState<string | null>(null);
   const [focusKey, setFocusKey] = useState<string | null>(null);
+  const [pasteOpen, setPasteOpen] = useState(false);
+  const [usage, setUsage] = useState<TokenUsage | null>(null);
   useLayoutEffect(() => {
     if (focusKey) setFocusKey(null);
   }, [focusKey]);
@@ -2075,7 +2250,22 @@ function StepEditor({
             setFocusKey(key);
           }}
         />
+        <PasteButton onClick={() => setPasteOpen(true)} />
       </div>
+      {usage ? <TokenNote usage={usage} /> : null}
+      {pasteOpen ? (
+        <PasteRecipeDialog
+          kind="steps"
+          onClose={() => setPasteOpen(false)}
+          onApply={(parsed, nextUsage) => {
+            const next = (parsed as ParsedStep[]).map((row) => ({ key: crypto.randomUUID(), heading: row.heading, text: row.text }));
+            setRows(next);
+            setUsage(nextUsage);
+            setOpenKey(null);
+            setPasteOpen(false);
+          }}
+        />
+      ) : null}
     </form>
   );
 }
@@ -2163,6 +2353,112 @@ function AddButton({ label, onClick }: { label: string; onClick: () => void }) {
   );
 }
 
+function TokenNote({ usage, className = "px-4 pb-3 text-start text-sm text-neutral-600" }: { usage: TokenUsage; className?: string }) {
+  const count = (value: number) => value.toLocaleString("he-IL");
+  return (
+    <p className={className}>
+      נוצלו <bdi>{count(usage.total)}</bdi> טוקנים (קלט <bdi>{count(usage.prompt)}</bdi>, פלט <bdi>{count(usage.output)}</bdi>
+      {usage.thoughts > 0 ? (
+        <>
+          , חשיבה <bdi>{count(usage.thoughts)}</bdi>
+        </>
+      ) : null}
+      )
+    </p>
+  );
+}
+
+function PasteButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button type="button" className="grid h-8 place-items-center rounded border border-neutral-800 px-2 text-sm font-medium" onClick={onClick}>
+      הדבקה
+    </button>
+  );
+}
+
+function PasteRecipeDialog({ kind, onClose, onApply }: { kind: "ingredients" | "steps"; onClose: () => void; onApply: (rows: ParsedIngredient[] | ParsedStep[], usage: TokenUsage | null) => void }) {
+  const [text, setText] = useState("");
+  const [error, setError] = useState("");
+  const [usage, setUsage] = useState<TokenUsage | null>(null);
+  const [pending, setPending] = useState(false);
+  const [seconds, setSeconds] = useState(0);
+  const abortRef = useRef<AbortController | null>(null);
+  useEffect(() => {
+    if (!pending) return;
+    setSeconds(0);
+    const timer = window.setInterval(() => setSeconds((value) => value + 1), 1000);
+    return () => window.clearInterval(timer);
+  }, [pending]);
+  useEffect(() => () => abortRef.current?.abort(), []);
+  const title = kind === "ingredients" ? "הדבקת מצרכים" : "הדבקת שלבי הכנה";
+  function close() {
+    abortRef.current?.abort();
+    onClose();
+  }
+  async function convert() {
+    const source = text.trim();
+    if (!source || pending) return;
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setError("");
+    setUsage(null);
+    setPending(true);
+    try {
+      const response = await fetch("/api/recipe-parse", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ kind, text: source }),
+        signal: controller.signal,
+      });
+      const body = (await response.json().catch(() => null)) as { rows?: ParsedIngredient[] | ParsedStep[]; error?: string; usage?: TokenUsage | null } | null;
+      if (body?.usage) setUsage(body.usage);
+      if (!response.ok || !body?.rows?.length) {
+        setError(body?.error || "לא ניתן להמיר את הטקסט");
+        return;
+      }
+      onApply(body.rows, body.usage ?? null);
+    } catch (caught) {
+      if (caught instanceof DOMException && caught.name === "AbortError") return;
+      setError("לא ניתן להמיר את הטקסט");
+    } finally {
+      if (abortRef.current === controller) abortRef.current = null;
+      setPending(false);
+    }
+  }
+  const clock = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+  return (
+    <Overlay label={title} onClose={close}>
+      <h3 className="text-start text-lg font-semibold">{title}</h3>
+      <textarea
+        dir="rtl"
+        rows={8}
+        value={text}
+        maxLength={12000}
+        readOnly={pending}
+        placeholder={kind === "ingredients" ? "הדביקו כאן את רשימת המצרכים" : "הדביקו כאן את שלבי ההכנה"}
+        aria-label={title}
+        className="mt-3 w-full resize-none rounded-xl border border-neutral-300 px-3 py-2 outline-none"
+        onChange={(event) => setText(event.target.value)}
+      />
+      {error ? <p className="mt-2 text-start text-sm text-red-700">{error}</p> : null}
+      {usage && !pending ? <TokenNote usage={usage} className="mt-2 text-start text-sm text-neutral-600" /> : null}
+      {pending ? (
+        <div className="mt-4 flex items-center justify-center gap-3 py-3" role="status">
+          <span aria-hidden className="inline-block size-5 rounded-full border-2 border-neutral-200" style={{ borderTopColor: "var(--teal)", animation: "cnaan-spin 0.8s linear infinite" }} />
+          <span>ממיר את הטקסט · {clock}</span>
+        </div>
+      ) : (
+        <button type="button" className="mt-4 w-full rounded-xl bg-[var(--teal)] py-3 font-medium text-white disabled:opacity-40" disabled={!text.trim()} onClick={() => void convert()}>
+          המרה
+        </button>
+      )}
+      <button type="button" className="mt-2 w-full rounded-xl bg-neutral-100 py-3 font-medium" onClick={close}>
+        ביטול
+      </button>
+    </Overlay>
+  );
+}
+
 function ArrowButton({ label, side, disabled, onClick }: { label: string; side: "left" | "right"; disabled: boolean; onClick: () => void }) {
   return (
     <button
@@ -2183,6 +2479,113 @@ function StarIcon({ filled }: { filled: boolean }) {
     <svg viewBox="0 0 24 24" className="size-6" aria-hidden="true">
       <path d="m12 3.2 2.4 5.2 5.6.7-4.1 3.8 1.1 5.6L12 15.8 7 18.5l1.1-5.6L4 9.1l5.6-.7L12 3.2Z" fill={filled ? "#e0a106" : "none"} stroke="#e0a106" strokeWidth="1.4" strokeLinejoin="round" />
     </svg>
+  );
+}
+
+function LinkRecipeDialog({
+  kind,
+  shared,
+  categories,
+  onClose,
+  onDone,
+}: {
+  kind: "link" | "text";
+  shared: SharedLink | null;
+  categories: CategoryChoice[];
+  onClose: () => void;
+  onDone: (recipe: ImportedRecipe) => void;
+}) {
+  const [text, setText] = useState("");
+  const [error, setError] = useState("");
+  const [usage, setUsage] = useState<TokenUsage | null>(null);
+  const [pending, setPending] = useState(false);
+  const [seconds, setSeconds] = useState(0);
+  const abortRef = useRef<AbortController | null>(null);
+  const startedRef = useRef(false);
+  useEffect(() => {
+    if (!pending) return;
+    setSeconds(0);
+    const timer = window.setInterval(() => setSeconds((value) => value + 1), 1000);
+    return () => window.clearInterval(timer);
+  }, [pending]);
+  useEffect(() => () => abortRef.current?.abort(), []);
+  async function convert(source: SharedLink) {
+    if (pending) return;
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setError("");
+    setUsage(null);
+    setPending(true);
+    try {
+      const response = await fetch("/api/recipe-from-link", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...source, textOnly: kind === "text", categories }),
+        signal: controller.signal,
+      });
+      const body = (await response.json().catch(() => null)) as (ImportedRecipe & { error?: string; usage?: TokenUsage | null }) | null;
+      if (body?.usage) setUsage(body.usage);
+      if (!response.ok || !body?.title) {
+        setError(body?.error || (kind === "text" ? "לא ניתן להמיר את הטקסט" : "לא ניתן לקרוא את הקישור"));
+        return;
+      }
+      onDone(body);
+    } catch (caught) {
+      if (caught instanceof DOMException && caught.name === "AbortError") return;
+      setError(kind === "text" ? "לא ניתן להמיר את הטקסט" : "לא ניתן לקרוא את הקישור");
+    } finally {
+      if (abortRef.current === controller) abortRef.current = null;
+      setPending(false);
+    }
+  }
+  useEffect(() => {
+    if (!shared || startedRef.current) return;
+    startedRef.current = true;
+    void convert(shared);
+  }, [shared]);
+  function close() {
+    abortRef.current?.abort();
+    onClose();
+  }
+  const clock = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+  const pasted = text.trim();
+  const title = kind === "text" ? "מתכון מטקסט" : "מתכון מקישור";
+  return (
+    <Overlay label={title} onClose={close}>
+      <h3 className="text-start text-lg font-semibold">{title}</h3>
+      {shared ? null : (
+        <textarea
+          dir="rtl"
+          rows={kind === "text" ? 10 : 4}
+          value={text}
+          readOnly={pending}
+          placeholder={kind === "text" ? "הדביקו כאן את המתכון" : "הדביקו כאן קישור לפוסט או לאתר"}
+          aria-label={kind === "text" ? "טקסט המתכון" : "קישור"}
+          className="mt-3 w-full resize-none rounded-xl border border-neutral-300 px-3 py-2 outline-none"
+          onChange={(event) => setText(event.target.value)}
+        />
+      )}
+      {error ? <p className="mt-2 text-start text-sm text-red-700">{error}</p> : null}
+      {usage && !pending ? <TokenNote usage={usage} className="mt-2 text-start text-sm text-neutral-600" /> : null}
+      {pending ? (
+        <div className="mt-4 flex items-center justify-center gap-3 py-3" role="status">
+          <span aria-hidden className="inline-block size-5 rounded-full border-2 border-neutral-200" style={{ borderTopColor: "var(--teal)", animation: "cnaan-spin 0.8s linear infinite" }} />
+          <span>{kind === "text" ? "ממיר את המתכון" : "קורא את הקישור"} · {clock}</span>
+        </div>
+      ) : shared ? null : (
+        <button
+          type="button"
+          className="mt-4 w-full rounded-xl bg-[var(--teal)] py-3 font-medium text-white disabled:opacity-40"
+          disabled={!pasted}
+          onClick={() => void convert(kind === "text" ? { title: "", text: pasted, url: "" } : { title: "", text: pasted, url: pasted })}
+        >
+          המרה
+        </button>
+      )}
+      <button type="button" className="mt-2 w-full rounded-xl bg-neutral-100 py-3 font-medium" onClick={close}>
+        ביטול
+      </button>
+    </Overlay>
   );
 }
 

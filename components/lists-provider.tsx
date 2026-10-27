@@ -34,7 +34,7 @@ import { applyOrder, compareNames, moveVisible, nameInsertIndex, sortByOrder } f
 import { defaultStore, normalizeStore, sortStores } from "@/lib/stores";
 import { createClient } from "@/lib/supabase/client";
 import type { Category, ChecklistRow, GroceryLine, Item, ListsData, Store } from "@/lib/types";
-import { parseQuantity, type UnitId } from "@/lib/units";
+import { isUnitId, parseQuantity, type UnitId } from "@/lib/units";
 
 type ListsContextValue = {
   accountId: string;
@@ -1181,8 +1181,7 @@ function normalizeItem(row: {
   quantity: number | string;
   sort_order: number;
 }): Item {
-  const units = ["unit", "kg", "g", "l", "ml", "pack", "box", "bag", "bottle"] as const;
-  const unit = units.find((candidate) => candidate === row.unit) ?? "unit";
+  const unit = isUnitId(row.unit) ? row.unit : "unit";
   return {
     id: row.id,
     account_id: row.account_id,

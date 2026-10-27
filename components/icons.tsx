@@ -235,6 +235,25 @@ export function RecipesIcon(props: IconProps) {
   );
 }
 
+export function PasteIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true" {...props}>
+      <path d="M9 4.2h6v2.2H9z" strokeLinejoin="round" />
+      <path d="M8 6.2H6.8A1.3 1.3 0 0 0 5.5 7.5v12a1.3 1.3 0 0 0 1.3 1.3h10.4a1.3 1.3 0 0 0 1.3-1.3v-12A1.3 1.3 0 0 0 17.2 6.2H16" strokeLinecap="round" />
+      <path d="M8.5 11.5h7M8.5 15h7M8.5 18.5h4" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+export function LinkIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true" {...props}>
+      <path d="M10.2 13.4a3.6 3.6 0 0 0 5.1.3l1.8-1.8a3.6 3.6 0 0 0-5.1-5.1l-1 1" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M13.8 10.6a3.6 3.6 0 0 0-5.1-.3l-1.8 1.8a3.6 3.6 0 0 0 5.1 5.1l1-1" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 export function ExportIcon(props: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true" {...props}>

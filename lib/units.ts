@@ -8,6 +8,7 @@ export const UNITS = [
   { id: "box", label: "קופסה", short: "קפ'" },
   { id: "bag", label: "שקית", short: "שק'" },
   { id: "bottle", label: "בקבוק", short: "בק'" },
+  { id: "handful", label: "חופן", short: "חופן" },
 ] as const;
 
 export type UnitId = (typeof UNITS)[number]["id"];

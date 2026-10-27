@@ -11,6 +11,7 @@ export function StartAtGrocery({ signedIn }: { signedIn: boolean }) {
     if (!signedIn) return;
     if (sessionStorage.getItem(startedKey)) return;
     sessionStorage.setItem(startedKey, "1");
+    if (new URLSearchParams(window.location.search).get("share") === "1") return;
     if (window.location.pathname !== "/grocery") window.location.replace("/grocery");
   }, [signedIn]);
   return null;

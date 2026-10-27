@@ -14,7 +14,9 @@ import {
   ChevronIcon,
   CloseIcon,
   ExportIcon,
+  LinkIcon,
   MenuIcon,
+  PasteIcon,
   PlusIcon,
   ReorderIcon,
   SearchIcon,
@@ -43,6 +45,8 @@ export function AppHeader({
   clearGroceryEnabled = false,
   onPlus,
   plusLabel = "הוספת שורה",
+  onLink,
+  onPasteRecipe,
   onExportFile,
   exportFileEnabled = true,
   showCredit = false,
@@ -68,6 +72,8 @@ export function AppHeader({
   clearGroceryEnabled?: boolean;
   onPlus?: () => void;
   plusLabel?: string;
+  onLink?: () => void;
+  onPasteRecipe?: () => void;
   onExportFile?: () => void;
   exportFileEnabled?: boolean;
   showCredit?: boolean;
@@ -75,7 +81,7 @@ export function AppHeader({
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [creditOpen, setCreditOpen] = useState(false);
-  const showMenu = Boolean(onAdd || onSort || onReorder || onPlus || onExportFile);
+  const showMenu = Boolean(onAdd || onSort || onReorder || onPlus || onLink || onPasteRecipe || onExportFile);
   const searchButton = onSearchToggle ? (
     <button
       type="button"
@@ -233,6 +239,30 @@ export function AppHeader({
                     }}
                   >
                     <PlusIcon className="size-5" />
+                  </MenuItem>
+                ) : null}
+                {onLink ? (
+                  <MenuItem
+                    label="מתכון מקישור"
+                    disabled={!actionsEnabled}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onLink();
+                    }}
+                  >
+                    <LinkIcon className="size-5" />
+                  </MenuItem>
+                ) : null}
+                {onPasteRecipe ? (
+                  <MenuItem
+                    label="מתכון מטקסט"
+                    disabled={!actionsEnabled}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onPasteRecipe();
+                    }}
+                  >
+                    <PasteIcon className="size-5" />
                   </MenuItem>
                 ) : null}
                 {onToggleCategories ? (

@@ -188,14 +188,68 @@ function amountValue(part: string) {
   return number ? Number(number[1]) : Number.NaN;
 }
 
+const rationalDenominators = [2, 3, 4, 5, 6, 8];
+
 export function formatQuantityToken(quantity: string) {
   const trimmed = quantity.trim().replace(/\s+/g, " ");
-  const mixed = trimmed.match(/^(\d+)\s+(\d+\/\d+)$/);
+  return trimmed
+    .split(/(\s*(?:-|\u2013|\u2014|עד)\s*)/)
+    .map((part, index) => (index % 2 === 1 ? part : formatQuantityPiece(part.trim())))
+    .join("");
+}
+
+function formatQuantityPiece(token: string) {
+  const rational = decimalRational(token) ?? token;
+  const mixed = rational.match(/^(\d+)\s+(\d+\/\d+)$/);
   if (mixed) {
     const fraction = fractions[mixed[2]];
-    return fraction ? `${mixed[1]}${fraction}` : trimmed;
+    return fraction ? `${mixed[1]}${fraction}` : rational;
   }
-  return fractions[trimmed] ?? trimmed;
+  return fractions[rational] ?? rational;
+}
+
+function decimalRational(token: string) {
+  const match = token.match(/^(\d+)[.,](\d+)$/);
+  if (!match) return null;
+  const value = Number(`${match[1]}.${match[2]}`);
+  if (!Number.isFinite(value)) return null;
+  const whole = Math.floor(value + 1e-9);
+  const fraction = value - whole;
+  let bestWhole = whole;
+  let bestNum = 0;
+  let bestDen = 1;
+  let bestError = fraction;
+  if (1 - fraction < bestError) {
+    bestWhole = whole + 1;
+    bestError = 1 - fraction;
+  }
+  for (const den of rationalDenominators) {
+    const num = Math.round(fraction * den);
+    if (num <= 0 || num >= den) continue;
+    const error = Math.abs(fraction - num / den);
+    if (error < bestError - 1e-9 || (Math.abs(error - bestError) <= 1e-9 && den < bestDen)) {
+      bestWhole = whole;
+      bestNum = num;
+      bestDen = den;
+      bestError = error;
+    }
+  }
+  if (bestNum === 0 ? bestError >= 0.02 : bestError > 0.05) return null;
+  if (bestNum === 0) return String(bestWhole);
+  const divisor = greatestDivisor(bestNum, bestDen);
+  const piece = `${bestNum / divisor}/${bestDen / divisor}`;
+  return bestWhole > 0 ? `${bestWhole} ${piece}` : piece;
+}
+
+function greatestDivisor(left: number, right: number) {
+  let a = Math.abs(left);
+  let b = Math.abs(right);
+  while (b) {
+    const next = a % b;
+    a = b;
+    b = next;
+  }
+  return a || 1;
 }
 
 export function formatHebrewDate(iso: string) {
