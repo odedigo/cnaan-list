@@ -13,7 +13,7 @@ import {
 } from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import { flushSync } from "react-dom";
 
 import { AppHeader } from "@/components/app-header";
@@ -330,6 +330,20 @@ function ChecklistLine({
   const menuOpen = !copy && menuId === row.id;
   const indentDirection = row.indent === 1 ? "decrease" : "increase";
   const indentEnabled = !copy && changeIndent(lists.checklist, row.id, indentDirection) !== null;
+  const priorityButtonRef = useRef<HTMLButtonElement>(null);
+  const priorityMenuRef = useRef<HTMLDivElement>(null);
+  const [priorityAbove, setPriorityAbove] = useState(false);
+  useLayoutEffect(() => {
+    if (!menuOpen) return;
+    const button = priorityButtonRef.current;
+    const menu = priorityMenuRef.current;
+    if (!button || !menu) return;
+    const buttonBox = button.getBoundingClientRect();
+    const navTop = document.querySelector("nav")?.getBoundingClientRect().top ?? window.innerHeight;
+    const spaceBelow = navTop - buttonBox.bottom;
+    const spaceAbove = buttonBox.top;
+    setPriorityAbove(spaceBelow < menu.offsetHeight + 8 && spaceAbove > spaceBelow);
+  }, [menuOpen]);
   useEffect(() => {
     const element = inputRef.current;
     if (!selected || !element) return;
@@ -436,6 +450,7 @@ function ChecklistLine({
         ) : (
           <div className="relative" data-priority-menu="">
             <button
+              ref={priorityButtonRef}
               type="button"
               className="grid size-9 place-items-center text-neutral-500"
               style={{ height: 28 }}
@@ -450,7 +465,7 @@ function ChecklistLine({
               <FlagIcon className="size-5" />
             </button>
             {menuOpen ? (
-              <div role="menu" aria-label="עדיפות" className="absolute z-30 mt-1 overflow-hidden rounded-xl border border-neutral-200 bg-white py-1 text-neutral-800 shadow-lg" style={{ insetInlineEnd: 0, top: "100%", minWidth: "8.5rem" }}>
+              <div ref={priorityMenuRef} role="menu" aria-label="עדיפות" className="absolute z-30 overflow-hidden rounded-xl border border-neutral-200 bg-white py-1 text-neutral-800 shadow-lg" style={{ insetInlineEnd: 0, minWidth: "8.5rem", ...(priorityAbove ? { bottom: "100%", marginBottom: 4 } : { top: "100%", marginTop: 4 }) }}>
                 {priorities.map((item) => (
                   <button
                     key={item.id}
