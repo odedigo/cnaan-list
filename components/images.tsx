@@ -5,7 +5,8 @@
 import { useEffect, useRef, useState, type DragEvent } from "react";
 import { createPortal } from "react-dom";
 
-import { CameraIcon, CheckIcon, CloseIcon, FolderIcon, ImageIcon, SearchIcon, TrashIcon } from "@/components/icons";
+import { CameraIcon, CloseIcon, FolderIcon, ImageIcon, SearchIcon, TrashIcon } from "@/components/icons";
+import { ImageAdjust } from "@/components/image-adjust";
 
 function denied(error: unknown) {
   return error instanceof DOMException && (error.name === "NotAllowedError" || error.name === "PermissionDeniedError");
@@ -62,6 +63,7 @@ export function Lightbox({
   onRemove?: () => void;
 }) {
   const [dragOver, setDragOver] = useState(false);
+  const [adjust, setAdjust] = useState<File | null>(null);
   const dragDepth = useRef(0);
 
   function onDragEnter(event: DragEvent) {
@@ -93,7 +95,7 @@ export function Lightbox({
     dragDepth.current = 0;
     setDragOver(false);
     const file = droppedImage(event.dataTransfer);
-    if (file) onReplace(file);
+    if (file) setAdjust(file);
   }
 
   return (
@@ -124,6 +126,16 @@ export function Lightbox({
         <div className="mt-4">
           <ImagePicker hasImage={Boolean(src)} variant="light" searchName={label} onFile={onReplace} onRemove={onRemove} />
         </div>
+        {adjust ? (
+          <ImageAdjust
+            file={adjust}
+            onCancel={() => setAdjust(null)}
+            onConfirm={(next) => {
+              setAdjust(null);
+              onReplace(next);
+            }}
+          />
+        ) : null}
       </div>
     </div>
   );
@@ -142,7 +154,7 @@ export function ImagePicker({
   onFile: (file: File) => void;
   onRemove?: () => void;
 }) {
-  const [pending, setPending] = useState<{ file: File; url: string } | null>(null);
+  const [adjust, setAdjust] = useState<File | null>(null);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [confirmRemove, setConfirmRemove] = useState(false);
@@ -160,12 +172,6 @@ export function ImagePicker({
 
   useEffect(() => {
     return () => {
-      if (pending) URL.revokeObjectURL(pending.url);
-    };
-  }, [pending]);
-
-  useEffect(() => {
-    return () => {
       streamRef.current?.getTracks().forEach((track) => track.stop());
     };
   }, []);
@@ -177,20 +183,6 @@ export function ImagePicker({
     video.srcObject = stream;
     void video.play();
   }, [cameraOpen]);
-
-  function stageCamera(file: File) {
-    setPending((current) => {
-      if (current) URL.revokeObjectURL(current.url);
-      return { file, url: URL.createObjectURL(file) };
-    });
-  }
-
-  function discard() {
-    setPending((current) => {
-      if (current) URL.revokeObjectURL(current.url);
-      return null;
-    });
-  }
 
   function stopCamera() {
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -232,7 +224,7 @@ export function ImagePicker({
     canvas.toBlob((blob) => {
       stopCamera();
       if (!blob) return;
-      stageCamera(new File([blob], "camera.jpg", { type: "image/jpeg" }));
+      setAdjust(new File([blob], "camera.jpg", { type: "image/jpeg" }));
     }, "image/jpeg", 0.9);
   }
 
@@ -248,7 +240,7 @@ export function ImagePicker({
             onChange={(event) => {
               const file = event.target.files?.[0];
               event.target.value = "";
-              if (file) onFile(file);
+              if (file) setAdjust(file);
             }}
           />
         </label>
@@ -278,32 +270,21 @@ export function ImagePicker({
           </div>
         </div>
       ) : null}
-      {pending ? (
-        <div className="fixed inset-0 z-[80] flex flex-col bg-black/90 p-4" role="dialog" aria-modal="true" aria-label="אישור תמונה">
-          <img src={pending.url} alt="" className="mx-auto my-auto max-h-[70vh] max-w-full rounded-lg object-contain" />
-          <div className="mx-auto mt-4 flex items-center gap-3">
-            <button
-              type="button"
-              className="grid size-14 place-items-center rounded-full bg-[var(--teal)] text-white"
-              aria-label="שימוש בתמונה"
-              onClick={() => {
-                onFile(pending.file);
-                discard();
-              }}
-            >
-              <CheckIcon className="size-7" />
-            </button>
-            <button type="button" className="grid size-14 place-items-center rounded-full bg-white text-neutral-700" aria-label="ביטול" onClick={discard}>
-              <CloseIcon className="size-6" />
-            </button>
-          </div>
-        </div>
+      {adjust ? (
+        <ImageAdjust
+          file={adjust}
+          onCancel={() => setAdjust(null)}
+          onConfirm={(next) => {
+            setAdjust(null);
+            onFile(next);
+          }}
+        />
       ) : null}
       {searchOpen ? (
         <ImageSearch
           initialQuery={searchName.trim()}
           onFile={(file) => {
-            onFile(file);
+            setAdjust(file);
             setSearchOpen(false);
           }}
           onClose={() => setSearchOpen(false)}

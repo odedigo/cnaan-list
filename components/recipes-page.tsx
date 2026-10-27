@@ -32,6 +32,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 
 import { AppHeader } from "@/components/app-header";
+import { ImageAdjust } from "@/components/image-adjust";
 import { RecipeCrop } from "@/components/recipe-crop";
 import {
   ArrowIcon,
@@ -1968,9 +1969,11 @@ function CategoryImageDialog({
   onRemove: () => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const drop = useImageDrop((file) => {
-    if (!busy) onFile(file);
-  });
+  const [adjust, setAdjust] = useState<File | null>(null);
+  function stage(file: File) {
+    if (!busy) setAdjust(file);
+  }
+  const drop = useImageDrop(stage);
   return (
     <Overlay
       label={`תמונה עבור ${category.name}`}
@@ -2002,7 +2005,7 @@ function CategoryImageDialog({
         onChange={(event) => {
           const file = event.target.files?.[0];
           event.target.value = "";
-          if (file) onFile(file);
+          if (file) stage(file);
         }}
       />
       <button
@@ -2013,7 +2016,18 @@ function CategoryImageDialog({
       >
         בחירת תמונה
       </button>
-      <CameraShot disabled={busy} onFile={onFile} />
+      <CameraShot disabled={busy} onFile={stage} />
+      {adjust ? (
+        <ImageAdjust
+          file={adjust}
+          busy={busy}
+          onCancel={() => setAdjust(null)}
+          onConfirm={(next) => {
+            setAdjust(null);
+            onFile(next);
+          }}
+        />
+      ) : null}
       {category.image_path ? (
         <button
           type="button"
@@ -2051,9 +2065,11 @@ function RecipeImageDialog({
   onRemove: (() => void) | null;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const drop = useImageDrop((file) => {
-    if (!busy) onFile(file);
-  });
+  const [adjust, setAdjust] = useState<File | null>(null);
+  function stage(file: File) {
+    if (!busy) setAdjust(file);
+  }
+  const drop = useImageDrop(stage);
   return (
     <Overlay label={`תמונה עבור ${title}`} onClose={onClose} drop={drop}>
       <h3 className="text-lg font-semibold">{title}</h3>
@@ -2081,7 +2097,7 @@ function RecipeImageDialog({
         onChange={(event) => {
           const file = event.target.files?.[0];
           event.target.value = "";
-          if (file) onFile(file);
+          if (file) stage(file);
         }}
       />
       <button
@@ -2092,7 +2108,18 @@ function RecipeImageDialog({
       >
         בחירת תמונה
       </button>
-      <CameraShot disabled={busy} onFile={onFile} />
+      <CameraShot disabled={busy} onFile={stage} />
+      {adjust ? (
+        <ImageAdjust
+          file={adjust}
+          busy={busy}
+          onCancel={() => setAdjust(null)}
+          onConfirm={(next) => {
+            setAdjust(null);
+            onFile(next);
+          }}
+        />
+      ) : null}
       {onRemove ? (
         <button
           type="button"
