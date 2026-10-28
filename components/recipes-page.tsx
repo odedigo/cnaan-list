@@ -2622,6 +2622,11 @@ function RecipeList({
             key={row.id}
             type="button"
             className="flex w-full items-center gap-3 border-b border-neutral-200 px-4 py-3 text-start"
+            aria-label={
+              row.rating != null
+                ? `${row.title}, דירוג ${row.rating}`
+                : row.title
+            }
             {...menuProps(row.id)}
             onClick={() => onOpen(row)}
           >
@@ -2644,6 +2649,7 @@ function RecipeList({
                   <ImageIcon className="size-4" />
                 </span>
               )}
+              <TileRating rating={row.rating} />
             </span>
             <span className="min-w-0 flex-1">
               <span className="block truncate">{row.title}</span>
@@ -2736,6 +2742,19 @@ function RecipeDetail({
   const [title, setTitle] = useState(recipe.title);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [advanced, setAdvanced] = useState(false);
+  const barRef = useRef<HTMLDivElement>(null);
+  const [stickTop, setStickTop] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const header = barRef.current
+      ?.closest("[aria-hidden]")
+      ?.querySelector("header");
+    if (!header) return;
+    const update = () => setStickTop(header.getBoundingClientRect().height);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(header);
+    return () => observer.disconnect();
+  }, []);
   useEffect(() => {
     const sync = () => setAdvanced(readRecipeAdvanced());
     sync();
@@ -2763,6 +2782,14 @@ function RecipeDetail({
   const current = slides[slide];
   return (
     <div>
+      <div
+        ref={barRef}
+        className="sticky z-10"
+        style={{
+          top: stickTop ?? "calc(3.5rem + 3px)",
+          background: "var(--cream)",
+        }}
+      >
       <div className="flex items-start justify-between gap-3 px-4 pt-4">
         <div className="flex min-w-0 flex-1 items-start gap-3">
           <button
@@ -2843,6 +2870,7 @@ function RecipeDetail({
             </button>
           );
         })}
+      </div>
       </div>
       {tab === "info" ? (
         <div className="pb-4">
@@ -4699,7 +4727,7 @@ function NewRecipeDialog({
   return (
     <Overlay label="מתכון חדש" onClose={onClose}>
       <h3 className="text-lg font-semibold">מתכון חדש</h3>
-      <Field label="שם המתכון" value={title} onChange={setTitle} />
+      <Field label="שם המתכון" value={title} onChange={setTitle} autoFocus />
       {folderId ? null : categories.length > 0 ? (
         <label className="mt-3 block text-start">
           <span className="mb-1 block text-sm">קטגוריה</span>
