@@ -68,6 +68,7 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchResultsRef = useRef<HTMLUListElement>(null);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [collapseReady, setCollapseReady] = useState(mode !== "inventory");
   const collapseKey =
@@ -201,6 +202,35 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
   }, [lists.categories, mode]);
 
   const needle = query.trim().toLocaleLowerCase("he");
+
+  useLayoutEffect(() => {
+    if (mode !== "grocery" || !searchOpen || !needle) return;
+    const list = searchResultsRef.current;
+    const header = screenRef.current?.querySelector("header");
+    if (!list || !header) return;
+    const place = () => {
+      const rect = header.getBoundingClientRect();
+      const top = rect.bottom + 8;
+      const nav = document.querySelector('nav[aria-label="ניווט ראשי"]');
+      const navTop = nav?.getBoundingClientRect().top ?? window.innerHeight;
+      list.style.top = `${top}px`;
+      list.style.left = `${rect.left + 16}px`;
+      list.style.width = `${Math.max(0, rect.width - 32)}px`;
+      list.style.maxHeight = `${Math.max(120, navTop - top - 8)}px`;
+    };
+    list.scrollTop = 0;
+    place();
+    window.addEventListener("resize", place);
+    const viewport = window.visualViewport;
+    viewport?.addEventListener("resize", place);
+    viewport?.addEventListener("scroll", place);
+    return () => {
+      window.removeEventListener("resize", place);
+      viewport?.removeEventListener("resize", place);
+      viewport?.removeEventListener("scroll", place);
+    };
+  }, [mode, searchOpen, needle]);
+
   const groceryByItem = useMemo(
     () => new Map(lists.grocery.map((line) => [line.item_id, line])),
     [lists.grocery],
@@ -419,7 +449,11 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
         </p>
       ) : null}
       {mode === "grocery" && searchOpen && needle ? (
-        <ul className="mx-4 mb-3 overflow-hidden rounded-xl bg-white shadow-sm">
+        <ul
+          ref={searchResultsRef}
+          className="overflow-y-auto rounded-xl border border-neutral-200 bg-white shadow-sm"
+          style={{ position: "fixed", zIndex: 10, overscrollBehavior: "contain" }}
+        >
           {searchResults.length === 0 ? (
             <li className="px-3 py-3 text-sm text-neutral-500">
               לא נמצאו מוצרים ברשימה
@@ -428,17 +462,9 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
           {searchResults.map((item) => (
             <li key={item.id}>
               <div
-                role="button"
-                tabIndex={0}
                 className="flex w-full items-center gap-3 px-3 py-2 text-start"
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => chooseSearchResult(item.id)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    chooseSearchResult(item.id);
-                  }
-                }}
               >
                 <ImageBubble
                   src={lists.imageSrc("item", item.id, item.image_path)}
@@ -453,6 +479,11 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
                     </span>
                   ) : null}
                 </span>
+                <Stepper
+                  quantity={item.quantity}
+                  unitShort={unitById(item.unit).short}
+                  onChange={(quantity) => void lists.setQuantity(item.id, quantity)}
+                />
               </div>
             </li>
           ))}
@@ -1027,6 +1058,7 @@ function Stepper({
       dir="ltr"
       className="flex shrink-0 items-center gap-2 text-sm"
       onClick={(event) => event.stopPropagation()}
+      onKeyDown={(event) => event.stopPropagation()}
     >
       <button
         type="button"
