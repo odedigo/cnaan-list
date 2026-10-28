@@ -167,6 +167,8 @@ export function RecipesPage({ active }: { active: boolean }) {
   const [folderId, setFolderId] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [searchOverOpen, setSearchOverOpen] = useState(false);
+  const [recipeEditing, setRecipeEditing] = useState(false);
   const [open, setOpen] = useState<OpenRecipe | null>(null);
   const [tab, setTab] = useState<TabId>("ingredients");
   const [checks, setChecks] = useState<Checks>({ ingredients: [], steps: [] });
@@ -1443,6 +1445,7 @@ export function RecipesPage({ active }: { active: boolean }) {
   const needle = query.trim().toLocaleLowerCase("he");
   const rating = ratingSearch(needle);
   const searching = searchOpen && needle.length > 0;
+  const showResults = searching && (!open || (searchOverOpen && !recipeEditing));
   const found = recipes
     .filter((row) => {
       if (rating)
@@ -1535,8 +1538,12 @@ export function RecipesPage({ active }: { active: boolean }) {
         onSearchToggle={() => {
           setSearchOpen((current) => !current);
           setQuery("");
+          setSearchOverOpen(false);
         }}
-        onSearchChange={setQuery}
+        onSearchChange={(value) => {
+          setQuery(value);
+          setSearchOverOpen(Boolean(open) && !recipeEditing && Boolean(value.trim()));
+        }}
         onLink={
           !loading && !open && !searching ? () => setLinkOpen(true) : undefined
         }
@@ -1568,19 +1575,23 @@ export function RecipesPage({ active }: { active: boolean }) {
       {loading ? (
         <p className="px-6 pt-16 text-center text-neutral-500">טוען מתכונים…</p>
       ) : null}
-      {!loading && !open && !(error && categories.length === 0) ? (
+      {!loading && showResults ? (
         <div className="pb-4">
-          {searching ? (
-            <RecipeList
-              rows={found}
-              images={{ ...recipeCovers, ...searchThumbs }}
-              labelFor={labelText}
-              empty="אין מתכונים תואמים."
-              onOpen={(row) => void openRecipe(row)}
-              onMenu={setRecipeMenuId}
-            />
-          ) : (
-            <>
+          <RecipeList
+            rows={found}
+            images={{ ...recipeCovers, ...searchThumbs }}
+            labelFor={labelText}
+            empty="אין מתכונים תואמים."
+            onOpen={(row) => {
+              setSearchOverOpen(false);
+              void openRecipe(row);
+            }}
+            onMenu={setRecipeMenuId}
+          />
+        </div>
+      ) : null}
+      {!loading && !showResults && !open && !(error && categories.length === 0) ? (
+        <div className="pb-4">
               {folder ? (
                 <button
                   type="button"
@@ -1624,11 +1635,9 @@ export function RecipesPage({ active }: { active: boolean }) {
                   אין כאן מתכונים.
                 </p>
               ) : null}
-            </>
-          )}
         </div>
       ) : null}
-      {!loading && open ? (
+      {!loading && !showResults && open ? (
         <RecipeDetail
           recipe={open}
           tab={tab}
@@ -1678,6 +1687,7 @@ export function RecipesPage({ active }: { active: boolean }) {
           onDeleteImage={(id) => void changeRecipeImage(id, null)}
           onMakeCover={(id) => void makeCoverImage(id)}
           onDelete={deleteRecipe}
+          onEditingChange={setRecipeEditing}
         />
       ) : null}
       {linkOpen || sharedLink ? (
@@ -2687,6 +2697,7 @@ function RecipeDetail({
   onDeleteImage,
   onMakeCover,
   onDelete,
+  onEditingChange,
 }: {
   recipe: OpenRecipe;
   tab: TabId;
@@ -2719,6 +2730,7 @@ function RecipeDetail({
   onDeleteImage: (id: string) => void;
   onMakeCover: (id: string) => void;
   onDelete: () => Promise<void>;
+  onEditingChange: (editing: boolean) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(recipe.title);
@@ -2735,6 +2747,10 @@ function RecipeDetail({
     setConfirmDelete(false);
     setTitle(recipe.title);
   }, [recipe.id, tab, recipe.title]);
+  useEffect(() => {
+    onEditingChange(editing);
+    return () => onEditingChange(false);
+  }, [editing, onEditingChange]);
   function startEdit() {
     setTitle(recipe.title);
     setEditing(true);
