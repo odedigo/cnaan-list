@@ -4409,16 +4409,13 @@ function LinkRecipeDialog({
   const adding = categories.length === 0 || createNew;
   const canSave =
     Boolean(approvedTitle.trim()) &&
-    (kind !== "image" || Boolean(sourceName.trim())) &&
     (categoryIds.length > 0 || (adding && newCategory.trim()));
   if (draft) {
     return (
       <Overlay label="אישור המתכון" onClose={close}>
         <h3 className="text-start text-lg font-semibold">אישור המתכון</h3>
         <p className="mt-1 text-start text-sm text-neutral-600">
-          {kind === "image"
-            ? "אשרו את שם המתכון, כתבו את המקור, ובחרו קטגוריות לשמירה."
-            : "אשרו את שם המתכון ובחרו קטגוריות לשמירה."}
+          אשרו את שם המתכון ובחרו קטגוריות לשמירה.
         </p>
         {importPreviews(draft).length > 0 ? (
           <div className="mt-3 flex gap-2">
