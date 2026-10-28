@@ -922,6 +922,14 @@ function ItemRow({
                 unitShort={unitById(item.unit).short}
                 onChange={onQuantity}
               />
+            ) : mode === "inventory" && inGrocery ? (
+              <span
+                className="shrink-0 rounded-full bg-white px-1.5 text-xs font-semibold leading-5 text-neutral-700"
+                style={{ border: "1px solid var(--teal)" }}
+              >
+                <bdi>{formatQuantity(item.quantity)}</bdi>{" "}
+                <bdi>{unitById(item.unit).short}</bdi>
+              </span>
             ) : null
           }
           onOpenImage={onImage}

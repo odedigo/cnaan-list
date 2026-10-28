@@ -1588,7 +1588,7 @@ export function RecipesPage({ active }: { active: boolean }) {
         actionsEnabled
         searchOpen={searchOpen}
         searchValue={query}
-        searchPlaceholder="חיפוש מתכון, ד2 לדירוג 2, ד2+ לדירוג 2 ומעלה"
+        searchPlaceholder="חיפוש מתכון"
         searchInputRef={searchInputRef}
         searchSide="start"
         onSearchToggle={() => {
@@ -2542,6 +2542,55 @@ function CameraShot({
   );
 }
 
+function TickerTitle({ text }: { text: string }) {
+  const boxRef = useRef<HTMLSpanElement>(null);
+  const textRef = useRef<HTMLSpanElement>(null);
+  const [shift, setShift] = useState(0);
+
+  useLayoutEffect(() => {
+    const box = boxRef.current;
+    const node = textRef.current;
+    if (!box || !node) return;
+    const measure = () => {
+      const overflow = Math.ceil(node.scrollWidth - box.clientWidth);
+      const next = overflow > 2 ? overflow : 0;
+      setShift((current) => (current === next ? current : next));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(box);
+    void document.fonts?.ready.then(measure);
+    return () => observer.disconnect();
+  }, [text]);
+
+  const duration = Math.min(16, Math.max(4.5, shift / 9));
+
+  return (
+    <span className="block px-1 py-1 text-xs font-medium">
+      <span
+        ref={boxRef}
+        className="block overflow-hidden"
+        style={{ textAlign: shift > 0 ? "start" : "center" }}
+      >
+        <span
+          ref={textRef}
+          className={`inline-block whitespace-nowrap ${shift > 0 ? "cnaan-ticker" : ""}`}
+          style={
+            shift > 0
+              ? {
+                  ["--ticker-shift" as string]: `${shift}px`,
+                  ["--ticker-duration" as string]: `${duration}s`,
+                }
+              : undefined
+          }
+        >
+          {text}
+        </span>
+      </span>
+    </span>
+  );
+}
+
 function RecipeTiles({
   rows,
   images,
@@ -2610,9 +2659,7 @@ function RecipeTiles({
                 )}
                 <TileRating rating={row.rating} />
               </span>
-              <span className="block truncate px-1 py-1 text-center text-xs font-medium">
-                {row.title}
-              </span>
+              <TickerTitle text={row.title} />
             </button>
           );
         })}

@@ -54,3 +54,27 @@ select:focus-visible {
     transform: rotate(360deg);
   }
 }
+
+.cnaan-ticker {
+  animation: cnaan-ticker var(--ticker-duration, 8s) ease-in-out infinite;
+}
+
+@keyframes cnaan-ticker {
+  0%,
+  18% {
+    transform: translateX(0);
+  }
+  45%,
+  68% {
+    transform: translateX(var(--ticker-shift, 0px));
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cnaan-ticker {
+    animation: none;
+  }
+}
