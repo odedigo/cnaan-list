@@ -134,8 +134,14 @@ const tabs: { id: TabId; label: string }[] = [
 
 const favoritesCategoryName = "מועדפים";
 
-function isFavoritesCategory(category: { parent_id: string | null; name: string }) {
-  return category.parent_id === null && category.name.trim() === favoritesCategoryName;
+function isFavoritesCategory(category: {
+  parent_id: string | null;
+  name: string;
+}) {
+  return (
+    category.parent_id === null &&
+    category.name.trim() === favoritesCategoryName
+  );
 }
 
 function compareCategories(a: CategoryRow, b: CategoryRow) {
@@ -167,6 +173,7 @@ export function RecipesPage({ active }: { active: boolean }) {
   const [folderId, setFolderId] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [searchAll, setSearchAll] = useState(true);
   const [searchOverOpen, setSearchOverOpen] = useState(false);
   const [recipeEditing, setRecipeEditing] = useState(false);
   const [open, setOpen] = useState<OpenRecipe | null>(null);
@@ -230,7 +237,8 @@ export function RecipesPage({ active }: { active: boolean }) {
         if (favoriteBranchIds.has(row.leaf_category_id)) ids.add(row.id);
       }
       for (const label of labels) {
-        if (label.category_id === favoritesCategory.id) ids.add(label.recipe_id);
+        if (label.category_id === favoritesCategory.id)
+          ids.add(label.recipe_id);
       }
       counts[favoritesCategory.id] = ids.size;
     }
@@ -293,6 +301,10 @@ export function RecipesPage({ active }: { active: boolean }) {
       cancel = true;
     };
   }, [lists.accountId, opened, recipeReload, supabase]);
+
+  useLayoutEffect(() => {
+    setSearchAll(readSearchAllCategories());
+  }, []);
 
   useEffect(() => {
     const onImported = () => {
@@ -658,14 +670,12 @@ export function RecipesPage({ active }: { active: boolean }) {
       if (insertError || !data) throw insertError ?? new Error("insert failed");
       const labelIds = chain(leafCategoryId);
       if (!labelIds.includes(leafCategoryId)) labelIds.unshift(leafCategoryId);
-      const { error: labelError } = await supabase
-        .from("recipe_labels")
-        .insert(
-          labelIds.map((categoryId) => ({
-            recipe_id: data.id,
-            category_id: categoryId,
-          })),
-        );
+      const { error: labelError } = await supabase.from("recipe_labels").insert(
+        labelIds.map((categoryId) => ({
+          recipe_id: data.id,
+          category_id: categoryId,
+        })),
+      );
       if (labelError) throw labelError;
       const row = data as RecipeRow;
       setRecipes((current) => [
@@ -870,14 +880,12 @@ export function RecipesPage({ active }: { active: boolean }) {
         )
         .single();
       if (insertError || !data) throw insertError ?? new Error("insert failed");
-      const { error: labelError } = await supabase
-        .from("recipe_labels")
-        .insert(
-          labelIds.map((categoryId) => ({
-            recipe_id: data.id,
-            category_id: categoryId,
-          })),
-        );
+      const { error: labelError } = await supabase.from("recipe_labels").insert(
+        labelIds.map((categoryId) => ({
+          recipe_id: data.id,
+          category_id: categoryId,
+        })),
+      );
       if (labelError) throw labelError;
       const row = data as RecipeRow;
       const files = importedImageFiles(imported);
@@ -1358,14 +1366,12 @@ export function RecipesPage({ active }: { active: boolean }) {
         .delete()
         .eq("recipe_id", open.id);
       if (deleteError) throw deleteError;
-      const { error: labelError } = await supabase
-        .from("recipe_labels")
-        .insert(
-          selected.map((categoryId) => ({
-            recipe_id: open.id,
-            category_id: categoryId,
-          })),
-        );
+      const { error: labelError } = await supabase.from("recipe_labels").insert(
+        selected.map((categoryId) => ({
+          recipe_id: open.id,
+          category_id: categoryId,
+        })),
+      );
       if (labelError) throw labelError;
       const { error: leafError } = await supabase
         .from("recipes")
@@ -1445,9 +1451,27 @@ export function RecipesPage({ active }: { active: boolean }) {
   const needle = query.trim().toLocaleLowerCase("he");
   const rating = ratingSearch(needle);
   const searching = searchOpen && needle.length > 0;
-  const showResults = searching && (!open || (searchOverOpen && !recipeEditing));
+  const showResults =
+    searching && (!open || (searchOverOpen && !recipeEditing));
+  const searchScopeId = folderId;
+  const searchScopeIds =
+    !searchAll && searchScopeId
+      ? categoryBranchIds(searchScopeId, categories)
+      : null;
   const found = recipes
     .filter((row) => {
+      if (
+        searchScopeIds &&
+        searchScopeId &&
+        !recipeInSearchScope(
+          row,
+          searchScopeIds,
+          searchScopeId,
+          favoritesCategory,
+          labels,
+        )
+      )
+        return false;
       if (rating)
         return (
           row.rating != null &&
@@ -1510,6 +1534,9 @@ export function RecipesPage({ active }: { active: boolean }) {
     };
   }, [opened, searchKey, supabase]);
   const folder = folderId ? byId.get(folderId) : undefined;
+  const searchScopeName = searchScopeId
+    ? byId.get(searchScopeId)?.name
+    : undefined;
   const imageCategory = imageCategoryId ? byId.get(imageCategoryId) : undefined;
   const menuCategory = categoryMenuId ? byId.get(categoryMenuId) : undefined;
   const categoryToDelete = categoryDeleteId
@@ -1542,7 +1569,9 @@ export function RecipesPage({ active }: { active: boolean }) {
         }}
         onSearchChange={(value) => {
           setQuery(value);
-          setSearchOverOpen(Boolean(open) && !recipeEditing && Boolean(value.trim()));
+          setSearchOverOpen(
+            Boolean(open) && !recipeEditing && Boolean(value.trim()),
+          );
         }}
         onLink={
           !loading && !open && !searching ? () => setLinkOpen(true) : undefined
@@ -1577,6 +1606,26 @@ export function RecipesPage({ active }: { active: boolean }) {
       ) : null}
       {!loading && showResults ? (
         <div className="pb-4">
+          {searchScopeName ? (
+            <label
+              className="flex items-center gap-2 border-b border-neutral-200 px-4 text-start"
+              style={{ minHeight: 44 }}
+            >
+              <input
+                type="checkbox"
+                checked={searchAll}
+                style={{ width: 18, height: 18 }}
+                onChange={(event) => {
+                  const next = event.target.checked;
+                  setSearchAll(next);
+                  writeSearchAllCategories(next);
+                }}
+              />
+              <span className="min-w-0 text-sm">
+                {`חיפוש בכל הקטגוריות (או רק בקטגוריה ${searchScopeName})`}
+              </span>
+            </label>
+          ) : null}
           <RecipeList
             rows={found}
             images={{ ...recipeCovers, ...searchThumbs }}
@@ -1590,51 +1639,53 @@ export function RecipesPage({ active }: { active: boolean }) {
           />
         </div>
       ) : null}
-      {!loading && !showResults && !open && !(error && categories.length === 0) ? (
+      {!loading &&
+      !showResults &&
+      !open &&
+      !(error && categories.length === 0) ? (
         <div className="pb-4">
-              {folder ? (
-                <button
-                  type="button"
-                  className="flex w-full items-center gap-2 px-4 py-3 text-start font-semibold"
-                  onClick={() => setFolderId(folder.parent_id)}
-                >
-                  <BackMark />
-                  <span>{folder.name}</span>
-                </button>
-              ) : null}
-              {viewingFavorites ? null : (
-                <CategoryTiles
-                  categories={childCategories}
-                  images={categoryImages}
-                  counts={directRecipeCounts}
-                  onOpen={setFolderId}
-                  onImage={setImageCategoryId}
-                  onAdd={() => setAddingCategory(true)}
-                  onMenu={(id) => {
-                    const category = byId.get(id);
-                    if (category && isFavoritesCategory(category)) return;
-                    setCategoryMenuId(id);
-                  }}
-                />
-              )}
-              <RecipeTiles
-                rows={folderRecipes}
-                images={recipeCovers}
-                onOpen={(row) => void openRecipe(row)}
-                onMenu={setRecipeMenuId}
-                onAdd={
-                  folderId && !viewingFavorites
-                    ? () => setCreating(true)
-                    : undefined
-                }
-              />
-              {((!folderId && childCategories.length === 0) ||
-                viewingFavorites) &&
-              folderRecipes.length === 0 ? (
-                <p className="px-6 pt-10 text-center text-neutral-500">
-                  אין כאן מתכונים.
-                </p>
-              ) : null}
+          {folder ? (
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 px-4 py-3 text-start font-semibold"
+              onClick={() => setFolderId(folder.parent_id)}
+            >
+              <BackMark />
+              <span>{folder.name}</span>
+            </button>
+          ) : null}
+          {viewingFavorites ? null : (
+            <CategoryTiles
+              categories={childCategories}
+              images={categoryImages}
+              counts={directRecipeCounts}
+              onOpen={setFolderId}
+              onImage={setImageCategoryId}
+              onAdd={() => setAddingCategory(true)}
+              onMenu={(id) => {
+                const category = byId.get(id);
+                if (category && isFavoritesCategory(category)) return;
+                setCategoryMenuId(id);
+              }}
+            />
+          )}
+          <RecipeTiles
+            rows={folderRecipes}
+            images={recipeCovers}
+            onOpen={(row) => void openRecipe(row)}
+            onMenu={setRecipeMenuId}
+            onAdd={
+              folderId && !viewingFavorites
+                ? () => setCreating(true)
+                : undefined
+            }
+          />
+          {((!folderId && childCategories.length === 0) || viewingFavorites) &&
+          folderRecipes.length === 0 ? (
+            <p className="px-6 pt-10 text-center text-neutral-500">
+              אין כאן מתכונים.
+            </p>
+          ) : null}
         </div>
       ) : null}
       {!loading && !showResults && open ? (
@@ -1997,7 +2048,9 @@ function CategoryTiles({
             >
               <span
                 className="relative block aspect-square overflow-hidden bg-[var(--cream)] text-neutral-400"
-                style={favorites && !src ? { background: "#e8c56a" } : undefined}
+                style={
+                  favorites && !src ? { background: "#e8c56a" } : undefined
+                }
               >
                 {src ? (
                   <img
@@ -2790,87 +2843,88 @@ function RecipeDetail({
           background: "var(--cream)",
         }}
       >
-      <div className="flex items-start justify-between gap-3 px-4 pt-4">
-        <div className="flex min-w-0 flex-1 items-start gap-3">
-          <button
-            type="button"
-            className="shrink-0"
-            aria-label="חזרה"
-            onClick={onBack}
-          >
-            <BackMark />
-          </button>
-          {editing ? (
-            <input
-              className="min-w-0 flex-1 rounded-lg border border-neutral-300 bg-white px-2 text-lg font-semibold"
-              style={{ height: "2rem" }}
-              aria-label="שם המתכון"
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-            />
-          ) : (
-            <h2
-              className="min-w-0 text-lg font-semibold leading-8"
-              style={{ overflowWrap: "anywhere" }}
-            >
-              {recipe.title}
-            </h2>
-          )}
-        </div>
-        <div dir="ltr" className="flex shrink-0 items-center">
-          {onToggleFavorite ? (
+        <div className="flex items-start justify-between gap-3 px-4 pt-4">
+          <div className="flex min-w-0 flex-1 items-start gap-3">
             <button
               type="button"
-              className="grid size-8 place-items-center"
-              style={{ color: favorite ? "#b45309" : "#a3a3a3" }}
-              aria-label={favorite ? "הסרה ממועדפים" : "הוספה למועדפים"}
-              aria-pressed={favorite}
-              disabled={busy}
-              onClick={onToggleFavorite}
+              className="shrink-0"
+              aria-label="חזרה"
+              onClick={onBack}
             >
-              <BookmarkIcon className="size-5" filled={favorite} />
+              <BackMark />
             </button>
-          ) : null}
-          {[1, 2, 3, 4, 5].map((value) => (
-            <button
-              key={value}
-              type="button"
-              aria-label={`דירוג ${value}`}
-              onClick={() => onRate(value)}
-            >
-              <StarIcon
-                filled={recipe.rating != null && value <= recipe.rating}
+            {editing ? (
+              <input
+                className="min-w-0 flex-1 rounded-lg border border-neutral-300 bg-white px-2 text-lg font-semibold"
+                style={{ height: "2rem" }}
+                aria-label="שם המתכון"
+                value={title}
+                onChange={(event) => setTitle(event.target.value)}
               />
-            </button>
-          ))}
+            ) : (
+              <h2
+                className="min-w-0 text-lg font-semibold leading-8"
+                style={{ overflowWrap: "anywhere" }}
+              >
+                {recipe.title}
+              </h2>
+            )}
+          </div>
+          <div dir="ltr" className="flex shrink-0 items-center">
+            {onToggleFavorite ? (
+              <button
+                type="button"
+                className="grid size-8 place-items-center"
+                style={{ color: favorite ? "#b45309" : "#a3a3a3" }}
+                aria-label={favorite ? "הסרה ממועדפים" : "הוספה למועדפים"}
+                aria-pressed={favorite}
+                disabled={busy}
+                onClick={onToggleFavorite}
+              >
+                <BookmarkIcon className="size-5" filled={favorite} />
+              </button>
+            ) : null}
+            {[1, 2, 3, 4, 5].map((value) => (
+              <button
+                key={value}
+                type="button"
+                aria-label={`דירוג ${value}`}
+                onClick={() => onRate(value)}
+              >
+                <StarIcon
+                  filled={recipe.rating != null && value <= recipe.rating}
+                />
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
-      <div className="mt-3 flex bg-[var(--teal)] text-white">
-        {tabs.map((item) => {
-          const locked = editing && item.id !== tab;
-          return (
-            <button
-              key={item.id}
-              type="button"
-              className="flex-1 py-3 text-center font-medium"
-              style={{
-                color: tab === item.id ? "#fff" : "#c4c4c4",
-                boxShadow: tab === item.id ? "inset 0 -3px 0 #fff" : undefined,
-                opacity: locked ? 0.4 : undefined,
-              }}
-              aria-current={tab === item.id ? "true" : undefined}
-              aria-disabled={locked || undefined}
-              disabled={locked}
-              onClick={() => {
-                if (locked) return;
-                onTab(item.id);
-              }}
-            >
-              {item.label}
-            </button>
-          );
-        })}
-      </div>
+        <div className="mt-3 flex bg-[var(--teal)] text-white">
+          {tabs.map((item) => {
+            const locked = editing && item.id !== tab;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                className="flex-1 py-3 text-center font-medium"
+                style={{
+                  color: tab === item.id ? "#fff" : "#c4c4c4",
+                  boxShadow:
+                    tab === item.id ? "inset 0 -3px 0 #fff" : undefined,
+                  opacity: locked ? 0.4 : undefined,
+                }}
+                aria-current={tab === item.id ? "true" : undefined}
+                aria-disabled={locked || undefined}
+                disabled={locked}
+                onClick={() => {
+                  if (locked) return;
+                  onTab(item.id);
+                }}
+              >
+                {item.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
       {tab === "info" ? (
         <div className="pb-4">
@@ -5567,6 +5621,58 @@ function chooseLeaf(
       (a, b) =>
         depth(b) - depth(a) || (a === previous ? -1 : b === previous ? 1 : 0),
     )[0] ?? previous
+  );
+}
+
+const searchAllKey = "cnaanlist-recipe-search-all";
+
+function readSearchAllCategories() {
+  if (typeof window === "undefined") return true;
+  try {
+    return window.localStorage.getItem(searchAllKey) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+function writeSearchAllCategories(all: boolean) {
+  try {
+    window.localStorage.setItem(searchAllKey, all ? "1" : "0");
+  } catch {
+    return;
+  }
+}
+
+function categoryBranchIds(rootId: string, categories: CategoryRow[]) {
+  const ids = new Set<string>([rootId]);
+  const pending = [rootId];
+  while (pending.length > 0) {
+    const id = pending.pop() as string;
+    for (const category of categories) {
+      if (category.parent_id === id && !ids.has(category.id)) {
+        ids.add(category.id);
+        pending.push(category.id);
+      }
+    }
+  }
+  return ids;
+}
+
+function recipeInSearchScope(
+  row: RecipeRow,
+  scopeIds: Set<string>,
+  scopeId: string,
+  favorites: CategoryRow | null,
+  labels: LabelRow[],
+) {
+  if (scopeIds.has(row.leaf_category_id)) return true;
+  return (
+    favorites != null &&
+    scopeId === favorites.id &&
+    labels.some(
+      (label) =>
+        label.recipe_id === row.id && label.category_id === favorites.id,
+    )
   );
 }
 
