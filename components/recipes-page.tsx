@@ -245,6 +245,9 @@ export function RecipesPage({ active }: { active: boolean }) {
     return counts;
   }, [favoriteBranchIds, favoritesCategory, labels, recipes]);
 
+  const openRef = useRef(open);
+  openRef.current = open;
+
   useEffect(() => {
     if (!opened) return;
     let cancel = false;
@@ -295,6 +298,32 @@ export function RecipesPage({ active }: { active: boolean }) {
       setCategories(nextCategories);
       setRecipes(recipeResult.data ?? []);
       setLabels(labelResult.data ?? []);
+      const viewed = openRef.current;
+      const rows = recipeResult.data ?? [];
+      if (viewed) {
+        const row = rows.find((item) => item.id === viewed.id);
+        if (!row) {
+          setOpen(null);
+        } else {
+          const { data, error: documentError } = await supabase
+            .from("recipes")
+            .select("document")
+            .eq("id", row.id)
+            .single();
+          if (cancel) return;
+          if (!documentError && data) {
+            setOpen({
+              id: row.id,
+              title: row.title,
+              leafCategoryId: row.leaf_category_id,
+              sourcePath: row.source_path,
+              rating: row.rating,
+              createdAt: row.created_at,
+              document: parseDocument(data.document, row.title),
+            });
+          }
+        }
+      }
       setLoading(false);
     })();
     return () => {
@@ -418,7 +447,7 @@ export function RecipesPage({ active }: { active: boolean }) {
       cancel = true;
       for (const url of created) URL.revokeObjectURL(url);
     };
-  }, [categoryImageKey, supabase]);
+  }, [categoryImageKey, recipeReload, supabase]);
 
   const viewingFavorites =
     favoritesCategory != null && folderId === favoritesCategory.id;
@@ -480,7 +509,7 @@ export function RecipesPage({ active }: { active: boolean }) {
       cancel = true;
       for (const url of created) URL.revokeObjectURL(url);
     };
-  }, [coverKey, opened, supabase]);
+  }, [coverKey, opened, recipeReload, supabase]);
 
   function depth(id: string) {
     let count = 0;
@@ -1532,7 +1561,7 @@ export function RecipesPage({ active }: { active: boolean }) {
       cancel = true;
       for (const url of created) URL.revokeObjectURL(url);
     };
-  }, [opened, searchKey, supabase]);
+  }, [opened, recipeReload, searchKey, supabase]);
   const folder = folderId ? byId.get(folderId) : undefined;
   const searchScopeName = searchScopeId
     ? byId.get(searchScopeId)?.name
@@ -1582,6 +1611,7 @@ export function RecipesPage({ active }: { active: boolean }) {
         onPhotoRecipe={
           !loading && !open && !searching ? () => setPhotoOpen(true) : undefined
         }
+        onReloadRecipes={() => setRecipeReload((value) => value + 1)}
         onExportFile={() => {
           if (!open) return;
           downloadRecipeFile(

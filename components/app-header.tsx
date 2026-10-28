@@ -17,6 +17,7 @@ import {
   CameraIcon,
   LinkIcon,
   MenuIcon,
+  ReloadIcon,
   PasteIcon,
   PlusIcon,
   ReorderIcon,
@@ -49,6 +50,7 @@ export function AppHeader({
   onLink,
   onPasteRecipe,
   onPhotoRecipe,
+  onReloadRecipes,
   onExportFile,
   exportFileEnabled = true,
   showCredit = false,
@@ -77,6 +79,7 @@ export function AppHeader({
   onLink?: () => void;
   onPasteRecipe?: () => void;
   onPhotoRecipe?: () => void;
+  onReloadRecipes?: () => void;
   onExportFile?: () => void;
   exportFileEnabled?: boolean;
   showCredit?: boolean;
@@ -84,7 +87,7 @@ export function AppHeader({
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [creditOpen, setCreditOpen] = useState(false);
-  const showMenu = Boolean(onAdd || onSort || onReorder || onPlus || onLink || onPasteRecipe || onPhotoRecipe || onExportFile);
+  const showMenu = Boolean(onAdd || onSort || onReorder || onPlus || onLink || onPasteRecipe || onPhotoRecipe || onReloadRecipes || onExportFile);
   const searchButton = onSearchToggle ? (
     <button
       type="button"
@@ -282,6 +285,21 @@ export function AppHeader({
                   >
                     <CameraIcon className="size-5" />
                   </MenuItem>
+                ) : null}
+                {onReloadRecipes ? (
+                  <>
+                    <div role="separator" className="mx-3 my-1 h-px bg-neutral-200" />
+                    <MenuItem
+                      label="רענון מתכונים"
+                      disabled={!actionsEnabled}
+                      onClick={() => {
+                        setMenuOpen(false);
+                        onReloadRecipes();
+                      }}
+                    >
+                      <ReloadIcon className="size-5" />
+                    </MenuItem>
+                  </>
                 ) : null}
                 {onToggleCategories ? (
                   <MenuItem
