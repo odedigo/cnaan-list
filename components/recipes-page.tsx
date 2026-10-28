@@ -1640,7 +1640,6 @@ export function RecipesPage({ active }: { active: boolean }) {
             .filter((label) => label.recipe_id === open.id)
             .map((label) => label.category_id)}
           busy={busy}
-          depth={depth}
           onTab={(next) => setTab(next)}
           onSlide={setSlide}
           onBack={() => setOpen(null)}
@@ -1686,7 +1685,6 @@ export function RecipesPage({ active }: { active: boolean }) {
           kind="link"
           shared={sharedLink}
           categories={categories}
-          depth={depth}
           onClose={() => {
             setLinkOpen(false);
             setSharedLink(null);
@@ -1706,7 +1704,6 @@ export function RecipesPage({ active }: { active: boolean }) {
           kind="text"
           shared={null}
           categories={categories}
-          depth={depth}
           onClose={() => setTextOpen(false)}
           onDone={async (imported) => {
             const message = await saveImported(imported);
@@ -1720,7 +1717,6 @@ export function RecipesPage({ active }: { active: boolean }) {
           kind="image"
           shared={null}
           categories={categories}
-          depth={depth}
           onClose={() => setPhotoOpen(false)}
           onDone={async (imported) => {
             const message = await saveImported(imported);
@@ -2671,7 +2667,6 @@ function RecipeDetail({
   categories,
   selected,
   busy,
-  depth,
   onTab,
   onSlide,
   onBack,
@@ -2701,7 +2696,6 @@ function RecipeDetail({
   categories: CategoryRow[];
   selected: string[];
   busy: boolean;
-  depth: (id: string) => number;
   onTab: (tab: TabId) => void;
   onSlide: (index: number) => void;
   onBack: () => void;
@@ -2842,7 +2836,6 @@ function RecipeDetail({
               categories={categories}
               selected={selected}
               busy={busy}
-              depth={depth}
               onCancel={() => setEditing(false)}
               onSave={async (draft) => {
                 if (await onSaveInfo({ ...draft, title })) setEditing(false);
@@ -4093,14 +4086,12 @@ function LinkRecipeDialog({
   kind,
   shared,
   categories,
-  depth,
   onClose,
   onDone,
 }: {
   kind: "link" | "text" | "image";
   shared: SharedLink | null;
   categories: CategoryRow[];
-  depth: (id: string) => number;
   onClose: () => void;
   onDone: (recipe: ImportedRecipe) => Promise<string | null>;
 }) {
@@ -4131,7 +4122,6 @@ function LinkRecipeDialog({
   const startedRef = useRef(false);
   const cameraRef = useRef<HTMLInputElement>(null);
   const libraryRef = useRef<HTMLInputElement>(null);
-  const ordered = categoryTree(categories);
   useEffect(() => {
     if (!pending) return;
     setSeconds(0);
@@ -4413,44 +4403,40 @@ function LinkRecipeDialog({
             placeholder="למשל ספר, ערוץ או שם"
           />
         ) : null}
-        {ordered.length > 0 ? (
+        {categories.length > 0 ? (
           <>
             <p className="mb-1 mt-4 text-start text-sm font-semibold">
               קטגוריות
             </p>
-            {ordered.map((category) => (
-              <label
-                key={category.id}
-                className="flex items-center gap-2 py-1 text-start"
-                style={{ paddingInlineStart: depth(category.id) * 16 }}
-              >
+            <CategoryCheckTree
+              categories={categories}
+              selected={categoryIds}
+              disabled={saving}
+              onToggle={(id) => {
+                const checked = categoryIds.includes(id);
+                setCategoryIds(
+                  checked
+                    ? categoryIds.filter((item) => item !== id)
+                    : [...categoryIds, id],
+                );
+                if (!checked) setCreateNew(false);
+              }}
+            />
+            <label
+              className="mt-1 flex items-center text-start"
+              style={{ minHeight: 32 }}
+            >
+              <span className="shrink-0" style={{ width: 28 }} />
+              <span className="flex min-w-0 flex-1 items-center gap-2">
                 <input
                   type="checkbox"
-                  className="size-5"
-                  checked={categoryIds.includes(category.id)}
+                  checked={createNew}
                   disabled={saving}
-                  onChange={() => {
-                    const checked = categoryIds.includes(category.id);
-                    setCategoryIds(
-                      checked
-                        ? categoryIds.filter((id) => id !== category.id)
-                        : [...categoryIds, category.id],
-                    );
-                    if (!checked) setCreateNew(false);
-                  }}
+                  style={{ width: 18, height: 18 }}
+                  onChange={() => setCreateNew((current) => !current)}
                 />
-                <span>{category.name}</span>
-              </label>
-            ))}
-            <label className="mt-2 flex items-center gap-2 py-1 text-start">
-              <input
-                type="checkbox"
-                className="size-5"
-                checked={createNew}
-                disabled={saving}
-                onChange={() => setCreateNew((current) => !current)}
-              />
-              <span>קטגוריה חדשה</span>
+                <span className="text-sm">קטגוריה חדשה</span>
+              </span>
             </label>
             {createNew ? (
               <input
@@ -4782,7 +4768,6 @@ function InfoEditor({
   categories,
   selected,
   busy,
-  depth,
   onCancel,
   onSave,
 }: {
@@ -4790,7 +4775,6 @@ function InfoEditor({
   categories: CategoryRow[];
   selected: string[];
   busy: boolean;
-  depth: (id: string) => number;
   onCancel: () => void;
   onSave: (draft: EditDraft) => Promise<void>;
 }) {
@@ -4805,9 +4789,6 @@ function InfoEditor({
       .join("\n"),
   );
   const [categoryIds, setCategoryIds] = useState(selected);
-  const ordered = [...categories].sort(
-    (a, b) => depth(a.id) - depth(b.id) || a.sort_order - b.sort_order,
-  );
   return (
     <form
       onSubmit={(event) => {
@@ -4835,27 +4816,18 @@ function InfoEditor({
           />
         </label>
         <p className="mb-1 mt-4 text-start text-sm font-semibold">קטגוריות</p>
-        {ordered.map((category) => (
-          <label
-            key={category.id}
-            className="flex items-center gap-2 py-1 text-start"
-            style={{ paddingInlineStart: depth(category.id) * 16 }}
-          >
-            <input
-              type="checkbox"
-              className="size-5"
-              checked={categoryIds.includes(category.id)}
-              onChange={() =>
-                setCategoryIds((current) =>
-                  current.includes(category.id)
-                    ? current.filter((id) => id !== category.id)
-                    : [...current, category.id],
-                )
-              }
-            />
-            <span>{category.name}</span>
-          </label>
-        ))}
+        <CategoryCheckTree
+          categories={categories}
+          selected={categoryIds}
+          disabled={busy}
+          onToggle={(id) =>
+            setCategoryIds((current) =>
+              current.includes(id)
+                ? current.filter((item) => item !== id)
+                : [...current, id],
+            )
+          }
+        />
       </div>
     </form>
   );
@@ -5438,28 +5410,110 @@ async function ensureFavoritesCategory(
   return [...rows, result.data as CategoryRow];
 }
 
-function categoryTree(categories: CategoryRow[]) {
+function categoryChildren(categories: CategoryRow[]) {
   const ids = new Set(categories.map((category) => category.id));
   const children = new Map<string | null, CategoryRow[]>();
+  const parentOf = new Map<string, string | null>();
   for (const category of categories) {
     const parentId =
       category.parent_id && ids.has(category.parent_id)
         ? category.parent_id
         : null;
+    parentOf.set(category.id, parentId);
     const list = children.get(parentId) ?? [];
     list.push(category);
     children.set(parentId, list);
   }
   for (const list of children.values()) list.sort(compareCategories);
-  const ordered: CategoryRow[] = [];
-  function walk(parentId: string | null) {
-    for (const category of children.get(parentId) ?? []) {
-      ordered.push(category);
-      walk(category.id);
+  return { children, parentOf };
+}
+
+function CategoryCheckTree({
+  categories,
+  selected,
+  disabled,
+  onToggle,
+}: {
+  categories: CategoryRow[];
+  selected: string[];
+  disabled?: boolean;
+  onToggle: (id: string) => void;
+}) {
+  const { children, parentOf } = useMemo(
+    () => categoryChildren(categories),
+    [categories],
+  );
+  const [open, setOpen] = useState(() => {
+    const expanded = new Set<string>();
+    for (const id of selected) {
+      let current = parentOf.get(id) ?? null;
+      while (current) {
+        expanded.add(current);
+        current = parentOf.get(current) ?? null;
+      }
     }
+    return expanded;
+  });
+  function toggleOpen(id: string) {
+    setOpen((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   }
-  walk(null);
-  return ordered;
+  function rows(parentId: string | null, level: number): React.ReactNode {
+    return (children.get(parentId) ?? []).map((category) => {
+      const nested = children.get(category.id) ?? [];
+      const expanded = open.has(category.id);
+      return (
+        <div key={category.id}>
+          <div
+            className="flex items-center"
+            style={{ minHeight: 32, paddingInlineStart: level * 12 }}
+          >
+            {nested.length > 0 ? (
+              <button
+                type="button"
+                className="grid shrink-0 place-items-center text-neutral-500"
+                style={{ width: 28, height: 28 }}
+                aria-expanded={expanded}
+                aria-label={
+                  expanded ? `סגירת ${category.name}` : `פתיחת ${category.name}`
+                }
+                disabled={disabled}
+                onClick={() => toggleOpen(category.id)}
+              >
+                <ChevronIcon
+                  className="size-4"
+                  style={{
+                    transform: expanded ? "rotate(180deg)" : "rotate(-90deg)",
+                  }}
+                />
+              </button>
+            ) : (
+              <span className="shrink-0" style={{ width: 28 }} />
+            )}
+            <label
+              className="flex min-w-0 flex-1 items-center gap-2 text-start"
+              style={{ minHeight: 32 }}
+            >
+              <input
+                type="checkbox"
+                checked={selected.includes(category.id)}
+                disabled={disabled}
+                style={{ width: 18, height: 18 }}
+                onChange={() => onToggle(category.id)}
+              />
+              <span className="min-w-0 truncate text-sm">{category.name}</span>
+            </label>
+          </div>
+          {nested.length > 0 && expanded ? rows(category.id, level + 1) : null}
+        </div>
+      );
+    });
+  }
+  return <div>{rows(null, 0)}</div>;
 }
 
 function chooseLeaf(
