@@ -277,11 +277,9 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
 
   const searchResults =
     mode === "grocery" && needle
-      ? lists.items.filter((item) => {
-          if (!item.name.toLocaleLowerCase("he").includes(needle)) return false;
-          const line = groceryByItem.get(item.id);
-          return !line || line.checked;
-        })
+      ? lists.items.filter((item) =>
+          item.name.toLocaleLowerCase("he").includes(needle),
+        )
       : [];
 
   function itemsFor(category: Category) {
@@ -327,8 +325,9 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
   }
 
   function chooseSearchResult(itemId: string) {
-    void lists.addToGrocery(itemId);
-    setQuery("");
+    void (groceryByItem.has(itemId)
+      ? lists.removeFromGrocery(itemId)
+      : lists.addToGrocery(itemId));
     searchInputRef.current?.focus();
   }
 
@@ -462,7 +461,7 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
           {searchResults.map((item) => (
             <li key={item.id}>
               <div
-                className="flex w-full items-center gap-3 px-3 py-2 text-start"
+                className={`flex w-full items-center gap-3 px-3 py-2 text-start ${groceryByItem.has(item.id) ? "bg-[#d7efe9]" : ""}`}
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => chooseSearchResult(item.id)}
               >
@@ -568,27 +567,13 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
                               <span
                                 className="pointer-events-none absolute top-1/2 max-w-24 -translate-y-1/2 truncate rounded-full px-1.5 text-xs font-semibold leading-4 text-neutral-800"
                                 style={{
-                                  insetInlineEnd: "2rem",
+                                  insetInlineEnd: "0.25rem",
                                   background: "rgba(255,255,255,0.85)",
                                 }}
                               >
                                 {storeLabel}
                               </span>
                             ) : null}
-                            <button
-                              type="button"
-                              className="grid size-8 place-items-center text-inherit"
-                              aria-label="פרטי קטגוריה"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                setEditor({
-                                  kind: "category",
-                                  id: category.id,
-                                });
-                              }}
-                            >
-                              <DotsIcon className="size-5" />
-                            </button>
                           </div>
                         </div>
                       ) : (
@@ -924,9 +909,15 @@ function ItemRow({
               />
             ) : mode === "inventory" && inGrocery ? (
               <span
-                className="shrink-0 rounded-full bg-white px-1.5 text-xs font-semibold leading-5 text-neutral-700"
+                className="inline-flex shrink-0 items-center gap-1 rounded-full bg-white px-1.5 text-xs font-semibold leading-5 text-neutral-700"
                 style={{ border: "1px solid var(--teal)" }}
               >
+                <GroceryIcon
+                  className="size-3.5 shrink-0 text-[var(--teal)]"
+                  aria-hidden={false}
+                  role="img"
+                  aria-label="בעגלת הקניות"
+                />
                 <bdi>{formatQuantity(item.quantity)}</bdi>{" "}
                 <bdi>{unitById(item.unit).short}</bdi>
               </span>
@@ -1016,15 +1007,6 @@ function EntityCard({
               >
                 <PlusIcon className="size-4" />
               </button>
-            ) : null}
-            {highlighted ? (
-              <GroceryIcon
-                className="size-4 shrink-0 text-[var(--teal)]"
-                style={{ marginInlineEnd: "0.5rem" }}
-                aria-hidden={false}
-                role="img"
-                aria-label="בעגלת הקניות"
-              />
             ) : null}
             <button
               type="button"
