@@ -150,6 +150,30 @@ function compareCategories(a: CategoryRow, b: CategoryRow) {
   return a.sort_order - b.sort_order;
 }
 
+function compareRecipes(a: RecipeRow, b: RecipeRow) {
+  const rankA = a.rating ?? 0;
+  const rankB = b.rating ?? 0;
+  if (rankA !== rankB) return rankB - rankA;
+  return a.title.localeCompare(b.title, "he");
+}
+
+type RecipeHistory = {
+  folderId: string | null;
+  recipeId: string | null;
+  scrollY: number;
+};
+
+function recipeHistoryFrom(state: unknown): RecipeHistory | null {
+  if (!state || typeof state !== "object") return null;
+  const value = (state as { cnaanRecipes?: Partial<RecipeHistory> }).cnaanRecipes;
+  if (!value || typeof value !== "object") return null;
+  return {
+    folderId: typeof value.folderId === "string" ? value.folderId : null,
+    recipeId: typeof value.recipeId === "string" ? value.recipeId : null,
+    scrollY: typeof value.scrollY === "number" ? value.scrollY : 0,
+  };
+}
+
 function ratingSearch(query: string) {
   const match = query.match(/^ד(\d+)(\+)?$/);
   if (!match) return null;
@@ -247,6 +271,75 @@ export function RecipesPage({ active }: { active: boolean }) {
 
   const openRef = useRef(open);
   openRef.current = open;
+  const folderIdRef = useRef(folderId);
+  folderIdRef.current = folderId;
+  const recipesRef = useRef(recipes);
+  recipesRef.current = recipes;
+  const nativePushRef = useRef<History["pushState"] | null>(null);
+  const nativeReplaceRef = useRef<History["replaceState"] | null>(null);
+  const historySeq = useRef(0);
+  const pendingScroll = useRef<number | null>(null);
+  const openRecipeRef = useRef<
+    (row: RecipeRow, fromHistory?: boolean) => Promise<void>
+  >(async () => undefined);
+
+  useLayoutEffect(() => {
+    // Keep the browser's own history methods. Next.js patches them and would refetch this page.
+    nativePushRef.current = window.history.pushState.bind(window.history);
+    nativeReplaceRef.current = window.history.replaceState.bind(window.history);
+  }, []);
+
+  function historyUrl() {
+    return `${window.location.pathname}${window.location.search}${window.location.hash}`;
+  }
+
+  function writeRecipeHistory(
+    mode: "push" | "replace",
+    entry: RecipeHistory,
+    url = historyUrl(),
+  ) {
+    const write =
+      mode === "push"
+        ? (nativePushRef.current ?? window.history.pushState.bind(window.history))
+        : (nativeReplaceRef.current ??
+          window.history.replaceState.bind(window.history));
+    const current = window.history.state;
+    const base =
+      current && typeof current === "object"
+        ? { ...(current as Record<string, unknown>) }
+        : {};
+    write({ ...base, cnaanRecipes: entry }, "", url);
+  }
+
+  function pushRecipeHistory(entry: RecipeHistory) {
+    if (window.location.pathname !== "/recipes") return;
+    const current = recipeHistoryFrom(window.history.state) ?? {
+      folderId: folderIdRef.current,
+      recipeId: openRef.current?.id ?? null,
+      scrollY: window.scrollY,
+    };
+    writeRecipeHistory("replace", { ...current, scrollY: window.scrollY });
+    writeRecipeHistory("push", { ...entry, scrollY: 0 });
+    pendingScroll.current = 0;
+  }
+
+  function browseFolder(id: string | null) {
+    historySeq.current += 1;
+    if (id === folderIdRef.current && !openRef.current) return;
+    pushRecipeHistory({ folderId: id, recipeId: null, scrollY: 0 });
+    setOpen(null);
+    setFolderId(id);
+  }
+
+  function retreatHistory() {
+    historySeq.current += 1;
+    const entry = recipeHistoryFrom(window.history.state);
+    if (entry && (entry.folderId || entry.recipeId)) {
+      window.history.back();
+      return true;
+    }
+    return false;
+  }
 
   useEffect(() => {
     if (!opened) return;
@@ -337,6 +430,9 @@ export function RecipesPage({ active }: { active: boolean }) {
 
   useEffect(() => {
     const onImported = () => {
+      const entry = recipeHistoryFrom(window.history.state);
+      if (entry?.recipeId)
+        writeRecipeHistory("replace", { ...entry, recipeId: null, scrollY: 0 });
       setOpen(null);
       setRecipeCovers((current) => {
         for (const url of Object.values(current)) URL.revokeObjectURL(url);
@@ -358,7 +454,15 @@ export function RecipesPage({ active }: { active: boolean }) {
     if (params.get("share") !== "1") return;
     params.delete("share");
     const next = `${window.location.pathname}${params.size > 0 ? `?${params}` : ""}${window.location.hash}`;
-    window.history.replaceState(null, "", next);
+    const entry = recipeHistoryFrom(window.history.state);
+    const replace =
+      nativeReplaceRef.current ?? window.history.replaceState.bind(window.history);
+    const current = window.history.state;
+    const base =
+      current && typeof current === "object"
+        ? { ...(current as Record<string, unknown>) }
+        : {};
+    replace(entry ? { ...base, cnaanRecipes: entry } : current, "", next);
     let cancel = false;
     void fetch("/api/recipe-share")
       .then((response) => response.json())
@@ -373,6 +477,12 @@ export function RecipesPage({ active }: { active: boolean }) {
   }, [opened, loading]);
 
   const openId = open?.id ?? null;
+  useLayoutEffect(() => {
+    if (pendingScroll.current == null) return;
+    const y = pendingScroll.current;
+    pendingScroll.current = null;
+    window.scrollTo(0, y);
+  }, [folderId, openId]);
   const shownImages = open ? visibleImages(open.document.images) : [];
   const imageKey = shownImages
     .map((image) => image.storagePath ?? "")
@@ -465,7 +575,7 @@ export function RecipesPage({ active }: { active: boolean }) {
       }
       return row.leaf_category_id === folderId;
     })
-    .sort((a, b) => a.sort_order - b.sort_order);
+    .sort(compareRecipes);
   const coverKey = folderRecipes.map((row) => row.id).join("|");
   const coverIdsRef = useRef(folderRecipes);
   coverIdsRef.current = folderRecipes;
@@ -550,17 +660,25 @@ export function RecipesPage({ active }: { active: boolean }) {
       localStorage.setItem(checksKey(recipeId), JSON.stringify(next));
   }
 
-  async function openRecipe(row: RecipeRow) {
+  async function openRecipe(row: RecipeRow, fromHistory = false) {
+    const seq = fromHistory ? historySeq.current : ++historySeq.current;
     setError(null);
     const { data, error: loadError } = await supabase
       .from("recipes")
       .select("document")
       .eq("id", row.id)
       .single();
+    if (historySeq.current !== seq) return;
     if (loadError) {
       setError("לא ניתן לפתוח את המתכון.");
       return;
     }
+    if (!fromHistory)
+      pushRecipeHistory({
+        folderId: folderIdRef.current,
+        recipeId: row.id,
+        scrollY: 0,
+      });
     setOpen({
       id: row.id,
       title: row.title,
@@ -571,6 +689,34 @@ export function RecipesPage({ active }: { active: boolean }) {
       document: parseDocument(data.document, row.title),
     });
   }
+  openRecipeRef.current = openRecipe;
+
+  useEffect(() => {
+    const onPop = () => {
+      if (window.location.pathname !== "/recipes") return;
+      historySeq.current += 1;
+      const entry = recipeHistoryFrom(window.history.state) ?? {
+        folderId: null,
+        recipeId: null,
+        scrollY: 0,
+      };
+      setFolderId(entry.folderId);
+      pendingScroll.current = entry.recipeId ? 0 : entry.scrollY;
+      if (!entry.recipeId) {
+        setOpen(null);
+        return;
+      }
+      if (openRef.current?.id === entry.recipeId) return;
+      const row = recipesRef.current.find((item) => item.id === entry.recipeId);
+      if (!row) {
+        setOpen(null);
+        return;
+      }
+      void openRecipeRef.current(row, true);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
 
   async function saveDocument(
     recipe: OpenRecipe,
@@ -722,6 +868,12 @@ export function RecipesPage({ active }: { active: boolean }) {
           category_id: categoryId,
         })),
       ]);
+      historySeq.current += 1;
+      pushRecipeHistory({
+        folderId: leafCategoryId,
+        recipeId: row.id,
+        scrollY: 0,
+      });
       setFolderId(leafCategoryId);
       setCreating(false);
       setOpen({
@@ -957,6 +1109,8 @@ export function RecipesPage({ active }: { active: boolean }) {
       ]);
       setSearchOpen(false);
       setQuery("");
+      historySeq.current += 1;
+      pushRecipeHistory({ folderId: leaf, recipeId: row.id, scrollY: 0 });
       setFolderId(leaf);
       setTab("ingredients");
       setOpen({
@@ -1029,7 +1183,23 @@ export function RecipesPage({ active }: { active: boolean }) {
             !idSet.has(label.category_id) && !doomedIds.has(label.recipe_id),
         ),
       );
-      if (folderId && idSet.has(folderId)) setFolderId(category.parent_id);
+      if (
+        (folderId && idSet.has(folderId)) ||
+        (open && doomedIds.has(open.id))
+      ) {
+        historySeq.current += 1;
+        const entry = recipeHistoryFrom(window.history.state);
+        writeRecipeHistory("replace", {
+          folderId:
+            folderId && idSet.has(folderId)
+              ? category.parent_id
+              : (entry?.folderId ?? folderId),
+          recipeId: open && doomedIds.has(open.id) ? null : (entry?.recipeId ?? null),
+          scrollY: 0,
+        });
+        if (folderId && idSet.has(folderId)) setFolderId(category.parent_id);
+        if (open && doomedIds.has(open.id)) setOpen(null);
+      }
       setCategoryMenuId(null);
       setCategoryDeleteId(null);
     } catch {
@@ -1466,7 +1636,7 @@ export function RecipesPage({ active }: { active: boolean }) {
       setSearchThumbs((current) => dropBlob(current, id));
       if (open?.id === id) {
         setImageEdit(null);
-        setOpen(null);
+        if (!retreatHistory()) setOpen(null);
       }
       setRecipeMenuId(null);
       setRecipeDeleteId(null);
@@ -1678,7 +1848,9 @@ export function RecipesPage({ active }: { active: boolean }) {
             <button
               type="button"
               className="flex w-full items-center gap-2 px-4 py-3 text-start font-semibold"
-              onClick={() => setFolderId(folder.parent_id)}
+              onClick={() => {
+                if (!retreatHistory()) setFolderId(folder.parent_id);
+              }}
             >
               <BackMark />
               <span>{folder.name}</span>
@@ -1689,7 +1861,7 @@ export function RecipesPage({ active }: { active: boolean }) {
               categories={childCategories}
               images={categoryImages}
               counts={directRecipeCounts}
-              onOpen={setFolderId}
+              onOpen={browseFolder}
               onImage={setImageCategoryId}
               onAdd={() => setAddingCategory(true)}
               onMenu={(id) => {
@@ -1732,7 +1904,9 @@ export function RecipesPage({ active }: { active: boolean }) {
           busy={busy}
           onTab={(next) => setTab(next)}
           onSlide={setSlide}
-          onBack={() => setOpen(null)}
+          onBack={() => {
+            if (!retreatHistory()) setOpen(null);
+          }}
           onRate={(value) => void rate(value)}
           favorite={
             favoritesCategory != null &&
