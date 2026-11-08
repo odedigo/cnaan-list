@@ -1680,7 +1680,7 @@ export function RecipesPage({ active }: { active: boolean }) {
         );
       return row.title.toLocaleLowerCase("he").includes(needle);
     })
-    .sort((a, b) => a.title.localeCompare(b.title, "he"));
+    .sort(compareRecipes);
   const searchKey = searching ? found.map((row) => row.id).join("|") : "";
   const searchIdsRef = useRef(found);
   searchIdsRef.current = found;

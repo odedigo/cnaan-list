@@ -1,12 +1,12 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
+
 import { normalizeChecklist } from "@/lib/checklist";
 import { colorHex } from "@/lib/colors";
 import { normalizeStore, sortStores } from "@/lib/stores";
-import { createClient } from "@/lib/supabase/server";
 import type { Category, GroceryLine, Item, ListsData } from "@/lib/types";
 import { isUnitId } from "@/lib/units";
 
-export async function loadLists(userId: string): Promise<ListsData | null> {
-  const supabase = await createClient();
+export async function loadLists(supabase: SupabaseClient, userId: string): Promise<ListsData | null> {
   const [{ data: profile }, { data: account }] = await Promise.all([
     supabase.from("profiles").select("username").eq("id", userId).maybeSingle(),
     supabase.from("accounts").select("id").eq("owner_id", userId).maybeSingle(),

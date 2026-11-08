@@ -9,7 +9,7 @@
   "background_color": "#ffffff",
   "id": "/",
   "display": "standalone",
-  "start_url": "/",
+  "start_url": "/grocery",
   "scope": "/",
   "share_target": {
     "action": "/share",

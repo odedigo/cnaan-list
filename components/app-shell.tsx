@@ -12,7 +12,7 @@ import { DataTransfer } from "@/components/data-transfer";
 import { ChecklistPage } from "@/components/checklist-page";
 import { ListPage } from "@/components/list-page";
 import { RecipesPage } from "@/components/recipes-page";
-import { useLists, useListsOptional } from "@/components/lists-provider";
+import { useBootError, useLists, useListsOptional } from "@/components/lists-provider";
 import { bindKeepAwake } from "@/lib/keep-awake";
 import { bindSavedSession } from "@/lib/saved-accounts";
 import { SignedInSettings } from "@/components/settings-panel";
@@ -34,6 +34,7 @@ export function AppShell({
   const nativePushState = useRef<History["pushState"] | null>(null);
   const [warm, setWarm] = useState(false);
   const lists = useListsOptional();
+  const bootError = useBootError();
 
   useLayoutEffect(() => {
     // Keep the browser's own history methods. Next.js patches them and would refetch these pages from the server.
@@ -122,7 +123,11 @@ export function AppShell({
     };
   }, [go, lists?.reorderMode, signedIn]);
 
-  const body = signedIn ? (
+  const body = !signedIn ? (
+    children
+  ) : !lists ? (
+    <LoadingScreen path={path} version={version} message={bootError ?? undefined} />
+  ) : (
     <>
       <LazyList mode="grocery" active={path === "/grocery"} warm={warm} scrolls={scrolls} restoreRef={restoreRef} />
       <LazyList mode="inventory" active={path === "/inventory"} warm={warm} scrolls={scrolls} restoreRef={restoreRef} />
@@ -130,8 +135,6 @@ export function AppShell({
       <LazyRecipes active={path === "/recipes"} warm={warm} scrolls={scrolls} restoreRef={restoreRef} />
       {path === "/settings" ? <SignedInSettingsView version={version} /> : null}
     </>
-  ) : (
-    children
   );
 
   const frame = (
@@ -143,7 +146,7 @@ export function AppShell({
 
   return (
     <AppPathContext.Provider value={{ path, go }}>
-      {signedIn ? <DataTransfer>{frame}</DataTransfer> : frame}
+      {signedIn && lists ? <DataTransfer>{frame}</DataTransfer> : frame}
     </AppPathContext.Provider>
   );
 }
@@ -207,6 +210,25 @@ function LazyRecipes({
     <div hidden={!active}>
       <RecipesPage active={active} />
     </div>
+  );
+}
+
+function LoadingScreen({ path, version, message }: { path: string; version: string; message?: string }) {
+  const title =
+    path === "/inventory"
+      ? "רשימת המוצרים"
+      : path === "/lists"
+        ? "רשימות"
+        : path === "/recipes"
+          ? "מתכונים"
+          : path === "/settings"
+            ? "הגדרות"
+            : "עגלת קניות";
+  return (
+    <>
+      <AppHeader title={title} actionsEnabled={false} showCredit={path === "/settings"} creditVersion={version} />
+      <p className="px-6 pt-16 text-center text-neutral-500">{message ?? "טוען…"}</p>
+    </>
   );
 }
 

@@ -67,6 +67,7 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
   const lists = useLists();
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [keptNeedle, setKeptNeedle] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchResultsRef = useRef<HTMLUListElement>(null);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
@@ -202,9 +203,11 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
   }, [lists.categories, mode]);
 
   const needle = query.trim().toLocaleLowerCase("he");
+  const groceryNeedle =
+    mode === "grocery" ? needle || keptNeedle : needle;
 
   useLayoutEffect(() => {
-    if (mode !== "grocery" || !searchOpen || !needle) return;
+    if (mode !== "grocery" || !searchOpen || !groceryNeedle) return;
     const list = searchResultsRef.current;
     const header = screenRef.current?.querySelector("header");
     if (!list || !header) return;
@@ -229,7 +232,7 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
       viewport?.removeEventListener("resize", place);
       viewport?.removeEventListener("scroll", place);
     };
-  }, [mode, searchOpen, needle]);
+  }, [mode, searchOpen, groceryNeedle]);
 
   const groceryByItem = useMemo(
     () => new Map(lists.grocery.map((line) => [line.item_id, line])),
@@ -276,9 +279,9 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
   }
 
   const searchResults =
-    mode === "grocery" && needle
+    mode === "grocery" && groceryNeedle
       ? lists.items.filter((item) =>
-          item.name.toLocaleLowerCase("he").includes(needle),
+          item.name.toLocaleLowerCase("he").includes(groceryNeedle),
         )
       : [];
 
@@ -328,6 +331,8 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
     void (groceryByItem.has(itemId)
       ? lists.removeFromGrocery(itemId)
       : lists.addToGrocery(itemId));
+    if (needle) setKeptNeedle(needle);
+    setQuery("");
     searchInputRef.current?.focus();
   }
 
@@ -364,9 +369,11 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
         onSearchToggle={() => {
           setSearchOpen((open) => !open);
           setQuery("");
+          setKeptNeedle("");
         }}
         onSearchChange={(value) => {
           setQuery(value);
+          if (mode === "grocery") setKeptNeedle("");
           const nextNeedle = value.trim().toLocaleLowerCase("he");
           if (!nextNeedle || mode !== "inventory") return;
           setCollapsed((current) => {
@@ -447,7 +454,7 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
           {lists.error}
         </p>
       ) : null}
-      {mode === "grocery" && searchOpen && needle ? (
+      {mode === "grocery" && searchOpen && groceryNeedle ? (
         <ul
           ref={searchResultsRef}
           className="overflow-y-auto rounded-xl border border-neutral-200 bg-white shadow-sm"

@@ -42,6 +42,8 @@ This is a Hebrew right-to-left app. Every screen, dialog, label, and control fol
 
 Signed-in grocery, inventory, lists, and settings are switched in `components/app-shell.tsx`. The layout is `force-dynamic`, so a Next.js history call refetches it.
 
+The signed-in shell paints before grocery, inventory, and checklist data. `loadLists` runs in the browser after that shell is on screen. Do not await it in the app layout.
+
 - Capture the native `pushState` in `useLayoutEffect` and use it. Next.js patches the method, and a patched call refetches the layout.
 - An installed app (`display-mode: standalone` or `navigator.standalone`) uses that same `pushState`. The system back button then returns to the previous tab.
 - `/lists` returns null; the shell renders `ChecklistPage`. `/recipes` returns null; the shell renders `RecipesPage`. Signed-in `/settings` returns null; the shell renders `SignedInSettings`, and that screen unmounts when the path leaves `/settings`.
@@ -50,13 +52,13 @@ Signed-in grocery, inventory, lists, and settings are switched in `components/ap
 
 ## Grocery
 
-Marking an item purchased, or moving it back, updates the list on screen first and talks to the server after that.
+Adding a grocery line, removing one, marking it purchased, or moving it back updates the list on screen first and talks to the server after that.
 
-1. `rememberPendingGrocery` for that item.
-2. `flushSync` the `checked` change on grocery state so the row leaves or re-enters its category before any request.
-3. Call `syncPendingGrocery` without awaiting it. Skip the network when `navigator.onLine` is false. Pending changes stay in `localStorage` under `cnaanlist-grocery-pending:${accountId}`.
+1. `rememberPendingGrocery` for that item. A removal is stored on the same entry.
+2. Bump the grocery fetch generation and `flushSync` the local grocery list so the row moves before any request.
+3. Call `syncPendingGrocery` without awaiting it. Skip the network when `navigator.onLine` is false. On a network failure, keep the pending change and retry later. Pending changes stay in `localStorage` under `cnaanlist-grocery-pending:${accountId}`.
 
-`mergePendingGrocery` must overlay those pending checks on every refetch. A realtime refetch of `grocery_items` must not move the row back. Realtime also refetches categories, items, checklist rows, and stores. Skip refetch while an import or reorder is in progress.
+`mergePendingGrocery` must overlay those pending lines, including removals, on every refetch. A refetch that started before the latest local grocery change must not write `grocery`. A realtime refetch must not move the row back. Realtime also refetches categories, items, checklist rows, and stores. Skip refetch while an import or reorder is in progress.
 
 An inventory click toggles grocery membership. The teal card (`bg-[#d7efe9]`) means the product is on the grocery list, including a purchased line.
 
@@ -78,4 +80,4 @@ An inventory click toggles grocery membership. The teal card (`bg-[#d7efe9]`) me
 
 ## Verify
 
-After a UI change, exercise the changed flow in the browser. Grocery, inventory, and lists can all be in the accessibility tree while hidden. Click the one whose box has a non-zero size. Do not leave the page offline or with `fetch` replaced.
+Do not open the VS Code browser to test after making changes. The user checks the app in their own browser.

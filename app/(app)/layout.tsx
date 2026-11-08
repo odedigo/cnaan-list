@@ -1,35 +1,27 @@
+import { cookies } from "next/headers";
+
 import { AppShell } from "@/components/app-shell";
 import { StartAtGrocery } from "@/components/start-at-grocery";
 import { ListsProvider } from "@/components/lists-provider";
-import { loadLists } from "@/lib/lists";
-import { createClient, hasPublicEnv } from "@/lib/supabase/server";
-import type { ListsData } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-export default async function AppLayout({ children }: { children: React.ReactNode }) {
-  let signedIn = false;
-  let initial: ListsData | null = null;
-  if (hasPublicEnv()) {
-    const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (user) {
-      initial = await loadLists(user.id);
-      signedIn = Boolean(user);
-    }
-  }
+function hasSession(all: { name: string }[]) {
+  return all.some((cookie) => cookie.name.startsWith("sb-") && cookie.name.includes("auth-token"));
+}
 
+export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const version = process.env.APP_VERSION ?? "";
+  const cookieStore = await cookies();
+  const signedIn = hasSession(cookieStore.getAll());
   const content = (
     <>
       <StartAtGrocery signedIn={signedIn} />
-      <AppShell signedIn={Boolean(initial)} version={version}>
+      <AppShell signedIn={signedIn} version={version}>
         {children}
       </AppShell>
     </>
   );
 
-  return initial ? <ListsProvider initial={initial}>{content}</ListsProvider> : content;
+  return signedIn ? <ListsProvider>{content}</ListsProvider> : content;
 }

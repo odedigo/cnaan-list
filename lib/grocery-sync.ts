@@ -5,6 +5,7 @@ export type PendingGroceryChange = {
   checked: boolean;
   localId: string;
   revision: number;
+  removed?: boolean;
 };
 
 function storageKey(accountId: string) {
@@ -29,7 +30,7 @@ function writePendingGrocery(accountId: string, entries: PendingGroceryChange[])
   else localStorage.setItem(storageKey(accountId), JSON.stringify(entries));
 }
 
-export function rememberPendingGrocery(accountId: string, itemId: string, checked: boolean, localId: string) {
+export function rememberPendingGrocery(accountId: string, itemId: string, checked: boolean, localId: string, removed = false) {
   const entries = readPendingGrocery(accountId);
   const previous = entries.find((entry) => entry.itemId === itemId);
   const next: PendingGroceryChange = {
@@ -37,6 +38,7 @@ export function rememberPendingGrocery(accountId: string, itemId: string, checke
     checked,
     localId: previous?.localId ?? localId,
     revision: (previous?.revision ?? 0) + 1,
+    removed,
   };
   writePendingGrocery(accountId, [...entries.filter((entry) => entry.itemId !== itemId), next]);
   return next.revision;
@@ -61,12 +63,15 @@ export function forgetPendingGrocery(accountId: string, itemId: string, revision
 export function mergePendingGrocery(accountId: string, rows: GroceryLine[]) {
   const pending = readPendingGrocery(accountId);
   if (pending.length === 0) return rows;
-  const next = rows.map((row) => {
-    const change = pending.find((entry) => entry.itemId === row.item_id);
-    return change ? { ...row, checked: change.checked } : row;
+  const byItem = new Map(pending.map((entry) => [entry.itemId, entry]));
+  const next = rows.flatMap((row) => {
+    const change = byItem.get(row.item_id);
+    if (!change) return [row];
+    if (change.removed) return [];
+    return [{ ...row, checked: change.checked }];
   });
   for (const change of pending) {
-    if (next.some((row) => row.item_id === change.itemId)) continue;
+    if (change.removed || next.some((row) => row.item_id === change.itemId)) continue;
     next.push({
       id: change.localId,
       account_id: accountId,
