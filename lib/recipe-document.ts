@@ -157,6 +157,35 @@ const fractionGlyphs: Record<string, string> = {
   "⅞": "7/8",
 };
 
+export function scaleQuantity(quantity: string | null, factor: number) {
+  if (quantity == null || factor === 1) return quantity;
+  const trimmed = normalizeAmountText(quantity);
+  if (!trimmed) return quantity;
+  return trimmed
+    .split(/(\s*(?:-|\u2013|\u2014|עד)\s*)/)
+    .map((part, index) => {
+      if (index % 2 === 1) return part;
+      const piece = part.trim();
+      if (!piece) return part;
+      const value = amountValue(piece);
+      if (!Number.isFinite(value)) return piece;
+      return formatScaledNumber(value * factor);
+    })
+    .join("");
+}
+
+function normalizeAmountText(quantity: string) {
+  let text = quantity.trim();
+  for (const [glyph, ascii] of Object.entries(fractionGlyphs)) text = text.replaceAll(glyph, ` ${ascii}`);
+  return text.replace(/,/g, ".").replace(/\s+/g, " ").trim();
+}
+
+function formatScaledNumber(value: number) {
+  const rounded = Math.round((value + Number.EPSILON) * 100) / 100;
+  if (Object.is(rounded, -0)) return "0";
+  return String(rounded);
+}
+
 export function formatAmount(quantity: string | null, unit: string | null) {
   const qty = clean(quantity);
   if (!qty) return "";

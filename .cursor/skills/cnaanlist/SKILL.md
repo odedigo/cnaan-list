@@ -44,7 +44,7 @@ Signed-in grocery, inventory, lists, and settings are switched in `components/ap
 
 The signed-in shell paints before grocery, inventory, and checklist data. `loadLists` runs in the browser after that shell is on screen. Do not await it in the app layout.
 
-- Capture the native `pushState` in `useLayoutEffect` and use it. Next.js patches the method, and a patched call refetches the layout.
+- Change the address with `History.prototype.pushState` or `replaceState` through `lib/history.ts`, and keep the current history state. Next.js patches `window.history.pushState`. A patched call refetches the layout. An entry whose state drops `__NA` makes the next back or pop reload the page.
 - An installed app (`display-mode: standalone` or `navigator.standalone`) uses that same `pushState`. The system back button then returns to the previous tab.
 - `/lists` returns null; the shell renders `ChecklistPage`. `/recipes` returns null; the shell renders `RecipesPage`. Signed-in `/settings` returns null; the shell renders `SignedInSettings`, and that screen unmounts when the path leaves `/settings`.
 - Grocery, inventory, lists, and recipes stay mounted after the 250ms warm. Swipe only between grocery and inventory.

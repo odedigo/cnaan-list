@@ -15,6 +15,7 @@ import {
   CloseIcon,
   ExportIcon,
   CameraIcon,
+  HomeIcon,
   LinkIcon,
   MenuIcon,
   ReloadIcon,
@@ -52,6 +53,7 @@ export function AppHeader({
   onPhotoRecipe,
   onReloadRecipes,
   onExportFile,
+  onTopCategories,
   exportFileEnabled = true,
   showCredit = false,
   creditVersion = "",
@@ -81,6 +83,7 @@ export function AppHeader({
   onPhotoRecipe?: () => void;
   onReloadRecipes?: () => void;
   onExportFile?: () => void;
+  onTopCategories?: () => void;
   exportFileEnabled?: boolean;
   showCredit?: boolean;
   creditVersion?: string;
@@ -155,6 +158,11 @@ export function AppHeader({
           <span className="min-w-0 truncate">{title}</span>
         </h1>
         <div className="relative flex shrink-0 items-center justify-self-end">
+          {onTopCategories ? (
+            <HeaderButton label="קטגוריות ראשיות" disabled={!actionsEnabled} onClick={onTopCategories}>
+              <HomeIcon className="size-6" />
+            </HeaderButton>
+          ) : null}
           {showCredit ? (
             <HeaderButton label="אודות" onClick={() => setCreditOpen(true)}>
               <span className="text-xl font-semibold leading-none">@</span>

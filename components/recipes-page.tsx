@@ -61,6 +61,7 @@ import {
   type CropFractions,
   type NormBox,
 } from "@/lib/images";
+import { pushAppHistory, replaceAppHistory } from "@/lib/history";
 import { nameInsertIndex } from "@/lib/order";
 import { readRecipeAdvanced, recipeAdvancedEvent } from "@/lib/recipe-advanced";
 import type {
@@ -78,6 +79,7 @@ import {
   emptyDocument,
   formatAmount,
   formatHebrewDate,
+  scaleQuantity,
   ingredientName,
   isSubtitle,
   parseDocument,
@@ -275,19 +277,11 @@ export function RecipesPage({ active }: { active: boolean }) {
   folderIdRef.current = folderId;
   const recipesRef = useRef(recipes);
   recipesRef.current = recipes;
-  const nativePushRef = useRef<History["pushState"] | null>(null);
-  const nativeReplaceRef = useRef<History["replaceState"] | null>(null);
   const historySeq = useRef(0);
   const pendingScroll = useRef<number | null>(null);
   const openRecipeRef = useRef<
     (row: RecipeRow, fromHistory?: boolean) => Promise<void>
   >(async () => undefined);
-
-  useLayoutEffect(() => {
-    // Keep the browser's own history methods. Next.js patches them and would refetch this page.
-    nativePushRef.current = window.history.pushState.bind(window.history);
-    nativeReplaceRef.current = window.history.replaceState.bind(window.history);
-  }, []);
 
   function historyUrl() {
     return `${window.location.pathname}${window.location.search}${window.location.hash}`;
@@ -298,17 +292,8 @@ export function RecipesPage({ active }: { active: boolean }) {
     entry: RecipeHistory,
     url = historyUrl(),
   ) {
-    const write =
-      mode === "push"
-        ? (nativePushRef.current ?? window.history.pushState.bind(window.history))
-        : (nativeReplaceRef.current ??
-          window.history.replaceState.bind(window.history));
-    const current = window.history.state;
-    const base =
-      current && typeof current === "object"
-        ? { ...(current as Record<string, unknown>) }
-        : {};
-    write({ ...base, cnaanRecipes: entry }, "", url);
+    const write = mode === "push" ? pushAppHistory : replaceAppHistory;
+    write(url, { cnaanRecipes: entry });
   }
 
   function pushRecipeHistory(entry: RecipeHistory) {
@@ -329,6 +314,13 @@ export function RecipesPage({ active }: { active: boolean }) {
     pushRecipeHistory({ folderId: id, recipeId: null, scrollY: 0 });
     setOpen(null);
     setFolderId(id);
+  }
+
+  function showTopCategories() {
+    setSearchOpen(false);
+    setQuery("");
+    setSearchOverOpen(false);
+    browseFolder(null);
   }
 
   function retreatHistory() {
@@ -455,14 +447,7 @@ export function RecipesPage({ active }: { active: boolean }) {
     params.delete("share");
     const next = `${window.location.pathname}${params.size > 0 ? `?${params}` : ""}${window.location.hash}`;
     const entry = recipeHistoryFrom(window.history.state);
-    const replace =
-      nativeReplaceRef.current ?? window.history.replaceState.bind(window.history);
-    const current = window.history.state;
-    const base =
-      current && typeof current === "object"
-        ? { ...(current as Record<string, unknown>) }
-        : {};
-    replace(entry ? { ...base, cnaanRecipes: entry } : current, "", next);
+    replaceAppHistory(next, entry ? { cnaanRecipes: entry } : undefined);
     let cancel = false;
     void fetch("/api/recipe-share")
       .then((response) => response.json())
@@ -1795,6 +1780,9 @@ export function RecipesPage({ active }: { active: boolean }) {
           );
         }}
         exportFileEnabled={Boolean(open)}
+        onTopCategories={
+          open || folderId || showResults ? showTopCategories : undefined
+        }
       />
       {error ? (
         <p className="mx-3 mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -1847,13 +1835,15 @@ export function RecipesPage({ active }: { active: boolean }) {
           {folder ? (
             <button
               type="button"
-              className="flex w-full items-center gap-2 px-4 py-3 text-start font-semibold"
+              className="flex w-full items-center gap-2 px-4 py-3 text-start"
               onClick={() => {
                 if (!retreatHistory()) setFolderId(folder.parent_id);
               }}
             >
               <BackMark />
-              <span>{folder.name}</span>
+              <span className="min-w-0" style={{ fontWeight: 700 }}>
+                {folder.name}
+              </span>
             </button>
           ) : null}
           {viewingFavorites ? null : (
@@ -3045,6 +3035,8 @@ function RecipeDetail({
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(recipe.title);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [factor, setFactor] = useState(1);
+  const [factorOpen, setFactorOpen] = useState(false);
   const [advanced, setAdvanced] = useState(false);
   const barRef = useRef<HTMLDivElement>(null);
   const [stickTop, setStickTop] = useState<number | null>(null);
@@ -3070,6 +3062,10 @@ function RecipeDetail({
     setConfirmDelete(false);
     setTitle(recipe.title);
   }, [recipe.id, tab, recipe.title]);
+  useEffect(() => {
+    setFactor(1);
+    setFactorOpen(false);
+  }, [recipe.id]);
   useEffect(() => {
     onEditingChange(editing);
     return () => onEditingChange(false);
@@ -3433,7 +3429,17 @@ function RecipeDetail({
             <TabActions
               onEdit={startEdit}
               extra={
-                <ClearMarksButton onClick={() => onClear("ingredients")} />
+                <span className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    className="rounded-lg px-2 py-1 text-sm font-semibold"
+                    aria-label={`מכפיל כמויות ${formatFactor(factor)}`}
+                    onClick={() => setFactorOpen(true)}
+                  >
+                    x{formatFactor(factor)}
+                  </button>
+                  <ClearMarksButton onClick={() => onClear("ingredients")} />
+                </span>
               }
             />
             {recipe.document.ingredients.map((ingredient, index) =>
@@ -3475,7 +3481,10 @@ function RecipeDetail({
                       ) : null}
                     </span>
                     <span className="shrink-0 text-neutral-700">
-                      {formatAmount(ingredient.quantity, ingredient.unit)}
+                      {formatAmount(
+                        scaleQuantity(ingredient.quantity, factor),
+                        ingredient.unit,
+                      )}
                     </span>
                   </p>
                   {advanced ? (
@@ -3497,6 +3506,20 @@ function RecipeDetail({
             )}
           </div>
         )
+      ) : null}
+      {factorOpen ? (
+        <FactorDialog
+          factor={factor}
+          onClose={() => setFactorOpen(false)}
+          onSet={(value) => {
+            setFactor(value);
+            setFactorOpen(false);
+          }}
+          onClear={() => {
+            setFactor(1);
+            setFactorOpen(false);
+          }}
+        />
       ) : null}
       {confirmDelete ? (
         <Overlay label="מחיקת מתכון" onClose={() => setConfirmDelete(false)}>
@@ -3574,6 +3597,62 @@ function TabActions({
       )}
       {extra ?? <span />}
     </div>
+  );
+}
+
+function formatFactor(value: number) {
+  const rounded = Math.round((value + Number.EPSILON) * 100) / 100;
+  return String(Object.is(rounded, -0) ? 0 : rounded);
+}
+
+function FactorDialog({
+  factor,
+  onClose,
+  onSet,
+  onClear,
+}: {
+  factor: number;
+  onClose: () => void;
+  onSet: (value: number) => void;
+  onClear: () => void;
+}) {
+  const [text, setText] = useState(formatFactor(factor));
+  const value = Number(text);
+  const ready = /^\d+(?:\.\d{1,2})?$/.test(text) && Number.isFinite(value);
+  return (
+    <Overlay label="מכפיל כמויות" onClose={onClose}>
+      <h3 className="text-start text-lg font-semibold">מכפיל כמויות</h3>
+      <label className="mt-3 block text-start">
+        <span className="mb-1 block text-sm">מכפיל</span>
+        <input
+          dir="ltr"
+          inputMode="decimal"
+          className="w-full rounded-xl border border-neutral-300 px-3 py-2 text-start"
+          aria-label="מכפיל"
+          value={text}
+          autoFocus
+          onChange={(event) => {
+            const next = event.target.value.replace(",", ".");
+            if (next === "" || /^\d*(?:\.\d{0,2})?$/.test(next)) setText(next);
+          }}
+        />
+      </label>
+      <button
+        type="button"
+        className="mt-4 w-full rounded-xl bg-[var(--teal)] py-3 font-medium text-white disabled:opacity-40"
+        disabled={!ready}
+        onClick={() => onSet(value)}
+      >
+        קביעה
+      </button>
+      <button
+        type="button"
+        className="mt-2 w-full rounded-xl bg-neutral-100 py-3 font-medium"
+        onClick={onClear}
+      >
+        ניקוי
+      </button>
+    </Overlay>
   );
 }
 
