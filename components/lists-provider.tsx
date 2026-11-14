@@ -25,7 +25,7 @@ import {
   withoutChecklistRow,
 } from "@/lib/checklist";
 import { colorHex, nextCategoryColor, uniqueCategoryColors } from "@/lib/colors";
-import { normalizePackingCategory, normalizePackingItem, normalizePackingList, packingName, reorderRows } from "@/lib/packing";
+import { normalizePackingCategory, normalizePackingItem, normalizePackingList, packingCopyName, packingName, reorderRows } from "@/lib/packing";
 import { clearPendingGrocery, forgetPendingGrocery, isOfflineError, mergePendingGrocery, readPendingGrocery, rememberPendingGrocery } from "@/lib/grocery-sync";
 import { recipesImportedEvent } from "@/lib/recipe-transfer";
 import { forgetCachedImage, pruneImageCache, readCachedImage, writeCachedImage } from "@/lib/image-cache";
@@ -91,6 +91,7 @@ type ListsContextValue = {
   packingItems: PackingItem[];
   packingReady: boolean;
   addPackingList: (name: string) => Promise<string | null>;
+  duplicatePackingList: (id: string) => Promise<string | null>;
   renamePackingList: (id: string, name: string) => Promise<boolean>;
   setPackingFavorite: (id: string, favorite: boolean) => Promise<void>;
   deletePackingList: (id: string) => Promise<void>;
@@ -650,6 +651,88 @@ export function ListsProvider({ children }: { children: ReactNode }) {
         return Boolean(insertError);
       });
       return saved ? row.id : null;
+    },
+    [accountId, rememberPacking, runPacking],
+  );
+
+  const duplicatePackingList = useCallback(
+    async (id: string) => {
+      const source = packingListsRef.current.find((row) => row.id === id);
+      if (!source) return null;
+      const name = packingName(packingCopyName(source.name));
+      if (!name) {
+        setError("השם ארוך מדי");
+        return null;
+      }
+      const ordered = sortByOrder(packingListsRef.current);
+      const list: PackingList = {
+        id: crypto.randomUUID(),
+        account_id: accountId,
+        name,
+        favorite: false,
+        sort_order: ordered.length === 0 ? 0 : ordered[ordered.length - 1].sort_order + 1,
+      };
+      const categoryIds = new Map<string, string>();
+      const categories = sortByOrder(packingCategoriesRef.current.filter((row) => row.list_id === id)).map((row) => {
+        const nextId = crypto.randomUUID();
+        categoryIds.set(row.id, nextId);
+        return { ...row, id: nextId, list_id: list.id };
+      });
+      const items = packingItemsRef.current.flatMap((row) => {
+        const categoryId = categoryIds.get(row.category_id);
+        if (!categoryId) return [];
+        return [{ ...row, id: crypto.randomUUID(), category_id: categoryId }];
+      });
+      rememberPacking({
+        lists: [...ordered, list],
+        categories: [...packingCategoriesRef.current, ...categories],
+        items: [...packingItemsRef.current, ...items],
+      });
+      const saved = await runPacking("לא ניתן לשכפל את הרשימה", async () => {
+        const { error: listError } = await supabaseRef.current.from("packing_lists").insert({
+          id: list.id,
+          account_id: accountId,
+          name: list.name,
+          favorite: false,
+          sort_order: list.sort_order,
+        });
+        if (listError) return true;
+        if (categories.length > 0) {
+          const { error } = await supabaseRef.current.from("packing_categories").insert(
+            categories.map((row) => ({
+              id: row.id,
+              account_id: accountId,
+              list_id: row.list_id,
+              name: row.name,
+              color: row.color,
+              sort_order: row.sort_order,
+            })),
+          );
+          if (error) {
+            await supabaseRef.current.from("packing_lists").delete().eq("id", list.id);
+            return true;
+          }
+        }
+        if (items.length > 0) {
+          const { error } = await supabaseRef.current.from("packing_items").insert(
+            items.map((row) => ({
+              id: row.id,
+              account_id: accountId,
+              category_id: row.category_id,
+              name: row.name,
+              quantity: row.quantity,
+              checked: row.checked,
+              sort_order: row.sort_order,
+            })),
+          );
+          if (error) {
+            await supabaseRef.current.from("packing_lists").delete().eq("id", list.id);
+            return true;
+          }
+        }
+        return false;
+      });
+      return saved ? list.id : null;
     },
     [accountId, rememberPacking, runPacking],
   );
@@ -1599,6 +1682,7 @@ export function ListsProvider({ children }: { children: ReactNode }) {
       packingItems: sortByOrder(packingItems),
       packingReady,
       addPackingList,
+      duplicatePackingList,
       renamePackingList,
       setPackingFavorite,
       deletePackingList,
@@ -1620,6 +1704,7 @@ export function ListsProvider({ children }: { children: ReactNode }) {
     addPackingCategory,
     addPackingItem,
     addPackingList,
+    duplicatePackingList,
     categories,
     commitGrocery,
     stores,

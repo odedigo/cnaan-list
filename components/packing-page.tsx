@@ -17,7 +17,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { AppHeader } from "@/components/app-header";
 import { useDataTransfer } from "@/components/data-transfer";
-import { CloseIcon, DotsIcon, DownloadIcon, FlagIcon, GripIcon, PenIcon, PlusIcon } from "@/components/icons";
+import { CloseIcon, CopyIcon, DotsIcon, DownloadIcon, GripIcon, PenIcon, PlusIcon } from "@/components/icons";
 import { useLists } from "@/components/lists-provider";
 import { downloadPackingList } from "@/lib/export-inventory";
 import { pushAppHistory, replaceAppHistory } from "@/lib/history";
@@ -172,7 +172,14 @@ export function PackingPage({ active }: { active: boolean }) {
               onConfirm: () => void lists.deletePackingList(row.id),
             })
           }
-          onFavorite={(row) => void lists.setPackingFavorite(row.id, !row.favorite)}
+          onDuplicate={(row) =>
+            setConfirm({
+              title: "שכפול רשימה",
+              body: `לשכפל את "${row.name}"?`,
+              confirmLabel: "שכפול",
+              onConfirm: () => void lists.duplicatePackingList(row.id),
+            })
+          }
           onMove={(activeId, overId) => void lists.movePackingList(activeId, overId)}
           onMarkAll={(row) => void lists.setPackingListChecked(row.id, true)}
           onClearMarks={(row) => void lists.setPackingListChecked(row.id, false)}
@@ -226,7 +233,7 @@ function PackingIndex({
   onAdd,
   onRename,
   onDelete,
-  onFavorite,
+  onDuplicate,
   onMove,
   onMarkAll,
   onClearMarks,
@@ -241,7 +248,7 @@ function PackingIndex({
   onAdd: () => void;
   onRename: (row: PackingList) => void;
   onDelete: (row: PackingList) => void;
-  onFavorite: (row: PackingList) => void;
+  onDuplicate: (row: PackingList) => void;
   onMove: (activeId: string, overId: string) => void;
   onMarkAll: (row: PackingList) => void;
   onClearMarks: (row: PackingList) => void;
@@ -311,6 +318,9 @@ function PackingIndex({
                           </div>
                         ) : null}
                       </div>
+                      <button type="button" className="grid size-8 place-items-center text-neutral-500" aria-label="שכפול הרשימה" onClick={() => onDuplicate(row)}>
+                        <CopyIcon className="size-5" />
+                      </button>
                       <button type="button" className="grid size-8 place-items-center text-neutral-500" aria-label="ייצוא הרשימה" onClick={() => onExport(row)}>
                         <DownloadIcon className="size-5" />
                       </button>
@@ -318,15 +328,6 @@ function PackingIndex({
                         <GripIcon className="size-5" />
                       </button>
                     </div>
-                    <button
-                      type="button"
-                      className={`grid size-8 place-items-center ${row.favorite ? "text-[var(--teal)]" : "text-neutral-400"}`}
-                      aria-label={row.favorite ? "ביטול רשימה מועדפת" : "רשימה מועדפת"}
-                      aria-pressed={row.favorite}
-                      onClick={() => onFavorite(row)}
-                    >
-                      <FlagIcon filled={row.favorite} className="size-5" />
-                    </button>
                     <button type="button" className="grid size-8 place-items-center text-neutral-500" aria-label="מחיקת רשימה" onClick={() => onDelete(row)}>
                       <CloseIcon className="size-5" />
                     </button>

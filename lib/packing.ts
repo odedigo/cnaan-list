@@ -62,6 +62,13 @@ export function packingName(value: string) {
   return name;
 }
 
+const packingCopySuffix = " - העתק";
+
+export function packingCopyName(name: string) {
+  const room = 80 - packingCopySuffix.length;
+  return `${name.trim().slice(0, room).trimEnd()}${packingCopySuffix}`;
+}
+
 export function reorderRows<T extends { id: string; sort_order: number }>(rows: T[], activeId: string, overId: string) {
   const ordered = sortByOrder(rows);
   const ids = ordered.map((row) => row.id);
