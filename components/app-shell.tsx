@@ -11,6 +11,7 @@ import { BottomNav } from "@/components/bottom-nav";
 import { DataTransfer } from "@/components/data-transfer";
 import { ChecklistPage } from "@/components/checklist-page";
 import { ListPage } from "@/components/list-page";
+import { PackingPage } from "@/components/packing-page";
 import { RecipesPage } from "@/components/recipes-page";
 import { useBootError, useLists, useListsOptional } from "@/components/lists-provider";
 import { pushAppHistory } from "@/lib/history";
@@ -54,7 +55,7 @@ export function AppShell({
   useEffect(() => {
     const onPop = () => {
       const next = window.location.pathname;
-      if (next === "/grocery" || next === "/inventory" || next === "/lists" || next === "/recipes") restoreRef.current = next;
+      if (next === "/grocery" || next === "/inventory" || next === "/lists" || next === "/recipes" || next === "/packing") restoreRef.current = next;
       pathRef.current = next;
       setPath(next);
     };
@@ -67,7 +68,7 @@ export function AppShell({
     if (current === href) return;
     scrolls.current[current] = window.scrollY;
     pathRef.current = href;
-    if (href === "/grocery" || href === "/inventory" || href === "/lists" || href === "/recipes") restoreRef.current = href;
+    if (href === "/grocery" || href === "/inventory" || href === "/lists" || href === "/recipes" || href === "/packing") restoreRef.current = href;
     if (window.location.pathname !== href) pushAppHistory(href);
     setPath(href);
     if (href === "/settings") window.scrollTo(0, 0);
@@ -125,6 +126,7 @@ export function AppShell({
       <LazyList mode="inventory" active={path === "/inventory"} warm={warm} scrolls={scrolls} restoreRef={restoreRef} />
       <LazyChecklist active={path === "/lists"} warm={warm} scrolls={scrolls} restoreRef={restoreRef} />
       <LazyRecipes active={path === "/recipes"} warm={warm} scrolls={scrolls} restoreRef={restoreRef} />
+      <LazyPacking active={path === "/packing"} warm={warm} scrolls={scrolls} restoreRef={restoreRef} />
       {path === "/settings" ? <SignedInSettingsView version={version} /> : null}
     </>
   );
@@ -205,6 +207,37 @@ function LazyRecipes({
   );
 }
 
+function LazyPacking({
+  active,
+  warm,
+  scrolls,
+  restoreRef,
+}: {
+  active: boolean;
+  warm: boolean;
+  scrolls: RefObject<Record<string, number>>;
+  restoreRef: RefObject<string | null>;
+}) {
+  const [mounted, setMounted] = useState(active);
+
+  useEffect(() => {
+    if (active || warm) setMounted(true);
+  }, [active, warm]);
+
+  useLayoutEffect(() => {
+    if (!active || restoreRef.current !== "/packing") return;
+    restoreRef.current = null;
+    window.scrollTo(0, scrolls.current?.["/packing"] ?? 0);
+  }, [active, restoreRef, scrolls]);
+
+  if (!mounted) return null;
+  return (
+    <div hidden={!active}>
+      <PackingPage active={active} />
+    </div>
+  );
+}
+
 function LoadingScreen({ path, version, message }: { path: string; version: string; message?: string }) {
   const title =
     path === "/inventory"
@@ -212,7 +245,9 @@ function LoadingScreen({ path, version, message }: { path: string; version: stri
       : path === "/lists"
         ? "רשימות"
         : path === "/recipes"
-          ? "מתכונים"
+        ? "מתכונים"
+        : path === "/packing"
+          ? "רשימות אריזה"
           : path === "/settings"
             ? "הגדרות"
             : "עגלת קניות";

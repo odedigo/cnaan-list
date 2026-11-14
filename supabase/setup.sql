@@ -77,6 +77,38 @@ create table if not exists public.checklist_rows (
   constraint checklist_rows_priority_check check (priority is null or priority in ('immediate', 'high', 'medium', 'low'))
 );
 
+create table if not exists public.packing_lists (
+  id uuid primary key default gen_random_uuid(),
+  account_id uuid not null references public.accounts (id) on delete cascade,
+  name text not null,
+  favorite boolean not null default false,
+  sort_order integer not null default 0,
+  constraint packing_lists_name_length check (char_length(btrim(name)) between 1 and 80)
+);
+
+create table if not exists public.packing_categories (
+  id uuid primary key default gen_random_uuid(),
+  account_id uuid not null references public.accounts (id) on delete cascade,
+  list_id uuid not null references public.packing_lists (id) on delete cascade,
+  name text not null,
+  color text not null default '#2563EB',
+  sort_order integer not null default 0,
+  constraint packing_categories_name_length check (char_length(btrim(name)) between 1 and 80),
+  constraint packing_categories_color_hex check (color ~ '^#[0-9A-Fa-f]{6}$')
+);
+
+create table if not exists public.packing_items (
+  id uuid primary key default gen_random_uuid(),
+  account_id uuid not null references public.accounts (id) on delete cascade,
+  category_id uuid not null references public.packing_categories (id) on delete cascade,
+  name text not null,
+  quantity numeric(10, 2) not null default 1,
+  checked boolean not null default false,
+  sort_order integer not null default 0,
+  constraint packing_items_name_length check (char_length(btrim(name)) between 1 and 80),
+  constraint packing_items_quantity_check check (quantity >= 0.01)
+);
+
 create table if not exists public.recipe_categories (
   id uuid primary key default gen_random_uuid(),
   account_id uuid not null references public.accounts (id) on delete cascade,
@@ -118,6 +150,9 @@ create index if not exists categories_account_sort_idx on public.categories (acc
 create index if not exists items_account_category_sort_idx on public.items (account_id, category_id, sort_order);
 create unique index if not exists grocery_account_item_idx on public.grocery_items (account_id, item_id);
 create index if not exists checklist_rows_account_sort_idx on public.checklist_rows (account_id, sort_order);
+create index if not exists packing_lists_account_sort_idx on public.packing_lists (account_id, sort_order);
+create index if not exists packing_categories_list_sort_idx on public.packing_categories (list_id, sort_order);
+create index if not exists packing_items_category_sort_idx on public.packing_items (category_id, sort_order);
 alter table public.recipe_categories add column if not exists protected boolean not null default false;
 
 create unique index if not exists recipe_categories_sibling_name_idx
@@ -141,6 +176,9 @@ alter table public.categories enable row level security;
 alter table public.items enable row level security;
 alter table public.grocery_items enable row level security;
 alter table public.checklist_rows enable row level security;
+alter table public.packing_lists enable row level security;
+alter table public.packing_categories enable row level security;
+alter table public.packing_items enable row level security;
 alter table public.recipe_categories enable row level security;
 alter table public.recipes enable row level security;
 alter table public.recipe_labels enable row level security;
@@ -197,6 +235,36 @@ create policy "own checklist rows"
   using (account_id in (select id from public.accounts where owner_id = auth.uid()))
   with check (account_id in (select id from public.accounts where owner_id = auth.uid()));
 
+drop policy if exists "own packing lists" on public.packing_lists;
+create policy "own packing lists"
+  on public.packing_lists for all to authenticated
+  using (account_id in (select id from public.accounts where owner_id = auth.uid()))
+  with check (account_id in (select id from public.accounts where owner_id = auth.uid()));
+
+drop policy if exists "own packing categories" on public.packing_categories;
+create policy "own packing categories"
+  on public.packing_categories for all to authenticated
+  using (account_id in (select id from public.accounts where owner_id = auth.uid()))
+  with check (
+    account_id in (select id from public.accounts where owner_id = auth.uid())
+    and exists (
+      select 1 from public.packing_lists as list
+      where list.id = list_id and list.account_id = packing_categories.account_id
+    )
+  );
+
+drop policy if exists "own packing items" on public.packing_items;
+create policy "own packing items"
+  on public.packing_items for all to authenticated
+  using (account_id in (select id from public.accounts where owner_id = auth.uid()))
+  with check (
+    account_id in (select id from public.accounts where owner_id = auth.uid())
+    and exists (
+      select 1 from public.packing_categories as category
+      where category.id = category_id and category.account_id = packing_items.account_id
+    )
+  );
+
 drop policy if exists "own recipe categories" on public.recipe_categories;
 create policy "own recipe categories"
   on public.recipe_categories for all to authenticated
@@ -248,6 +316,9 @@ revoke all on public.categories from anon;
 revoke all on public.items from anon;
 revoke all on public.grocery_items from anon;
 revoke all on public.checklist_rows from anon;
+revoke all on public.packing_lists from anon;
+revoke all on public.packing_categories from anon;
+revoke all on public.packing_items from anon;
 revoke all on public.recipe_categories from anon;
 revoke all on public.recipes from anon;
 revoke all on public.recipe_labels from anon;
@@ -259,6 +330,9 @@ grant select, insert, update, delete on public.categories to authenticated;
 grant select, insert, update, delete on public.items to authenticated;
 grant select, insert, update, delete on public.grocery_items to authenticated;
 grant select, insert, update, delete on public.checklist_rows to authenticated;
+grant select, insert, update, delete on public.packing_lists to authenticated;
+grant select, insert, update, delete on public.packing_categories to authenticated;
+grant select, insert, update, delete on public.packing_items to authenticated;
 grant select, insert, update, delete on public.recipe_categories to authenticated;
 grant select, insert, update, delete on public.recipes to authenticated;
 grant select, insert, update, delete on public.recipe_labels to authenticated;
@@ -889,6 +963,9 @@ alter table public.categories replica identity full;
 alter table public.items replica identity full;
 alter table public.grocery_items replica identity full;
 alter table public.checklist_rows replica identity full;
+alter table public.packing_lists replica identity full;
+alter table public.packing_categories replica identity full;
+alter table public.packing_items replica identity full;
 
 do $$
 declare
@@ -899,7 +976,10 @@ begin
     'public.categories'::regclass,
     'public.items'::regclass,
     'public.grocery_items'::regclass,
-    'public.checklist_rows'::regclass
+    'public.checklist_rows'::regclass,
+    'public.packing_lists'::regclass,
+    'public.packing_categories'::regclass,
+    'public.packing_items'::regclass
   ]
   loop
     begin

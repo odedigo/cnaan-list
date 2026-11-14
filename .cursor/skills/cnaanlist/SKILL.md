@@ -46,9 +46,9 @@ The signed-in shell paints before grocery, inventory, and checklist data. `loadL
 
 - Change the address with `History.prototype.pushState` or `replaceState` through `lib/history.ts`, and keep the current history state. Next.js patches `window.history.pushState`. A patched call refetches the layout. An entry whose state drops `__NA` makes the next back or pop reload the page.
 - An installed app (`display-mode: standalone` or `navigator.standalone`) uses that same `pushState`. The system back button then returns to the previous tab.
-- `/lists` returns null; the shell renders `ChecklistPage`. `/recipes` returns null; the shell renders `RecipesPage`. Signed-in `/settings` returns null; the shell renders `SignedInSettings`, and that screen unmounts when the path leaves `/settings`.
-- Grocery, inventory, lists, and recipes stay mounted after the 250ms warm. Swipe only between grocery and inventory.
-- Bottom nav order, visually left to right: `/inventory` רשימת מוצרים, `/grocery` עגלת קניות, `/lists` רשימות, `/recipes` מתכונים, then עוד.... עוד... opens a menu above the button with ייצוא נתונים and ייבוא נתונים, then a separator, then רענון האפליקציה, then a separator, then הגדרות which opens `/settings`. The grocery badge is `grocery.length`, including purchased lines.
+- `/lists` returns null; the shell renders `ChecklistPage`. `/recipes` returns null; the shell renders `RecipesPage`. `/packing` returns null; the shell renders `PackingPage`. Signed-in `/settings` returns null; the shell renders `SignedInSettings`, and that screen unmounts when the path leaves `/settings`.
+- Grocery, inventory, lists, recipes, and packing stay mounted after the 250ms warm. Swipe only between grocery and inventory.
+- Bottom nav order, visually left to right: `/inventory` רשימת מוצרים, `/grocery` עגלת קניות, `/lists` רשימות, `/recipes` מתכונים, then עוד..., then a vertical three-dot button. עוד... opens a launcher above the button; ארזות opens `/packing`. The three-dot button opens ייצוא נתונים and ייבוא נתונים, then a separator, then רענון האפליקציה, then a separator, then הגדרות which opens `/settings`. The grocery badge is `grocery.length`, including purchased lines. עוד... is active on `/packing`.
 
 ## Grocery
 

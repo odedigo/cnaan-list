@@ -1,9 +1,9 @@
-import { openZip, readInventoryFiles, type ImportedGroceryLine, type ImportedPhoto } from "@/lib/inventory-file";
+import { openZip, readInventoryFiles, readPackingListFile, type ImportedGroceryLine, type ImportedPackingList, type ImportedPhoto } from "@/lib/inventory-file";
 import { writeCachedImage } from "@/lib/image-cache";
 import { compressImage } from "@/lib/images";
 import { importRecipes } from "@/lib/recipe-transfer";
 import { createClient } from "@/lib/supabase/client";
-import type { Category, ChecklistRow, GroceryLine, Item } from "@/lib/types";
+import type { Category, ChecklistRow, GroceryLine, Item, PackingCategory, PackingItem, PackingList } from "@/lib/types";
 
 type Supabase = ReturnType<typeof createClient>;
 
@@ -14,8 +14,8 @@ export async function replaceInventory(
   accountId: string,
   file: File,
   onProgress?: (ratio: number) => void,
-  options?: { recipes?: "replace" | "append" },
-): Promise<{ categories: Category[] | null; items: Item[] | null; grocery: GroceryLine[] | null; checklist: ChecklistRow[] | null; recipes: boolean }> {
+  options?: { recipes?: "replace" | "append"; only?: "packing" | "packing-list" },
+): Promise<{ categories: Category[] | null; items: Item[] | null; grocery: GroceryLine[] | null; checklist: ChecklistRow[] | null; recipes: boolean; packing: { lists: PackingList[]; categories: PackingCategory[]; items: PackingItem[] } | null; packingAppend: boolean }> {
   let reported = 0;
   const report = (ratio: number) => {
     const next = Math.max(reported, Math.min(1, ratio));
@@ -26,8 +26,19 @@ export async function replaceInventory(
   report(0);
   const bytes = new Uint8Array(await file.arrayBuffer());
   report(0.01);
+  if (options?.only === "packing-list") {
+    const packing = await appendPacking(supabase, accountId, readPackingListFile(bytes));
+    report(1);
+    return { categories: null, items: null, grocery: null, checklist: null, recipes: false, packing, packingAppend: true };
+  }
   const files = await openZip(bytes, (ratio) => report(0.01 + ratio * 0.07));
   const inventory = readInventoryFiles(files);
+  if (options?.only === "packing") {
+    if (!inventory.packing) throw new Error("הקובץ אינו כולל רשימות אריזה");
+    const packing = await replacePacking(supabase, accountId, inventory.packing);
+    report(1);
+    return { categories: null, items: null, grocery: null, checklist: null, recipes: false, packing, packingAppend: false };
+  }
   const hasCategories = inventory.categories !== null;
   const plan = (inventory.categories ?? [])
     .map((category, index) => ({ category, index }))
@@ -209,6 +220,7 @@ export async function replaceInventory(
     }
     tick();
   }
+  const packing = inventory.packing ? await replacePacking(supabase, accountId, inventory.packing) : null;
   if (hasCategories) {
     void removeReplacedImages(
       supabase,
@@ -230,6 +242,8 @@ export async function replaceInventory(
     grocery,
     checklist,
     recipes: Boolean(importRecipeMode && files.has("recipes.json")),
+    packing,
+    packingAppend: false,
   };
 }
 
@@ -271,6 +285,138 @@ async function replaceGrocery(
     if (error) throw new Error("לא ניתן לייבא את הרשימה");
   }
   return rows;
+}
+
+async function appendPacking(supabase: Supabase, accountId: string, list: ImportedPackingList) {
+  const { data: latest, error: orderError } = await supabase.from("packing_lists").select("sort_order").eq("account_id", accountId).order("sort_order", { ascending: false }).limit(1);
+  if (orderError) throw new Error("לא ניתן לייבא את הרשימה");
+  const listId = crypto.randomUUID();
+  const listRow: PackingList = {
+    id: listId,
+    account_id: accountId,
+    name: list.name,
+    favorite: list.favorite,
+    sort_order: latest && latest.length > 0 ? Number(latest[0].sort_order) + 1 : 0,
+  };
+  const categoryRows: PackingCategory[] = [];
+  const itemRows: PackingItem[] = [];
+  const categories = [...list.categories].sort((a, b) => a.sortOrder - b.sortOrder);
+  for (const category of categories) {
+    const categoryId = crypto.randomUUID();
+    categoryRows.push({
+      id: categoryId,
+      account_id: accountId,
+      list_id: listId,
+      name: category.name,
+      color: category.color,
+      sort_order: category.sortOrder,
+    });
+    const items = [...category.items].sort((a, b) => a.sortOrder - b.sortOrder);
+    for (const item of items) {
+      itemRows.push({
+        id: crypto.randomUUID(),
+        account_id: accountId,
+        category_id: categoryId,
+        name: item.name,
+        quantity: item.quantity,
+        checked: item.checked,
+        sort_order: item.sortOrder,
+      });
+    }
+  }
+  const { error: listError } = await supabase.from("packing_lists").insert(listRow);
+  if (listError) throw new Error("לא ניתן לייבא את הרשימה");
+  try {
+    for (const group of chunks(categoryRows, 100)) {
+      const { error } = await supabase.from("packing_categories").insert(group);
+      if (error) throw new Error("לא ניתן לייבא את הרשימה");
+    }
+    for (const group of chunks(itemRows, 100)) {
+      const { error } = await supabase.from("packing_items").insert(group);
+      if (error) throw new Error("לא ניתן לייבא את הרשימה");
+    }
+    return { lists: [listRow], categories: categoryRows, items: itemRows };
+  } catch (error) {
+    await supabase.from("packing_lists").delete().eq("id", listId).then(() => undefined, () => undefined);
+    throw error instanceof Error && error.message ? error : new Error("לא ניתן לייבא את הרשימה");
+  }
+}
+
+async function replacePacking(supabase: Supabase, accountId: string, lists: ImportedPackingList[]) {
+  const ordered = lists
+    .map((list, index) => ({ list, index }))
+    .sort((a, b) => a.list.sortOrder - b.list.sortOrder || a.index - b.index)
+    .map(({ list }) => list);
+  const listRows: PackingList[] = [];
+  const categoryRows: PackingCategory[] = [];
+  const itemRows: PackingItem[] = [];
+  for (const list of ordered) {
+    const listId = crypto.randomUUID();
+    listRows.push({
+      id: listId,
+      account_id: accountId,
+      name: list.name,
+      favorite: list.favorite,
+      sort_order: list.sortOrder,
+    });
+    const categories = [...list.categories].sort((a, b) => a.sortOrder - b.sortOrder);
+    for (const category of categories) {
+      const categoryId = crypto.randomUUID();
+      categoryRows.push({
+        id: categoryId,
+        account_id: accountId,
+        list_id: listId,
+        name: category.name,
+        color: category.color,
+        sort_order: category.sortOrder,
+      });
+      const items = [...category.items].sort((a, b) => a.sortOrder - b.sortOrder);
+      for (const item of items) {
+        itemRows.push({
+          id: crypto.randomUUID(),
+          account_id: accountId,
+          category_id: categoryId,
+          name: item.name,
+          quantity: item.quantity,
+          checked: item.checked,
+          sort_order: item.sortOrder,
+        });
+      }
+    }
+  }
+  const created = listRows.map((row) => row.id);
+  try {
+    for (const group of chunks(listRows, 100)) {
+      const { error } = await supabase.from("packing_lists").insert(group);
+      if (error) throw new Error("לא ניתן לייבא את הרשימה");
+    }
+    for (const group of chunks(categoryRows, 100)) {
+      const { error } = await supabase.from("packing_categories").insert(group);
+      if (error) throw new Error("לא ניתן לייבא את הרשימה");
+    }
+    for (const group of chunks(itemRows, 100)) {
+      const { error } = await supabase.from("packing_items").insert(group);
+      if (error) throw new Error("לא ניתן לייבא את הרשימה");
+    }
+    const { data: existing, error: listError } = await supabase.from("packing_lists").select("id").eq("account_id", accountId);
+    if (listError) throw new Error("לא ניתן לייבא את הרשימה");
+    const keep = new Set(created);
+    const stale = (existing ?? []).map((row) => row.id).filter((id) => !keep.has(id));
+    for (const group of chunks(stale, 100)) {
+      const { error } = await supabase.from("packing_lists").delete().in("id", group);
+      if (error) throw new Error("לא ניתן לייבא את הרשימה");
+    }
+    return { lists: listRows, categories: categoryRows, items: itemRows };
+  } catch (error) {
+    for (const group of chunks(created, 100)) {
+      await supabase
+        .from("packing_lists")
+        .delete()
+        .in("id", group)
+        .then(() => undefined, () => undefined);
+    }
+    throw error instanceof Error && error.message ? error : new Error("לא ניתן לייבא את הרשימה");
+  }
 }
 
 function matchItem(line: ImportedGroceryLine, categories: Category[], items: Item[]) {

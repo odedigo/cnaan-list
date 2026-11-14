@@ -134,6 +134,26 @@ export function MoreIcon(props: IconProps) {
   );
 }
 
+export function AppsIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true" {...props}>
+      <rect x="3.2" y="3.2" width="7.2" height="7.2" rx="1.4" />
+      <rect x="13.6" y="3.2" width="7.2" height="7.2" rx="1.4" />
+      <rect x="3.2" y="13.6" width="7.2" height="7.2" rx="1.4" />
+      <rect x="13.6" y="13.6" width="7.2" height="7.2" rx="1.4" />
+    </svg>
+  );
+}
+
+export function PlaneIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true" {...props}>
+      <path d="M3.2 12.2 21 4.2l-6.4 15.2-2.2-6.1L3.2 12.2Z" strokeLinejoin="round" />
+      <path d="m12.4 13.3 8.6-9.1" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export function PenIcon(props: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true" {...props}>
@@ -344,11 +364,11 @@ export function BookmarkIcon({
   );
 }
 
-export function FlagIcon(props: IconProps) {
+export function FlagIcon({ filled, ...props }: IconProps & { filled?: boolean }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true" {...props}>
       <path d="M6 20.5V4" strokeLinecap="round" />
-      <path d="M6 4.5h12l-2.4 3.6L18 12H6" strokeLinejoin="round" />
+      <path d="M6 4.5h12l-2.4 3.6L18 12H6" fill={filled ? "currentColor" : "none"} strokeLinejoin="round" />
     </svg>
   );
 }

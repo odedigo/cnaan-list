@@ -6,7 +6,7 @@ import { createContext, useContext, useLayoutEffect, useRef, useState, type Reac
 
 import { useLists } from "@/components/lists-provider";
 import { downloadInventoryZip, type ExportSelection } from "@/lib/export-inventory";
-import { inspectArchive } from "@/lib/inventory-file";
+import { inspectArchive, readPackingListFile } from "@/lib/inventory-file";
 import { createClient } from "@/lib/supabase/client";
 
 type PendingImport = {
@@ -15,6 +15,8 @@ type PendingImport = {
   grocery: boolean;
   lists: boolean;
   recipes: boolean;
+  packing: boolean;
+  packingOnly: boolean;
 };
 
 type TransferApi = {
@@ -23,6 +25,7 @@ type TransferApi = {
   importing: boolean;
   requestExport: () => void;
   requestImport: () => void;
+  requestPackingImport: () => void;
 };
 
 const TransferContext = createContext<TransferApi | null>(null);
@@ -34,8 +37,9 @@ export function useDataTransfer() {
 export function DataTransfer({ children }: { children: ReactNode }) {
   const lists = useLists();
   const importInputRef = useRef<HTMLInputElement>(null);
+  const importKind = useRef<"all" | "packing">("all");
   const [confirmExport, setConfirmExport] = useState(false);
-  const [exportChoice, setExportChoice] = useState<ExportSelection>({ inventory: true, grocery: true, lists: true, recipes: true });
+  const [exportChoice, setExportChoice] = useState<ExportSelection>({ inventory: true, grocery: true, lists: true, recipes: true, packing: true });
   const [exporting, setExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -46,24 +50,34 @@ export function DataTransfer({ children }: { children: ReactNode }) {
 
   function requestExport() {
     if (busy) return;
-    setExportChoice({ inventory: true, grocery: true, lists: true, recipes: true });
+    setExportChoice({ inventory: true, grocery: true, lists: true, recipes: true, packing: true });
     setConfirmExport(true);
   }
 
   function requestImport() {
     if (busy) return;
+    importKind.current = "all";
+    if (importInputRef.current) importInputRef.current.accept = ".zip,application/zip";
+    importInputRef.current?.click();
+  }
+
+  function requestPackingImport() {
+    if (busy) return;
+    importKind.current = "packing";
+    if (importInputRef.current) importInputRef.current.accept = ".json,application/json";
     importInputRef.current?.click();
   }
 
   function beginImport(recipes?: "replace" | "append") {
     if (!pendingImport) return;
     const file = pendingImport.file;
+    const packingOnly = pendingImport.packingOnly;
     setPendingImport(null);
     setImportProgress(0);
     setImporting(true);
     setExportError(null);
     void lists
-      .importInventory(file, recipes ? { recipes } : undefined, (ratio) => {
+      .importInventory(file, packingOnly ? { only: "packing-list" } : recipes ? { recipes } : undefined, (ratio) => {
         setImportProgress(ratio);
         if (ratio >= 1) setImporting(false);
       })
@@ -71,7 +85,7 @@ export function DataTransfer({ children }: { children: ReactNode }) {
   }
 
   return (
-    <TransferContext.Provider value={{ busy, exporting, importing, requestExport, requestImport }}>
+    <TransferContext.Provider value={{ busy, exporting, importing, requestExport, requestImport, requestPackingImport }}>
       {children}
       {exporting ? <WorkOverlay label="מכין את הייצוא…" progress={exportProgress} /> : null}
       {importing ? <WorkOverlay label="מייבא את הנתונים…" progress={importProgress} /> : null}
@@ -88,12 +102,18 @@ export function DataTransfer({ children }: { children: ReactNode }) {
           if (!file) return;
           void file.arrayBuffer().then(async (buffer) => {
             try {
+              const packingOnly = importKind.current === "packing";
+              if (packingOnly) {
+                readPackingListFile(new Uint8Array(buffer));
+                setPendingImport({ file, inventory: false, grocery: false, lists: false, recipes: false, packing: true, packingOnly: true });
+                return;
+              }
               const flags = await inspectArchive(new Uint8Array(buffer));
-              if (!flags.inventory && !flags.grocery && !flags.lists && !flags.recipes) {
+              if (!flags.inventory && !flags.grocery && !flags.lists && !flags.recipes && !flags.packing) {
                 setExportError("הקובץ אינו ייצוא של הרשימה");
                 return;
               }
-              setPendingImport({ file, ...flags });
+              setPendingImport({ file, ...flags, packingOnly });
             } catch {
               setExportError("הקובץ אינו ייצוא של הרשימה");
             }
@@ -118,21 +138,29 @@ export function DataTransfer({ children }: { children: ReactNode }) {
                 {note}
               </p>
             ))}
-            {pendingImport.recipes ? (
+            {pendingImport.packingOnly ? (
+              <button
+                type="button"
+                className="mt-4 w-full rounded-xl bg-[var(--teal)] py-3 font-medium text-white"
+                onClick={() => beginImport()}
+              >
+                ייבוא
+              </button>
+            ) : pendingImport.recipes ? (
               <>
                 <button
                   type="button"
                   className="mt-4 w-full rounded-xl bg-[var(--teal)] py-3 font-medium text-white"
                   onClick={() => beginImport("replace")}
                 >
-                  {pendingImport.inventory || pendingImport.grocery || pendingImport.lists ? "ייבוא והחלפת המתכונים" : "החלפת המתכונים"}
+                  {pendingImport.inventory || pendingImport.grocery || pendingImport.lists || pendingImport.packing ? "ייבוא והחלפת המתכונים" : "החלפת המתכונים"}
                 </button>
                 <button
                   type="button"
                   className="mt-2 w-full rounded-xl bg-[var(--teal)] py-3 font-medium text-white"
                   onClick={() => beginImport("append")}
                 >
-                  {pendingImport.inventory || pendingImport.grocery || pendingImport.lists ? "ייבוא והוספת המתכונים" : "הוספה למתכונים"}
+                  {pendingImport.inventory || pendingImport.grocery || pendingImport.lists || pendingImport.packing ? "ייבוא והוספת המתכונים" : "הוספה למתכונים"}
                 </button>
               </>
             ) : (
@@ -169,6 +197,7 @@ export function DataTransfer({ children }: { children: ReactNode }) {
                 ["grocery", "עגלת קניות"],
                 ["lists", "רשימות"],
                 ["recipes", "מתכונים"],
+                ["packing", "רשימות אריזה"],
               ] as const
             ).map(([key, label]) => (
               <label key={key} className="mt-3 flex items-center gap-3">
@@ -184,7 +213,7 @@ export function DataTransfer({ children }: { children: ReactNode }) {
             <button
               type="button"
               className="mt-4 w-full rounded-xl bg-[var(--teal)] py-3 font-medium text-white disabled:opacity-40"
-              disabled={!exportChoice.inventory && !exportChoice.grocery && !exportChoice.lists && !exportChoice.recipes}
+              disabled={!exportChoice.inventory && !exportChoice.grocery && !exportChoice.lists && !exportChoice.recipes && !exportChoice.packing}
               onClick={() => {
                 const selection = exportChoice;
                 setConfirmExport(false);
@@ -199,6 +228,7 @@ export function DataTransfer({ children }: { children: ReactNode }) {
                   lists.checklist,
                   lists.stores,
                   lists.grocery,
+                  { lists: lists.packingLists, categories: lists.packingCategories, items: lists.packingItems },
                   selection,
                   (ratio) => setExportProgress(ratio),
                 )
@@ -222,12 +252,14 @@ export function DataTransfer({ children }: { children: ReactNode }) {
   );
 }
 
-function importNotes(pending: { inventory: boolean; grocery: boolean; lists: boolean; recipes: boolean }) {
+function importNotes(pending: { inventory: boolean; grocery: boolean; lists: boolean; recipes: boolean; packing: boolean; packingOnly: boolean }) {
+  if (pending.packingOnly) return ["הרשימה בקובץ תתווסף לרשימות האריזה."];
   const notes: string[] = [];
   if (pending.inventory) notes.push("ייבוא יחליף את כל הקטגוריות, המוצרים והתמונות בחשבון זה.");
   if (pending.inventory && !pending.grocery) notes.push("רשימת הקניות תתרוקן.");
   if (pending.grocery) notes.push("עגלת הקניות בקובץ תחליף את העגלה בחשבון.");
   if (pending.lists) notes.push("הרשימות בקובץ יחליפו את הרשימות בחשבון.");
+  if (pending.packing) notes.push("רשימות האריזה בקובץ יחליפו את רשימות האריזה בחשבון.");
   if (pending.recipes) notes.push("הקובץ כולל מתכונים. להחליף את המתכונים בחשבון, או להוסיף אותם למתכונים הקיימים?");
   return notes;
 }

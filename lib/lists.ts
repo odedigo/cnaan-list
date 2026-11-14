@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { normalizeChecklist } from "@/lib/checklist";
 import { colorHex } from "@/lib/colors";
+import { normalizePackingCategory, normalizePackingItem, normalizePackingList } from "@/lib/packing";
 import { normalizeStore, sortStores } from "@/lib/stores";
 import type { Category, GroceryLine, Item, ListsData } from "@/lib/types";
 import { isUnitId } from "@/lib/units";
@@ -13,13 +14,17 @@ export async function loadLists(supabase: SupabaseClient, userId: string): Promi
   ]);
   if (!profile || !account) return null;
 
-  const [{ data: categories }, { data: items }, { data: grocery }, checklistResult, storesResult] = await Promise.all([
+  const [{ data: categories }, { data: items }, { data: grocery }, checklistResult, storesResult, packingListsResult, packingCategoriesResult, packingItemsResult] = await Promise.all([
     supabase.from("categories").select("*").eq("account_id", account.id).order("sort_order"),
     supabase.from("items").select("*").eq("account_id", account.id).order("sort_order"),
     supabase.from("grocery_items").select("*").eq("account_id", account.id),
     supabase.from("checklist_rows").select("*").eq("account_id", account.id).order("sort_order"),
     supabase.from("stores").select("*").eq("account_id", account.id).order("sort_order"),
+    supabase.from("packing_lists").select("*").eq("account_id", account.id).order("sort_order"),
+    supabase.from("packing_categories").select("*").eq("account_id", account.id).order("sort_order"),
+    supabase.from("packing_items").select("*").eq("account_id", account.id).order("sort_order"),
   ]);
+  const packingReady = !packingListsResult.error && !packingCategoriesResult.error && !packingItemsResult.error;
 
   return {
     accountId: account.id,
@@ -30,6 +35,10 @@ export async function loadLists(supabase: SupabaseClient, userId: string): Promi
     checklist: checklistResult.error ? [] : (checklistResult.data ?? []).map(normalizeChecklist),
     stores: storesResult.error ? [] : sortStores((storesResult.data ?? []).map(normalizeStore)),
     storesReady: !storesResult.error,
+    packingLists: packingReady ? (packingListsResult.data ?? []).map(normalizePackingList) : [],
+    packingCategories: packingReady ? (packingCategoriesResult.data ?? []).map(normalizePackingCategory) : [],
+    packingItems: packingReady ? (packingItemsResult.data ?? []).map(normalizePackingItem) : [],
+    packingReady,
   };
 }
 

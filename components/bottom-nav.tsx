@@ -1,6 +1,6 @@
 "use client";
 
-/** Fixed bottom navigation between products, grocery, lists, recipes, and more. */
+/** Fixed bottom navigation between products, grocery, lists, recipes, packing, and actions. */
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -9,10 +9,12 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useAppPath } from "@/components/app-path";
 import { useDataTransfer } from "@/components/data-transfer";
 import {
+  AppsIcon,
+  DotsIcon,
   DownloadIcon,
   GroceryIcon,
   ListsIcon,
-  MoreIcon,
+  PlaneIcon,
   ProductsIcon,
   RecipesIcon,
   ReloadIcon,
@@ -35,18 +37,32 @@ export function BottomNav({ signedIn }: { signedIn: boolean }) {
   const lists = useListsOptional();
   const transfer = useDataTransfer();
   const groceryCount = lists?.grocery.length ?? 0;
-  const [moreOpen, setMoreOpen] = useState(false);
+  const [launcherOpen, setLauncherOpen] = useState(false);
+  const [actionsOpen, setActionsOpen] = useState(false);
   const [reloading, setReloading] = useState(false);
-  const moreRef = useRef<HTMLDivElement>(null);
-  const settingsActive = pathname === "/settings" || pathname.startsWith("/settings/");
+  const launcherRef = useRef<HTMLDivElement>(null);
+  const actionsRef = useRef<HTMLDivElement>(null);
+  const settingsActive =
+    pathname === "/settings" || pathname.startsWith("/settings/");
+  const packingActive =
+    pathname === "/packing" || pathname.startsWith("/packing/");
   useEffect(() => {
-    if (!moreOpen) return;
+    if (!launcherOpen && !actionsOpen) return;
     function onPointer(event: PointerEvent) {
-      if (moreRef.current?.contains(event.target as Node)) return;
-      setMoreOpen(false);
+      const target = event.target as Node;
+      if (
+        launcherRef.current?.contains(target) ||
+        actionsRef.current?.contains(target)
+      )
+        return;
+      setLauncherOpen(false);
+      setActionsOpen(false);
     }
     function onKey(event: KeyboardEvent) {
-      if (event.key === "Escape") setMoreOpen(false);
+      if (event.key === "Escape") {
+        setLauncherOpen(false);
+        setActionsOpen(false);
+      }
     }
     document.addEventListener("pointerdown", onPointer);
     document.addEventListener("keydown", onKey);
@@ -54,9 +70,10 @@ export function BottomNav({ signedIn }: { signedIn: boolean }) {
       document.removeEventListener("pointerdown", onPointer);
       document.removeEventListener("keydown", onKey);
     };
-  }, [moreOpen]);
+  }, [actionsOpen, launcherOpen]);
   useEffect(() => {
-    setMoreOpen(false);
+    setLauncherOpen(false);
+    setActionsOpen(false);
   }, [pathname]);
   useEffect(() => {
     if (!reloading) return;
@@ -72,12 +89,16 @@ export function BottomNav({ signedIn }: { signedIn: boolean }) {
       aria-label="ניווט ראשי"
     >
       {tabs.map((tab) => {
-        const active = pathname === tab.href || pathname.startsWith(`${tab.href}/`);
+        const active =
+          pathname === tab.href || pathname.startsWith(`${tab.href}/`);
         const href = signedIn ? tab.href : "/settings";
         const Icon = tab.icon;
         const instant = signedIn && href === tab.href;
         const className = `flex min-w-0 flex-1 flex-col items-center gap-1 px-0.5 py-2 text-center text-[10px] leading-tight ${active ? "text-black" : "text-neutral-400"}`;
-        const label = tab.href === "/grocery" && groceryCount > 0 ? `${tab.label}, ${groceryCount}` : undefined;
+        const label =
+          tab.href === "/grocery" && groceryCount > 0
+            ? `${tab.label}, ${groceryCount}`
+            : undefined;
         if (instant) {
           return (
             <a
@@ -87,7 +108,14 @@ export function BottomNav({ signedIn }: { signedIn: boolean }) {
               aria-current={active ? "page" : undefined}
               aria-label={label}
               onClick={(event) => {
-                if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
+                if (
+                  event.metaKey ||
+                  event.ctrlKey ||
+                  event.shiftKey ||
+                  event.altKey ||
+                  event.button !== 0
+                )
+                  return;
                 event.preventDefault();
                 appPath?.go(href);
               }}
@@ -105,7 +133,13 @@ export function BottomNav({ signedIn }: { signedIn: boolean }) {
           );
         }
         return (
-          <Link key={tab.href} href={href} className={className} aria-current={active ? "page" : undefined} aria-label={label}>
+          <Link
+            key={tab.href}
+            href={href}
+            className={className}
+            aria-current={active ? "page" : undefined}
+            aria-label={label}
+          >
             <span className="relative">
               <Icon className="size-6" />
               {tab.href === "/grocery" && groceryCount > 0 ? (
@@ -118,9 +152,60 @@ export function BottomNav({ signedIn }: { signedIn: boolean }) {
           </Link>
         );
       })}
-      <div ref={moreRef} className={`relative flex min-w-0 flex-1 flex-col items-center ${settingsActive || moreOpen ? "text-black" : "text-neutral-400"}`}>
-        {moreOpen ? (
-          <div role="menu" dir="rtl" className="absolute bottom-full z-10 mb-2 rounded-xl border border-neutral-200 bg-white py-1 text-neutral-800 shadow-lg" style={{ right: "0.25rem", minWidth: "11.5rem" }}>
+      <div
+        ref={launcherRef}
+        className={`relative flex min-w-0 flex-1 flex-col items-center ${packingActive || launcherOpen ? "text-black" : "text-neutral-400"}`}
+      >
+        {launcherOpen ? (
+          <div
+            className="absolute bottom-full z-10 mb-2 flex rounded-xl border border-neutral-200 bg-white p-2 text-neutral-800 shadow-lg"
+            style={{ left: "50%", transform: "translateX(-50%)" }}
+          >
+            <button
+              type="button"
+              className="flex w-16 flex-col items-center gap-1 rounded-lg px-1 py-2 text-neutral-800"
+              onClick={() => {
+                setLauncherOpen(false);
+                if (!signedIn) {
+                  appPath?.go("/settings");
+                  return;
+                }
+                appPath?.go("/packing");
+              }}
+            >
+              <PlaneIcon className="size-7" />
+              <span className="text-xs">אריזות</span>
+            </button>
+          </div>
+        ) : null}
+        <button
+          type="button"
+          className="flex w-full flex-col items-center gap-1 px-0.5 py-2 text-center"
+          style={{ fontSize: "10px", lineHeight: "12.5px" }}
+          aria-current={packingActive ? "page" : undefined}
+          aria-expanded={launcherOpen}
+          aria-haspopup="menu"
+          aria-label="עוד"
+          onClick={() => {
+            setActionsOpen(false);
+            setLauncherOpen((open) => !open);
+          }}
+        >
+          <AppsIcon className="size-6" />
+          <span dir="rtl">עוד...</span>
+        </button>
+      </div>
+      <div
+        ref={actionsRef}
+        className={`relative flex w-11 shrink-0 flex-col items-center ${settingsActive || actionsOpen ? "text-black" : "text-neutral-400"}`}
+      >
+        {actionsOpen ? (
+          <div
+            role="menu"
+            dir="rtl"
+            className="absolute bottom-full z-10 mb-2 rounded-xl border border-neutral-200 bg-white py-1 text-neutral-800 shadow-lg"
+            style={{ right: 0, minWidth: "11.5rem" }}
+          >
             {transfer ? (
               <>
                 <button
@@ -130,7 +215,7 @@ export function BottomNav({ signedIn }: { signedIn: boolean }) {
                   style={{ fontSize: "0.875rem", lineHeight: "1.25rem" }}
                   disabled={transfer.busy}
                   onClick={() => {
-                    setMoreOpen(false);
+                    setActionsOpen(false);
                     transfer.requestExport();
                   }}
                 >
@@ -144,14 +229,17 @@ export function BottomNav({ signedIn }: { signedIn: boolean }) {
                   style={{ fontSize: "0.875rem", lineHeight: "1.25rem" }}
                   disabled={transfer.busy}
                   onClick={() => {
-                    setMoreOpen(false);
+                    setActionsOpen(false);
                     transfer.requestImport();
                   }}
                 >
                   <UploadIcon className="size-5 shrink-0" />
                   <span>{transfer.importing ? "מייבא…" : "ייבוא נתונים"}</span>
                 </button>
-                <div role="separator" className="mx-3 my-1 h-px bg-neutral-200" />
+                <div
+                  role="separator"
+                  className="mx-3 my-1 h-px bg-neutral-200"
+                />
               </>
             ) : null}
             <button
@@ -161,7 +249,7 @@ export function BottomNav({ signedIn }: { signedIn: boolean }) {
               style={{ fontSize: "0.875rem", lineHeight: "1.25rem" }}
               disabled={reloading}
               onClick={() => {
-                setMoreOpen(false);
+                setActionsOpen(false);
                 setReloading(true);
               }}
             >
@@ -175,9 +263,16 @@ export function BottomNav({ signedIn }: { signedIn: boolean }) {
               dir="rtl"
               className="flex w-full items-center gap-2 px-3 py-2 text-start text-sm"
               onClick={(event) => {
-                setMoreOpen(false);
+                setActionsOpen(false);
                 if (!signedIn) return;
-                if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
+                if (
+                  event.metaKey ||
+                  event.ctrlKey ||
+                  event.shiftKey ||
+                  event.altKey ||
+                  event.button !== 0
+                )
+                  return;
                 event.preventDefault();
                 appPath?.go("/settings");
               }}
@@ -190,15 +285,23 @@ export function BottomNav({ signedIn }: { signedIn: boolean }) {
         <button
           type="button"
           className="flex w-full flex-col items-center gap-1 px-0.5 py-2 text-center"
-          style={{ fontSize: "10px", lineHeight: "12.5px" }}
           aria-current={settingsActive ? "page" : undefined}
-          aria-expanded={moreOpen}
+          aria-expanded={actionsOpen}
           aria-haspopup="menu"
-          aria-label="עוד"
-          onClick={() => setMoreOpen((open) => !open)}
+          aria-label="פעולות"
+          onClick={() => {
+            setLauncherOpen(false);
+            setActionsOpen((open) => !open);
+          }}
         >
-          <MoreIcon className="size-6" />
-          <span dir="rtl">עוד...</span>
+          <DotsIcon className="size-6" />
+          <span
+            aria-hidden
+            className="invisible"
+            style={{ fontSize: "10px", lineHeight: "12.5px" }}
+          >
+            .
+          </span>
         </button>
       </div>
       {reloading ? <ReloadNotice /> : null}
@@ -266,7 +369,10 @@ function ReloadNotice() {
             animation: "cnaanlist-spin 0.8s linear infinite",
           }}
         />
-        <p className="font-semibold" style={{ fontSize: "1.5rem", lineHeight: 1.35 }}>
+        <p
+          className="font-semibold"
+          style={{ fontSize: "1.5rem", lineHeight: 1.35 }}
+        >
           מרענן את האפליקציה…
         </p>
       </div>

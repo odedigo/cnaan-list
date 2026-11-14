@@ -11,7 +11,9 @@ import {
 } from "react";
 
 import {
+  CheckIcon,
   ChevronIcon,
+  ClearMarksIcon,
   CloseIcon,
   ExportIcon,
   CameraIcon,
@@ -25,6 +27,7 @@ import {
   SearchIcon,
   SortIcon,
   TrashIcon,
+  UploadIcon,
 } from "@/components/icons";
 
 export function AppHeader({
@@ -54,6 +57,15 @@ export function AppHeader({
   onReloadRecipes,
   onExportFile,
   onTopCategories,
+  onHeaderPlus,
+  headerPlusLabel = "הוספה",
+  onBack,
+  onMarkAll,
+  onClearMarks,
+  onSortWithin,
+  onExportList,
+  onImportList,
+  onAddList,
   exportFileEnabled = true,
   showCredit = false,
   creditVersion = "",
@@ -84,13 +96,24 @@ export function AppHeader({
   onReloadRecipes?: () => void;
   onExportFile?: () => void;
   onTopCategories?: () => void;
+  onHeaderPlus?: () => void;
+  headerPlusLabel?: string;
+  onBack?: () => void;
+  onMarkAll?: () => void;
+  onClearMarks?: () => void;
+  onSortWithin?: () => void;
+  onExportList?: () => void;
+  onImportList?: () => void;
+  onAddList?: () => void;
   exportFileEnabled?: boolean;
   showCredit?: boolean;
   creditVersion?: string;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [creditOpen, setCreditOpen] = useState(false);
-  const showMenu = Boolean(onAdd || onSort || onReorder || onPlus || onLink || onPasteRecipe || onPhotoRecipe || onReloadRecipes || onExportFile);
+  const showMenu = Boolean(
+    onAdd || onSort || onReorder || onPlus || onLink || onPasteRecipe || onPhotoRecipe || onReloadRecipes || onExportFile || onMarkAll || onClearMarks || onSortWithin || onExportList || onImportList || onAddList,
+  );
   const searchButton = onSearchToggle ? (
     <button
       type="button"
@@ -131,6 +154,11 @@ export function AppHeader({
         className="grid h-14 grid-cols-[minmax(max-content,1fr)_minmax(0,max-content)_minmax(max-content,1fr)] items-center px-1"
       >
         <div className="flex items-center justify-self-start">
+          {onHeaderPlus ? (
+            <HeaderButton label={headerPlusLabel} disabled={!actionsEnabled} onClick={onHeaderPlus}>
+              <PlusIcon className="size-6" />
+            </HeaderButton>
+          ) : null}
           {onToggleCategories && !showMenu ? (
             <HeaderButton
               label={categoriesExpanded ? "כווץ את הקטגוריות" : "הרחב את הקטגוריות"}
@@ -158,6 +186,11 @@ export function AppHeader({
           <span className="min-w-0 truncate">{title}</span>
         </h1>
         <div className="relative flex shrink-0 items-center justify-self-end">
+          {onBack ? (
+            <HeaderButton label="חזרה" onClick={onBack}>
+              <ChevronIcon className="size-6 rotate-90" />
+            </HeaderButton>
+          ) : null}
           {onTopCategories ? (
             <HeaderButton label="קטגוריות ראשיות" disabled={!actionsEnabled} onClick={onTopCategories}>
               <HomeIcon className="size-6" />
@@ -190,8 +223,86 @@ export function AppHeader({
               <div
                 dir="rtl"
                 role="menu"
-                className="absolute right-0 top-12 z-30 w-52 overflow-hidden rounded-xl bg-white py-1 text-start shadow-lg"
+                className="absolute right-0 top-12 z-30 w-max min-w-52 overflow-hidden rounded-xl bg-white py-1 text-start shadow-lg"
               >
+                {onAddList ? (
+                  <>
+                    <MenuItem
+                      label="הוספת רשימה"
+                      disabled={!actionsEnabled}
+                      onClick={() => {
+                        setMenuOpen(false);
+                        onAddList();
+                      }}
+                    >
+                      <PlusIcon className="size-5" />
+                    </MenuItem>
+                    <div role="separator" className="mx-3 my-1 h-px bg-neutral-200" />
+                  </>
+                ) : null}
+                {onExportList ? (
+                  <MenuItem
+                    label="ייצוא רשימה"
+                    disabled={!actionsEnabled}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onExportList();
+                    }}
+                  >
+                    <ExportIcon className="size-5" />
+                  </MenuItem>
+                ) : null}
+                {onImportList ? (
+                  <MenuItem
+                    label="ייבוא רשימה"
+                    disabled={!actionsEnabled}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onImportList();
+                    }}
+                  >
+                    <UploadIcon className="size-5" />
+                  </MenuItem>
+                ) : null}
+                {onMarkAll ? (
+                  <MenuItem
+                    label="סימון הכל"
+                    disabled={!actionsEnabled}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onMarkAll();
+                    }}
+                  >
+                    <CheckIcon className="size-5" />
+                  </MenuItem>
+                ) : null}
+                {onClearMarks ? (
+                  <MenuItem
+                    label="ביטול סימונים"
+                    disabled={!actionsEnabled}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onClearMarks();
+                    }}
+                  >
+                    <ClearMarksIcon className="size-5" />
+                  </MenuItem>
+                ) : null}
+                {onSortWithin ? (
+                  <>
+                    {onMarkAll || onClearMarks ? <div role="separator" className="mx-3 my-1 h-px bg-neutral-200" /> : null}
+                    <MenuItem
+                      label="מיון בתוך קטגוריות"
+                      disabled={!actionsEnabled}
+                      onClick={() => {
+                        setMenuOpen(false);
+                        onSortWithin();
+                      }}
+                    >
+                      <SortIcon className="size-5" />
+                    </MenuItem>
+                  </>
+                ) : null}
                 {onAdd ? (
                   <MenuItem
                     label="הוספת קטגוריה"

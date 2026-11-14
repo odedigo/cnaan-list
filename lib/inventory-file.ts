@@ -53,10 +53,32 @@ export type ImportedGroceryLine = {
   checked: boolean;
 };
 
+export type ImportedPackingItem = {
+  name: string;
+  quantity: number;
+  checked: boolean;
+  sortOrder: number;
+};
+
+export type ImportedPackingCategory = {
+  name: string;
+  color: string;
+  sortOrder: number;
+  items: ImportedPackingItem[];
+};
+
+export type ImportedPackingList = {
+  name: string;
+  favorite: boolean;
+  sortOrder: number;
+  categories: ImportedPackingCategory[];
+};
+
 export type ImportedInventory = {
   categories: ImportedCategory[] | null;
   grocery: ImportedGroceryLine[] | null;
   lists: ImportedChecklistRow[] | null;
+  packing: ImportedPackingList[] | null;
 };
 
 export type ArchiveFlags = {
@@ -64,6 +86,7 @@ export type ArchiveFlags = {
   grocery: boolean;
   lists: boolean;
   recipes: boolean;
+  packing: boolean;
 };
 
 export async function openZip(bytes: Uint8Array, onProgress?: (ratio: number) => void) {
@@ -88,7 +111,7 @@ export async function inspectArchive(bytes: Uint8Array): Promise<ArchiveFlags> {
   const documentBytes = files.get("inventory.json");
   if (!documentBytes) {
     if (!recipes) throw new InventoryFileError();
-    return { inventory: false, grocery: false, lists: false, recipes: true };
+    return { inventory: false, grocery: false, lists: false, recipes: true, packing: false };
   }
   const record = parseDocument(documentBytes);
   return {
@@ -96,6 +119,7 @@ export async function inspectArchive(bytes: Uint8Array): Promise<ArchiveFlags> {
     grocery: Array.isArray(record.grocery),
     lists: Array.isArray(record.lists),
     recipes,
+    packing: Array.isArray(record.packing),
   };
 }
 
@@ -107,16 +131,16 @@ export function readInventoryFiles(files: Map<string, Uint8Array>): ImportedInve
   const documentBytes = files.get("inventory.json");
   if (!documentBytes) {
     if (!files.has("recipes.json")) throw new InventoryFileError();
-    return { categories: null, grocery: null, lists: null };
+    return { categories: null, grocery: null, lists: null, packing: null };
   }
   const record = parseDocument(documentBytes);
   const categories = Array.isArray(record.categories)
     ? record.categories.map((category, categoryIndex) => readCategory(category, categoryIndex, files))
     : null;
   const grocery = Array.isArray(record.grocery) ? record.grocery.map(readGroceryLine) : null;
-  if (record.lists == null) return { categories, grocery, lists: null };
-  if (!Array.isArray(record.lists)) throw new InventoryFileError();
-  return { categories, grocery, lists: record.lists.map((row, index) => readChecklistRow(row, index)) };
+  const lists = readListRows(record.lists);
+  const packing = readPackingLists(record.packing);
+  return { categories, grocery, lists, packing };
 }
 
 function parseDocument(bytes: Uint8Array) {
@@ -127,7 +151,75 @@ function parseDocument(bytes: Uint8Array) {
     throw new InventoryFileError();
   }
   if (!document || typeof document !== "object") throw new InventoryFileError();
-  return document as { categories?: unknown; grocery?: unknown; lists?: unknown };
+  return document as { categories?: unknown; grocery?: unknown; lists?: unknown; packing?: unknown };
+}
+
+function readListRows(value: unknown) {
+  if (value == null) return null;
+  if (!Array.isArray(value)) throw new InventoryFileError();
+  return value.map((row, index) => readChecklistRow(row, index));
+}
+
+export function readPackingListFile(bytes: Uint8Array) {
+  let document: unknown;
+  try {
+    document = JSON.parse(new TextDecoder().decode(bytes));
+  } catch {
+    throw new InventoryFileError();
+  }
+  return readPackingList(document, 0);
+}
+
+function readPackingLists(value: unknown) {
+  if (value == null) return null;
+  if (!Array.isArray(value)) throw new InventoryFileError();
+  return value.map((row, index) => readPackingList(row, index));
+}
+
+function readPackingList(value: unknown, index: number): ImportedPackingList {
+  if (!value || typeof value !== "object") throw new InventoryFileError();
+  const row = value as Record<string, unknown>;
+  const name = clipName(row.name);
+  if (!name) throw new InventoryFileError();
+  if (!Array.isArray(row.categories)) throw new InventoryFileError();
+  return {
+    name,
+    favorite: row.favorite === true,
+    sortOrder: order(row.sortOrder, index),
+    categories: row.categories.map((category, categoryIndex) => readPackingCategory(category, categoryIndex)),
+  };
+}
+
+function readPackingCategory(value: unknown, index: number): ImportedPackingCategory {
+  if (!value || typeof value !== "object") throw new InventoryFileError();
+  const row = value as Record<string, unknown>;
+  const name = clipName(row.name);
+  if (!name) throw new InventoryFileError();
+  if (!Array.isArray(row.items)) throw new InventoryFileError();
+  return {
+    name,
+    color: colorHex(typeof row.color === "string" ? row.color : ""),
+    sortOrder: order(row.sortOrder, index),
+    items: row.items.map((item, itemIndex) => readPackingItem(item, itemIndex)),
+  };
+}
+
+function readPackingItem(value: unknown, index: number): ImportedPackingItem {
+  if (!value || typeof value !== "object") throw new InventoryFileError();
+  const row = value as Record<string, unknown>;
+  const name = clipName(row.name);
+  if (!name) throw new InventoryFileError();
+  return {
+    name,
+    quantity: parseQuantity(typeof row.quantity === "number" || typeof row.quantity === "string" ? String(row.quantity) : ""),
+    checked: row.checked === true,
+    sortOrder: order(row.sortOrder, index),
+  };
+}
+
+function clipName(value: unknown) {
+  const name = text(value);
+  return name ? name.slice(0, 80) : "";
 }
 
 function readGroceryLine(value: unknown): ImportedGroceryLine {

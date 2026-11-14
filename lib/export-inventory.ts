@@ -1,14 +1,16 @@
+import { sortByOrder } from "@/lib/order";
 import { readCachedImage, writeCachedImage } from "@/lib/image-cache";
 import { recipeArchiveFiles } from "@/lib/recipe-transfer";
 import { createClient } from "@/lib/supabase/client";
 import { zipStoreAsync } from "@/lib/zip-async";
-import type { Category, ChecklistRow, GroceryLine, Item, Store } from "@/lib/types";
+import type { Category, ChecklistRow, GroceryLine, Item, PackingCategory, PackingItem, PackingList, Store } from "@/lib/types";
 
 export type ExportSelection = {
   inventory: boolean;
   grocery: boolean;
   lists: boolean;
   recipes: boolean;
+  packing: boolean;
 };
 
 type Supabase = ReturnType<typeof createClient>;
@@ -71,10 +73,11 @@ export async function downloadInventoryZip(
   checklist: ChecklistRow[],
   stores: Store[] = [],
   grocery: GroceryLine[] = [],
-  selection: ExportSelection = { inventory: true, grocery: false, lists: true, recipes: false },
+  packing: { lists: PackingList[]; categories: PackingCategory[]; items: PackingItem[] } = { lists: [], categories: [], items: [] },
+  selection: ExportSelection = { inventory: true, grocery: false, lists: true, recipes: false, packing: false },
   onProgress?: (ratio: number) => void,
 ) {
-  if (!selection.inventory && !selection.grocery && !selection.lists && !selection.recipes) return;
+  if (!selection.inventory && !selection.grocery && !selection.lists && !selection.recipes && !selection.packing) return;
   onProgress?.(0);
   await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
   const jobs: { key: string; path: string; fileName: string }[] = [];
@@ -156,8 +159,29 @@ export async function downloadInventoryZip(
         priority: row.priority,
       }));
   }
+  if (selection.packing) {
+    document.packing = sortByOrder(packing.lists).map((list) => ({
+      id: list.id,
+      name: list.name,
+      favorite: list.favorite,
+      sortOrder: list.sort_order,
+      categories: sortByOrder(packing.categories.filter((category) => category.list_id === list.id)).map((category) => ({
+        id: category.id,
+        name: category.name,
+        color: category.color,
+        sortOrder: category.sort_order,
+        items: sortByOrder(packing.items.filter((item) => item.category_id === category.id)).map((item) => ({
+          id: item.id,
+          name: item.name,
+          quantity: item.quantity,
+          checked: item.checked,
+          sortOrder: item.sort_order,
+        })),
+      })),
+    }));
+  }
   const archive = [...files];
-  if (selection.inventory || selection.grocery || selection.lists) {
+  if (selection.inventory || selection.grocery || selection.lists || selection.packing) {
     archive.unshift({ name: "inventory.json", data: new TextEncoder().encode(JSON.stringify(document, null, 2)) });
   }
   if (selection.recipes) {
@@ -174,4 +198,35 @@ export async function downloadInventoryZip(
   link.download = `cnaanlist-inventory-${day}.zip`;
   link.click();
   URL.revokeObjectURL(url);
+}
+
+export function downloadPackingList(list: PackingList, categories: PackingCategory[], items: PackingItem[]) {
+  const document = {
+    name: list.name,
+    favorite: list.favorite,
+    sortOrder: list.sort_order,
+    categories: sortByOrder(categories.filter((category) => category.list_id === list.id)).map((category) => ({
+      name: category.name,
+      color: category.color,
+      sortOrder: category.sort_order,
+      items: sortByOrder(items.filter((item) => item.category_id === category.id)).map((item) => ({
+        name: item.name,
+        quantity: item.quantity,
+        checked: item.checked,
+        sortOrder: item.sort_order,
+      })),
+    })),
+  };
+  const blob = new Blob([JSON.stringify(document, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = window.document.createElement("a");
+  link.href = url;
+  link.download = packingFileName(list.name);
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function packingFileName(name: string) {
+  const safe = name.replace(/[<>:"/\\|?*\u0000-\u001f]/g, " ").replace(/\s+/g, " ").trim().replace(/[. ]+$/g, "");
+  return `packing-${safe || "list"}.json`;
 }

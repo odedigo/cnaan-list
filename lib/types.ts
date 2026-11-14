@@ -52,6 +52,33 @@ export type ChecklistRow = {
   priority: ChecklistPriority | null;
 };
 
+export type PackingList = {
+  id: string;
+  account_id: string;
+  name: string;
+  favorite: boolean;
+  sort_order: number;
+};
+
+export type PackingCategory = {
+  id: string;
+  account_id: string;
+  list_id: string;
+  name: string;
+  color: string;
+  sort_order: number;
+};
+
+export type PackingItem = {
+  id: string;
+  account_id: string;
+  category_id: string;
+  name: string;
+  quantity: number;
+  checked: boolean;
+  sort_order: number;
+};
+
 export type ListsData = {
   accountId: string;
   username: string;
@@ -61,4 +88,8 @@ export type ListsData = {
   checklist: ChecklistRow[];
   stores: Store[];
   storesReady: boolean;
+  packingLists: PackingList[];
+  packingCategories: PackingCategory[];
+  packingItems: PackingItem[];
+  packingReady: boolean;
 };

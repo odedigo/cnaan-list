@@ -1,6 +1,6 @@
-"use client";
+﻿"use client";
 
-/** Shared client state for inventory, grocery, stores, and checklists, including Supabase sync. */
+/** Shared client state for inventory, grocery, stores, checklists, and packing lists, including Supabase sync. */
 
 import {
   createContext,
@@ -25,6 +25,7 @@ import {
   withoutChecklistRow,
 } from "@/lib/checklist";
 import { colorHex, nextCategoryColor, uniqueCategoryColors } from "@/lib/colors";
+import { normalizePackingCategory, normalizePackingItem, normalizePackingList, packingName, reorderRows } from "@/lib/packing";
 import { clearPendingGrocery, forgetPendingGrocery, isOfflineError, mergePendingGrocery, readPendingGrocery, rememberPendingGrocery } from "@/lib/grocery-sync";
 import { recipesImportedEvent } from "@/lib/recipe-transfer";
 import { forgetCachedImage, pruneImageCache, readCachedImage, writeCachedImage } from "@/lib/image-cache";
@@ -34,7 +35,7 @@ import { compressImage } from "@/lib/images";
 import { applyOrder, compareNames, moveVisible, nameInsertIndex, sortByOrder } from "@/lib/order";
 import { defaultStore, normalizeStore, sortStores } from "@/lib/stores";
 import { createClient } from "@/lib/supabase/client";
-import type { Category, ChecklistRow, GroceryLine, Item, ListsData, Store } from "@/lib/types";
+import type { Category, ChecklistRow, GroceryLine, Item, ListsData, PackingCategory, PackingItem, PackingList, Store } from "@/lib/types";
 import { isUnitId, parseQuantity, type UnitId } from "@/lib/units";
 
 type ListsContextValue = {
@@ -75,7 +76,7 @@ type ListsContextValue = {
   removeFromGrocery: (itemId: string) => Promise<void>;
   clearPurchased: () => Promise<void>;
   clearGrocery: () => Promise<void>;
-  importInventory: (file: File, options?: { recipes?: "replace" | "append" }, onProgress?: (ratio: number) => void) => Promise<void>;
+  importInventory: (file: File, options?: { recipes?: "replace" | "append"; only?: "packing" | "packing-list" }, onProgress?: (ratio: number) => void) => Promise<void>;
   checklist: ChecklistRow[];
   checklistError: string | null;
   addChecklistRow: (where: { at: "start" } | { afterId: string }) => string | null;
@@ -85,6 +86,26 @@ type ListsContextValue = {
   setChecklistChecked: (id: string, checked: boolean) => Promise<void>;
   setChecklistPriority: (id: string, priority: ChecklistRow["priority"]) => Promise<void>;
   deleteChecklistRow: (id: string) => Promise<void>;
+  packingLists: PackingList[];
+  packingCategories: PackingCategory[];
+  packingItems: PackingItem[];
+  packingReady: boolean;
+  addPackingList: (name: string) => Promise<string | null>;
+  renamePackingList: (id: string, name: string) => Promise<boolean>;
+  setPackingFavorite: (id: string, favorite: boolean) => Promise<void>;
+  deletePackingList: (id: string) => Promise<void>;
+  movePackingList: (activeId: string, overId: string) => Promise<void>;
+  setPackingListChecked: (listId: string, checked: boolean) => Promise<void>;
+  addPackingCategory: (listId: string, name: string) => Promise<string | null>;
+  renamePackingCategory: (id: string, name: string) => Promise<boolean>;
+  deletePackingCategory: (id: string) => Promise<void>;
+  movePackingCategory: (listId: string, activeId: string, overId: string) => Promise<void>;
+  sortPackingItems: (listId: string) => Promise<void>;
+  addPackingItem: (categoryId: string, name: string) => Promise<string | null>;
+  renamePackingItem: (id: string, name: string) => Promise<boolean>;
+  deletePackingItem: (id: string) => Promise<void>;
+  setPackingItemChecked: (id: string, checked: boolean) => Promise<void>;
+  setPackingItemQuantity: (id: string, quantity: number) => Promise<void>;
   uploadImage: (kind: "item" | "category", id: string, file: File) => Promise<void>;
   removeImage: (kind: "item" | "category", id: string) => Promise<void>;
 };
@@ -112,6 +133,10 @@ export function ListsProvider({ children }: { children: ReactNode }) {
   groceryRef.current = grocery;
   const [checklist, setChecklist] = useState<ChecklistRow[]>([]);
   const [checklistError, setChecklistError] = useState<string | null>(null);
+  const [packingLists, setPackingLists] = useState<PackingList[]>([]);
+  const [packingCategories, setPackingCategories] = useState<PackingCategory[]>([]);
+  const [packingItems, setPackingItems] = useState<PackingItem[]>([]);
+  const [packingReady, setPackingReady] = useState(false);
   const [reorderMode, setReorderMode] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -121,6 +146,11 @@ export function ListsProvider({ children }: { children: ReactNode }) {
   const importingRef = useRef(false);
   const supabaseRef = useRef(createClient());
   const checklistRef = useRef<ChecklistRow[]>([]);
+  const packingListsRef = useRef<PackingList[]>([]);
+  const packingCategoriesRef = useRef<PackingCategory[]>([]);
+  const packingItemsRef = useRef<PackingItem[]>([]);
+  const packingGen = useRef(0);
+  const packingWrites = useRef(0);
   const writeChain = useRef(Promise.resolve());
   const pendingIds = useRef(new Set<string>());
   const pendingDeletes = useRef(new Set<string>());
@@ -150,6 +180,9 @@ export function ListsProvider({ children }: { children: ReactNode }) {
       }
       groceryRef.current = loaded.grocery;
       checklistRef.current = loaded.checklist;
+      packingListsRef.current = loaded.packingLists;
+      packingCategoriesRef.current = loaded.packingCategories;
+      packingItemsRef.current = loaded.packingItems;
       setCategories(loaded.categories);
       setStores(loaded.stores);
       setStoresReady(loaded.storesReady);
@@ -157,6 +190,10 @@ export function ListsProvider({ children }: { children: ReactNode }) {
       setItems(loaded.items);
       setGrocery(loaded.grocery);
       setChecklist(loaded.checklist);
+      setPackingLists(loaded.packingLists);
+      setPackingCategories(loaded.packingCategories);
+      setPackingItems(loaded.packingItems);
+      setPackingReady(loaded.packingReady);
       setData(loaded);
     })();
     return () => {
@@ -167,13 +204,17 @@ export function ListsProvider({ children }: { children: ReactNode }) {
   const refetch = useCallback(async () => {
     if (!accountId || reorderRef.current || importingRef.current) return;
     const seenGroceryGen = groceryGen.current;
+    const seenPackingGen = packingGen.current;
     const supabase = supabaseRef.current;
-    const [{ data: categoryRows }, { data: itemRows }, { data: groceryRows }, checklistResult, storesResult] = await Promise.all([
+    const [{ data: categoryRows }, { data: itemRows }, { data: groceryRows }, checklistResult, storesResult, packingListsResult, packingCategoriesResult, packingItemsResult] = await Promise.all([
       supabase.from("categories").select("*").eq("account_id", accountId).order("sort_order"),
       supabase.from("items").select("*").eq("account_id", accountId).order("sort_order"),
       supabase.from("grocery_items").select("*").eq("account_id", accountId),
       supabase.from("checklist_rows").select("*").eq("account_id", accountId).order("sort_order"),
       supabase.from("stores").select("*").eq("account_id", accountId).order("sort_order"),
+      supabase.from("packing_lists").select("*").eq("account_id", accountId).order("sort_order"),
+      supabase.from("packing_categories").select("*").eq("account_id", accountId).order("sort_order"),
+      supabase.from("packing_items").select("*").eq("account_id", accountId).order("sort_order"),
     ]);
     if (reorderRef.current || importingRef.current) return;
     if (categoryRows) setCategories(categoryRows.map(normalizeCategory));
@@ -200,6 +241,20 @@ export function ListsProvider({ children }: { children: ReactNode }) {
       checklistRef.current = next;
       setChecklist(next);
       setChecklistError(null);
+    }
+    const packingFailed = Boolean(packingListsResult.error || packingCategoriesResult.error || packingItemsResult.error);
+    if (packingFailed) setPackingReady(false);
+    else if (packingWrites.current === 0 && seenPackingGen === packingGen.current) {
+      const nextLists = (packingListsResult.data ?? []).map(normalizePackingList);
+      const nextCategories = (packingCategoriesResult.data ?? []).map(normalizePackingCategory);
+      const nextItems = (packingItemsResult.data ?? []).map(normalizePackingItem);
+      packingListsRef.current = nextLists;
+      packingCategoriesRef.current = nextCategories;
+      packingItemsRef.current = nextItems;
+      setPackingLists(nextLists);
+      setPackingCategories(nextCategories);
+      setPackingItems(nextItems);
+      setPackingReady(true);
     }
   }, [accountId]);
 
@@ -258,10 +313,17 @@ export function ListsProvider({ children }: { children: ReactNode }) {
       if (document.visibilityState === "visible") schedule();
     };
     document.addEventListener("visibilitychange", onVisible);
+    const packingChannel = supabase
+      .channel(`account-${accountId}-packing`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "packing_lists", filter: `account_id=eq.${accountId}` }, schedule)
+      .on("postgres_changes", { event: "*", schema: "public", table: "packing_categories", filter: `account_id=eq.${accountId}` }, schedule)
+      .on("postgres_changes", { event: "*", schema: "public", table: "packing_items", filter: `account_id=eq.${accountId}` }, schedule)
+      .subscribe();
     return () => {
       window.clearTimeout(timer);
       document.removeEventListener("visibilitychange", onVisible);
       void supabase.removeChannel(channel);
+      void supabase.removeChannel(packingChannel);
     };
   }, [accountId, refetch, storesReady]);
 
@@ -517,6 +579,351 @@ export function ListsProvider({ children }: { children: ReactNode }) {
       return commitChecklist(previous, withoutChecklistRow(previous, id));
     },
     [commitChecklist],
+  );
+
+  const rememberPacking = useCallback((next: { lists?: PackingList[]; categories?: PackingCategory[]; items?: PackingItem[] }) => {
+    packingGen.current += 1;
+    if (next.lists) packingListsRef.current = next.lists;
+    if (next.categories) packingCategoriesRef.current = next.categories;
+    if (next.items) packingItemsRef.current = next.items;
+    flushSync(() => {
+      if (next.lists) setPackingLists(next.lists);
+      if (next.categories) setPackingCategories(next.categories);
+      if (next.items) setPackingItems(next.items);
+    });
+  }, []);
+
+  const settlePacking = useCallback(
+    async (failed: boolean, message: string) => {
+      packingWrites.current = Math.max(0, packingWrites.current - 1);
+      if (packingWrites.current > 0) {
+        if (failed) setError(message);
+        return;
+      }
+      packingGen.current += 1;
+      if (failed) setError(message);
+      else setError(null);
+      await refetch();
+    },
+    [refetch],
+  );
+
+  const runPacking = useCallback(
+    async (message: string, task: () => Promise<boolean>) => {
+      packingWrites.current += 1;
+      let failed = true;
+      try {
+        failed = await task();
+      } catch {
+        failed = true;
+      }
+      await settlePacking(failed, message);
+      return !failed;
+    },
+    [settlePacking],
+  );
+
+  const addPackingList = useCallback(
+    async (name: string) => {
+      const trimmed = packingName(name);
+      if (!trimmed) {
+        setError(name.trim() ? "השם ארוך מדי" : "יש להזין שם");
+        return null;
+      }
+      const ordered = sortByOrder(packingListsRef.current);
+      const row: PackingList = {
+        id: crypto.randomUUID(),
+        account_id: accountId,
+        name: trimmed,
+        favorite: false,
+        sort_order: ordered.length === 0 ? 0 : ordered[ordered.length - 1].sort_order + 1,
+      };
+      rememberPacking({ lists: [...ordered, row] });
+      const saved = await runPacking("לא ניתן להוסיף רשימה", async () => {
+        const { error: insertError } = await supabaseRef.current.from("packing_lists").insert({
+          id: row.id,
+          account_id: accountId,
+          name: row.name,
+          favorite: false,
+          sort_order: row.sort_order,
+        });
+        return Boolean(insertError);
+      });
+      return saved ? row.id : null;
+    },
+    [accountId, rememberPacking, runPacking],
+  );
+
+  const renamePackingList = useCallback(
+    async (id: string, name: string) => {
+      const trimmed = packingName(name);
+      if (!trimmed) {
+        setError(name.trim() ? "השם ארוך מדי" : "יש להזין שם");
+        return false;
+      }
+      const current = packingListsRef.current.find((row) => row.id === id);
+      if (!current || current.name === trimmed) return Boolean(current);
+      rememberPacking({ lists: packingListsRef.current.map((row) => (row.id === id ? { ...row, name: trimmed } : row)) });
+      return runPacking("לא ניתן לשמור את הרשימה", async () => {
+        const { error: updateError } = await supabaseRef.current.from("packing_lists").update({ name: trimmed }).eq("id", id);
+        return Boolean(updateError);
+      });
+    },
+    [rememberPacking, runPacking],
+  );
+
+  const setPackingFavorite = useCallback(
+    async (id: string, favorite: boolean) => {
+      const current = packingListsRef.current.find((row) => row.id === id);
+      if (!current || current.favorite === favorite) return;
+      rememberPacking({ lists: packingListsRef.current.map((row) => (row.id === id ? { ...row, favorite } : row)) });
+      await runPacking("לא ניתן לשמור את הרשימה", async () => {
+        const { error: updateError } = await supabaseRef.current.from("packing_lists").update({ favorite }).eq("id", id);
+        return Boolean(updateError);
+      });
+    },
+    [rememberPacking, runPacking],
+  );
+
+  const deletePackingList = useCallback(
+    async (id: string) => {
+      if (!packingListsRef.current.some((row) => row.id === id)) return;
+      const categoryIds = new Set(packingCategoriesRef.current.filter((row) => row.list_id === id).map((row) => row.id));
+      rememberPacking({
+        lists: packingListsRef.current.filter((row) => row.id !== id),
+        categories: packingCategoriesRef.current.filter((row) => row.list_id !== id),
+        items: packingItemsRef.current.filter((row) => !categoryIds.has(row.category_id)),
+      });
+      await runPacking("לא ניתן למחוק את הרשימה", async () => {
+        const { error: deleteError } = await supabaseRef.current.from("packing_lists").delete().eq("id", id);
+        return Boolean(deleteError);
+      });
+    },
+    [rememberPacking, runPacking],
+  );
+
+  const movePackingList = useCallback(
+    async (activeId: string, overId: string) => {
+      const next = reorderRows(packingListsRef.current, activeId, overId);
+      if (!next) return;
+      rememberPacking({ lists: next });
+      await runPacking("לא ניתן לשמור את הסדר", async () => {
+        const results = await Promise.all(next.map((row) => supabaseRef.current.from("packing_lists").update({ sort_order: row.sort_order }).eq("id", row.id)));
+        return results.some((result) => result.error);
+      });
+    },
+    [rememberPacking, runPacking],
+  );
+
+  const setPackingListChecked = useCallback(
+    async (listId: string, checked: boolean) => {
+      const categoryIds = packingCategoriesRef.current.filter((row) => row.list_id === listId).map((row) => row.id);
+      if (categoryIds.length === 0) return;
+      const ids = new Set(categoryIds);
+      rememberPacking({
+        items: packingItemsRef.current.map((row) => (ids.has(row.category_id) ? { ...row, checked } : row)),
+      });
+      await runPacking("לא ניתן לשמור את הסימונים", async () => {
+        const { error: updateError } = await supabaseRef.current.from("packing_items").update({ checked }).in("category_id", categoryIds);
+        return Boolean(updateError);
+      });
+    },
+    [rememberPacking, runPacking],
+  );
+
+  const addPackingCategory = useCallback(
+    async (listId: string, name: string) => {
+      const trimmed = packingName(name);
+      if (!trimmed) {
+        setError(name.trim() ? "השם ארוך מדי" : "יש להזין שם");
+        return null;
+      }
+      const siblings = sortByOrder(packingCategoriesRef.current.filter((row) => row.list_id === listId));
+      const row: PackingCategory = {
+        id: crypto.randomUUID(),
+        account_id: accountId,
+        list_id: listId,
+        name: trimmed,
+        color: nextCategoryColor(siblings.map((category) => category.color)),
+        sort_order: siblings.length === 0 ? 0 : siblings[siblings.length - 1].sort_order + 1,
+      };
+      rememberPacking({ categories: [...packingCategoriesRef.current, row] });
+      const saved = await runPacking("לא ניתן להוסיף קטגוריה", async () => {
+        const { error: insertError } = await supabaseRef.current.from("packing_categories").insert({
+          id: row.id,
+          account_id: accountId,
+          list_id: listId,
+          name: row.name,
+          color: row.color,
+          sort_order: row.sort_order,
+        });
+        return Boolean(insertError);
+      });
+      return saved ? row.id : null;
+    },
+    [accountId, rememberPacking, runPacking],
+  );
+
+  const renamePackingCategory = useCallback(
+    async (id: string, name: string) => {
+      const trimmed = packingName(name);
+      if (!trimmed) {
+        setError(name.trim() ? "השם ארוך מדי" : "יש להזין שם");
+        return false;
+      }
+      const current = packingCategoriesRef.current.find((row) => row.id === id);
+      if (!current || current.name === trimmed) return Boolean(current);
+      rememberPacking({ categories: packingCategoriesRef.current.map((row) => (row.id === id ? { ...row, name: trimmed } : row)) });
+      return runPacking("לא ניתן לשמור את הקטגוריה", async () => {
+        const { error: updateError } = await supabaseRef.current.from("packing_categories").update({ name: trimmed }).eq("id", id);
+        return Boolean(updateError);
+      });
+    },
+    [rememberPacking, runPacking],
+  );
+
+  const deletePackingCategory = useCallback(
+    async (id: string) => {
+      if (!packingCategoriesRef.current.some((row) => row.id === id)) return;
+      rememberPacking({
+        categories: packingCategoriesRef.current.filter((row) => row.id !== id),
+        items: packingItemsRef.current.filter((row) => row.category_id !== id),
+      });
+      await runPacking("לא ניתן למחוק את הקטגוריה", async () => {
+        const { error: deleteError } = await supabaseRef.current.from("packing_categories").delete().eq("id", id);
+        return Boolean(deleteError);
+      });
+    },
+    [rememberPacking, runPacking],
+  );
+
+  const movePackingCategory = useCallback(
+    async (listId: string, activeId: string, overId: string) => {
+      const siblings = packingCategoriesRef.current.filter((row) => row.list_id === listId);
+      const nextSiblings = reorderRows(siblings, activeId, overId);
+      if (!nextSiblings) return;
+      const rank = new Map(nextSiblings.map((row) => [row.id, row.sort_order]));
+      rememberPacking({
+        categories: packingCategoriesRef.current.map((row) => (rank.has(row.id) ? { ...row, sort_order: rank.get(row.id) ?? row.sort_order } : row)),
+      });
+      await runPacking("לא ניתן לשמור את הסדר", async () => {
+        const results = await Promise.all(nextSiblings.map((row) => supabaseRef.current.from("packing_categories").update({ sort_order: row.sort_order }).eq("id", row.id)));
+        return results.some((result) => result.error);
+      });
+    },
+    [rememberPacking, runPacking],
+  );
+
+  const sortPackingItems = useCallback(
+    async (listId: string) => {
+      const categoryIds = new Set(packingCategoriesRef.current.filter((row) => row.list_id === listId).map((row) => row.id));
+      const rank = new Map<string, number>();
+      for (const categoryId of categoryIds) {
+        const group = sortByOrder(packingItemsRef.current.filter((row) => row.category_id === categoryId)).sort((a, b) => compareNames(a.name, b.name) || a.sort_order - b.sort_order);
+        group.forEach((item, index) => rank.set(item.id, index));
+      }
+      const changed = [...rank].filter(([id, order]) => packingItemsRef.current.some((row) => row.id === id && row.sort_order !== order));
+      if (changed.length === 0) return;
+      rememberPacking({
+        items: packingItemsRef.current.map((row) => (rank.has(row.id) ? { ...row, sort_order: rank.get(row.id) ?? row.sort_order } : row)),
+      });
+      await runPacking("לא ניתן למיין", async () => {
+        const results = await Promise.all(changed.map(([id, sort_order]) => supabaseRef.current.from("packing_items").update({ sort_order }).eq("id", id)));
+        return results.some((result) => result.error);
+      });
+    },
+    [rememberPacking, runPacking],
+  );
+
+  const addPackingItem = useCallback(
+    async (categoryId: string, name: string) => {
+      const trimmed = packingName(name);
+      if (!trimmed) {
+        setError(name.trim() ? "השם ארוך מדי" : "יש להזין שם");
+        return null;
+      }
+      const siblings = sortByOrder(packingItemsRef.current.filter((row) => row.category_id === categoryId));
+      const row: PackingItem = {
+        id: crypto.randomUUID(),
+        account_id: accountId,
+        category_id: categoryId,
+        name: trimmed,
+        quantity: 1,
+        checked: false,
+        sort_order: siblings.length === 0 ? 0 : siblings[siblings.length - 1].sort_order + 1,
+      };
+      rememberPacking({ items: [...packingItemsRef.current, row] });
+      const saved = await runPacking("לא ניתן להוסיף פריט", async () => {
+        const { error: insertError } = await supabaseRef.current.from("packing_items").insert({
+          id: row.id,
+          account_id: accountId,
+          category_id: categoryId,
+          name: row.name,
+          quantity: row.quantity,
+          checked: false,
+          sort_order: row.sort_order,
+        });
+        return Boolean(insertError);
+      });
+      return saved ? row.id : null;
+    },
+    [accountId, rememberPacking, runPacking],
+  );
+
+  const renamePackingItem = useCallback(
+    async (id: string, name: string) => {
+      const trimmed = packingName(name);
+      if (!trimmed) {
+        setError(name.trim() ? "השם ארוך מדי" : "יש להזין שם");
+        return false;
+      }
+      const current = packingItemsRef.current.find((row) => row.id === id);
+      if (!current || current.name === trimmed) return Boolean(current);
+      rememberPacking({ items: packingItemsRef.current.map((row) => (row.id === id ? { ...row, name: trimmed } : row)) });
+      return runPacking("לא ניתן לשמור את הפריט", async () => {
+        const { error: updateError } = await supabaseRef.current.from("packing_items").update({ name: trimmed }).eq("id", id);
+        return Boolean(updateError);
+      });
+    },
+    [rememberPacking, runPacking],
+  );
+
+  const deletePackingItem = useCallback(
+    async (id: string) => {
+      if (!packingItemsRef.current.some((row) => row.id === id)) return;
+      rememberPacking({ items: packingItemsRef.current.filter((row) => row.id !== id) });
+      await runPacking("לא ניתן למחוק את הפריט", async () => {
+        const { error: deleteError } = await supabaseRef.current.from("packing_items").delete().eq("id", id);
+        return Boolean(deleteError);
+      });
+    },
+    [rememberPacking, runPacking],
+  );
+
+  const setPackingItemChecked = useCallback(
+    async (id: string, checked: boolean) => {
+      const current = packingItemsRef.current.find((row) => row.id === id);
+      if (!current || current.checked === checked) return;
+      rememberPacking({ items: packingItemsRef.current.map((row) => (row.id === id ? { ...row, checked } : row)) });
+      await runPacking("לא ניתן לשמור את הסימון", async () => {
+        const { error: updateError } = await supabaseRef.current.from("packing_items").update({ checked }).eq("id", id);
+        return Boolean(updateError);
+      });
+    },
+    [rememberPacking, runPacking],
+  );
+
+  const setPackingItemQuantity = useCallback(
+    async (id: string, quantity: number) => {
+      const current = packingItemsRef.current.find((row) => row.id === id);
+      if (!current || current.quantity === quantity) return;
+      rememberPacking({ items: packingItemsRef.current.map((row) => (row.id === id ? { ...row, quantity } : row)) });
+      await runPacking("לא ניתן לשמור את הכמות", async () => {
+        const { error: updateError } = await supabaseRef.current.from("packing_items").update({ quantity }).eq("id", id);
+        return Boolean(updateError);
+      });
+    },
+    [rememberPacking, runPacking],
   );
 
   const syncingGrocery = useRef({ running: false, again: false });
@@ -1095,7 +1502,7 @@ export function ListsProvider({ children }: { children: ReactNode }) {
         commitGrocery(groceryRef.current.filter((line) => !line.checked));
         void syncPendingGrocery();
       },
-      async importInventory(file: File, options?: { recipes?: "replace" | "append" }, onProgress?: (ratio: number) => void) {
+      async importInventory(file: File, options?: { recipes?: "replace" | "append"; only?: "packing" | "packing-list" }, onProgress?: (ratio: number) => void) {
         importingRef.current = true;
         reorderRef.current = false;
         setReorderMode(false);
@@ -1121,6 +1528,19 @@ export function ListsProvider({ children }: { children: ReactNode }) {
             checklistRef.current = imported.checklist;
             setChecklist(imported.checklist);
             setChecklistError(null);
+          }
+          if (imported.packing) {
+            packingGen.current += 1;
+            const nextLists = imported.packingAppend ? [...packingListsRef.current, ...imported.packing.lists] : imported.packing.lists;
+            const nextCategories = imported.packingAppend ? [...packingCategoriesRef.current, ...imported.packing.categories] : imported.packing.categories;
+            const nextItems = imported.packingAppend ? [...packingItemsRef.current, ...imported.packing.items] : imported.packing.items;
+            packingListsRef.current = nextLists;
+            packingCategoriesRef.current = nextCategories;
+            packingItemsRef.current = nextItems;
+            setPackingLists(nextLists);
+            setPackingCategories(nextCategories);
+            setPackingItems(nextItems);
+            setPackingReady(true);
           }
           if (imported.recipes) window.dispatchEvent(new Event(recipesImportedEvent));
         } catch (error) {
@@ -1174,9 +1594,32 @@ export function ListsProvider({ children }: { children: ReactNode }) {
       setChecklistChecked,
       setChecklistPriority,
       deleteChecklistRow,
+      packingLists: sortByOrder(packingLists),
+      packingCategories: sortByOrder(packingCategories),
+      packingItems: sortByOrder(packingItems),
+      packingReady,
+      addPackingList,
+      renamePackingList,
+      setPackingFavorite,
+      deletePackingList,
+      movePackingList,
+      setPackingListChecked,
+      addPackingCategory,
+      renamePackingCategory,
+      deletePackingCategory,
+      movePackingCategory,
+      sortPackingItems,
+      addPackingItem,
+      renamePackingItem,
+      deletePackingItem,
+      setPackingItemChecked,
+      setPackingItemQuantity,
     };
   }, [
     addChecklistRow,
+    addPackingCategory,
+    addPackingItem,
+    addPackingList,
     categories,
     commitGrocery,
     stores,
@@ -1184,14 +1627,31 @@ export function ListsProvider({ children }: { children: ReactNode }) {
     checklist,
     checklistError,
     deleteChecklistRow,
+    deletePackingCategory,
+    deletePackingItem,
+    deletePackingList,
     error,
     grocery,
     imageSrc,
     accountId,
     username,
     items,
+    movePackingCategory,
+    movePackingList,
+    packingCategories,
+    packingItems,
+    packingLists,
+    packingReady,
     refetch,
+    renamePackingCategory,
+    renamePackingItem,
+    renamePackingList,
     reorderMode,
+    setPackingFavorite,
+    setPackingItemChecked,
+    setPackingItemQuantity,
+    setPackingListChecked,
+    sortPackingItems,
     syncPendingGrocery,
     saving,
     setChecklistBody,
