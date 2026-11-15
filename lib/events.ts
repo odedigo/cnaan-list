@@ -35,8 +35,6 @@ export function eventTypeLabel(event: Pick<AccountEvent, "kind" | "label">) {
 
 export function sortEvents(events: AccountEvent[], today = new Date()) {
   return [...events].sort((a, b) => {
-    const byDistance = dayDistance(a.month, a.day, today) - dayDistance(b.month, b.day, today);
-    if (byDistance !== 0) return byDistance;
     const byUpcoming = daysUntil(a.month, a.day, today) - daysUntil(b.month, b.day, today);
     if (byUpcoming !== 0) return byUpcoming;
     return a.name.localeCompare(b.name, "he");
@@ -51,20 +49,14 @@ export function countdownText(month: number, day: number, today = new Date()) {
   return `עוד ${days} ימים`;
 }
 
-/** A birthday or death date that is still ahead shows the years they will reach. On the day, the number is the years already reached. */
-export function eventYears(event: Pick<AccountEvent, "kind" | "year" | "month" | "day">, today = new Date()) {
+/** Years reached on the next occurrence. יהיה stays on until that day. */
+export function eventYears(event: Pick<AccountEvent, "year" | "month" | "day">, today = new Date()) {
   if (event.year == null || event.year > today.getFullYear()) return null;
-  if (event.kind === "birthday" || event.kind === "passing") {
-    const until = daysUntil(event.month, event.day, today);
-    const next = nextOccurrence(event.month, event.day, startOfDay(today));
-    const years = next.getFullYear() - event.year;
-    if (years < 1) return null;
-    return { years, upcoming: until > 0 };
-  }
-  const reached = anniversaryReached(today, event.month, event.day);
-  const years = today.getFullYear() - event.year - (reached ? 0 : 1);
+  const until = daysUntil(event.month, event.day, today);
+  const next = nextOccurrence(event.month, event.day, startOfDay(today));
+  const years = next.getFullYear() - event.year;
   if (years < 1) return null;
-  return { years, upcoming: false };
+  return { years, upcoming: until > 0 };
 }
 
 export type EventDraft = {
@@ -133,17 +125,6 @@ export function normalizeEvent(row: {
   };
 }
 
-function dayDistance(month: number, day: number, today: Date) {
-  const until = daysUntil(month, day, today);
-  if (until === 0) return 0;
-  const start = startOfDay(today);
-  const year = start.getFullYear();
-  let previous = calendarDate(year, month, day);
-  if (previous >= start) previous = calendarDate(year - 1, month, day);
-  const since = Math.round((start.getTime() - previous.getTime()) / 86400000);
-  return Math.min(until, since);
-}
-
 function daysUntil(month: number, day: number, today: Date) {
   const start = startOfDay(today);
   const next = nextOccurrence(month, day, start);
@@ -155,10 +136,6 @@ function nextOccurrence(month: number, day: number, today: Date) {
   let date = calendarDate(year, month, day);
   if (date < today) date = calendarDate(year + 1, month, day);
   return date;
-}
-
-function anniversaryReached(today: Date, month: number, day: number) {
-  return startOfDay(today).getTime() >= calendarDate(today.getFullYear(), month, day).getTime();
 }
 
 function calendarDate(year: number, month: number, day: number) {
