@@ -2,7 +2,8 @@
 
 /** Important events: birthdays, anniversaries, death anniversaries, and custom dates. */
 
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 
 import { AppHeader } from "@/components/app-header";
 import { useDataTransfer } from "@/components/data-transfer";
@@ -10,15 +11,18 @@ import { CommentIcon, ImageIcon, UserIcon } from "@/components/icons";
 import { ImagePicker } from "@/components/images";
 import { useLists } from "@/components/lists-provider";
 import { countdownText, eventDraftError, eventKinds, eventTypeLabel, eventYears, hebrewMonths, type EventDraft } from "@/lib/events";
-import { androidContactPicker, pickAndroidContact } from "@/lib/installed-app";
+import { androidContactPicker, pickAndroidContact, prepareAndroidContacts } from "@/lib/installed-app";
 import type { AccountEvent, EventKind } from "@/lib/types";
 
-type Editor = { id: string | null };
+type PickedContact = { token: number; name: string; image: File | null };
+
+type Editor = { id: string | null; contact?: PickedContact };
 
 export function DatesPage({ active }: { active: boolean }) {
   const lists = useLists();
   const transfer = useDataTransfer();
   const [editor, setEditor] = useState<Editor | null>(null);
+  const contactToken = useRef(0);
   const busy = lists.saving || Boolean(transfer?.busy);
   const editing = editor?.id ? lists.events.find((event) => event.id === editor.id) ?? null : null;
 
@@ -55,6 +59,12 @@ export function DatesPage({ active }: { active: boolean }) {
         <EventDialog
           event={editing}
           src={editing ? eventImage(lists.imageSrc, editing) : null}
+          contact={editor.contact ?? null}
+          onContact={(name, image) => {
+            contactToken.current += 1;
+            const contact = { token: contactToken.current, name, image };
+            setEditor((current) => (current && current.id == null ? { ...current, contact } : current));
+          }}
           onClose={() => setEditor(null)}
           onSave={async (draft, imageFile, removeImage) => {
             const saved = await lists.saveEvent({ ...draft, id: editing?.id, imageFile, removeImage });
@@ -123,24 +133,29 @@ function EventStrip({ event, src, onOpen }: { event: AccountEvent; src: string |
 function EventDialog({
   event,
   src,
+  contact,
+  onContact,
   onClose,
   onSave,
   onDelete,
 }: {
   event: AccountEvent | null;
   src: string | null;
+  contact: PickedContact | null;
+  onContact: (name: string, image: File | null) => void;
   onClose: () => void;
   onSave: (draft: EventDraft, imageFile: File | null, removeImage: boolean) => Promise<boolean>;
   onDelete: (() => Promise<void>) | null;
 }) {
   const [kind, setKind] = useState<EventKind>(event?.kind ?? "birthday");
-  const [name, setName] = useState(event?.name ?? "");
+  const [name, setName] = useState(event?.name ?? contact?.name ?? "");
   const [label, setLabel] = useState(event?.kind === "other" ? event.label : "");
   const [day, setDay] = useState(event ? String(event.day) : "");
   const [month, setMonth] = useState(event?.month ?? new Date().getMonth() + 1);
   const [year, setYear] = useState(event?.year != null ? String(event.year) : "");
   const [comments, setComments] = useState(event?.comments ?? "");
-  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imageFile, setImageFile] = useState<File | null>(contact?.image ?? null);
+  const appliedContact = useRef(0);
   const [fileUrl, setFileUrl] = useState<string | null>(null);
   const [removed, setRemoved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -151,8 +166,19 @@ function EventDialog({
 
   useEffect(() => {
     if (event) return;
+    prepareAndroidContacts();
     setCanPickContact(Boolean(androidContactPicker()));
   }, [event]);
+
+  useLayoutEffect(() => {
+    if (!contact || contact.token === appliedContact.current) return;
+    appliedContact.current = contact.token;
+    if (contact.name) setName(contact.name);
+    if (contact.image) {
+      setImageFile(contact.image);
+      setRemoved(false);
+    }
+  }, [contact]);
 
   useEffect(() => {
     if (!imageFile) {
@@ -180,12 +206,16 @@ function EventDialog({
 
   async function pickContact() {
     try {
-      const contact = await pickAndroidContact();
-      if (!contact) return;
-      if (contact.name) setName(contact.name);
-      if (contact.image) chooseFile(contact.image);
+      const picked = await pickAndroidContact();
+      if (!picked) return;
+      if (!picked.name && !picked.image) {
+        setError("לא התקבל שם או תמונה מהאיש קשר");
+        return;
+      }
+      setError(null);
+      flushSync(() => onContact(picked.name, picked.image));
     } catch (pickError) {
-      if (pickError instanceof DOMException && (pickError.name === "AbortError" || pickError.name === "InvalidStateError")) return;
+      if (pickError instanceof DOMException && pickError.name === "AbortError") return;
       setError("לא ניתן לבחור איש קשר");
     }
   }
