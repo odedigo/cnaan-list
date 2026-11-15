@@ -6,10 +6,11 @@ import { useEffect, useState } from "react";
 
 import { AppHeader } from "@/components/app-header";
 import { useDataTransfer } from "@/components/data-transfer";
-import { CommentIcon, ImageIcon } from "@/components/icons";
+import { CommentIcon, ImageIcon, UserIcon } from "@/components/icons";
 import { ImagePicker } from "@/components/images";
 import { useLists } from "@/components/lists-provider";
 import { countdownText, eventDraftError, eventKinds, eventTypeLabel, eventYears, hebrewMonths, type EventDraft } from "@/lib/events";
+import { androidContactPicker, pickAndroidContact } from "@/lib/installed-app";
 import type { AccountEvent, EventKind } from "@/lib/types";
 
 type Editor = { id: string | null };
@@ -145,7 +146,13 @@ function EventDialog({
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [pending, setPending] = useState(false);
+  const [canPickContact, setCanPickContact] = useState(false);
   const preview = fileUrl || (!removed ? src : null);
+
+  useEffect(() => {
+    if (event) return;
+    setCanPickContact(Boolean(androidContactPicker()));
+  }, [event]);
 
   useEffect(() => {
     if (!imageFile) {
@@ -169,6 +176,18 @@ function EventDialog({
     setImageFile(file);
     setRemoved(false);
     setConfirmDelete(false);
+  }
+
+  async function pickContact() {
+    try {
+      const contact = await pickAndroidContact();
+      if (!contact) return;
+      if (contact.name) setName(contact.name);
+      if (contact.image) chooseFile(contact.image);
+    } catch (pickError) {
+      if (pickError instanceof DOMException && (pickError.name === "AbortError" || pickError.name === "InvalidStateError")) return;
+      setError("לא ניתן לבחור איש קשר");
+    }
   }
 
   async function save() {
@@ -223,7 +242,22 @@ function EventDialog({
         {kind === "other" ? (
           <Field label="טקסט האירוע" value={label} maxLength={80} onChange={setLabel} />
         ) : null}
-        <Field label="שם" value={name} maxLength={80} onChange={setName} />
+        <div className="mt-3 flex items-end gap-2">
+          <div className="min-w-0 flex-1">
+            <Field label="שם" value={name} maxLength={80} className="" onChange={setName} />
+          </div>
+          {!event && canPickContact ? (
+            <button
+              type="button"
+              className="grid size-11 shrink-0 place-items-center rounded-full border border-neutral-300 bg-white text-neutral-900"
+              aria-label="בחירה מאנשי הקשר"
+              disabled={pending}
+              onClick={() => void pickContact()}
+            >
+              <UserIcon className="size-6" />
+            </button>
+          ) : null}
+        </div>
         <div className="mt-3 grid grid-cols-3 gap-2">
           <Field label="יום" value={day} maxLength={2} inputMode="numeric" className="" onChange={setDay} />
           <label className="block text-sm">

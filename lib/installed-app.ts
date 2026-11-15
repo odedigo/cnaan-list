@@ -4,6 +4,45 @@ export function isInstalledApp() {
   return window.matchMedia("(display-mode: standalone)").matches || nav.standalone === true;
 }
 
+type PhoneContact = {
+  name?: string[];
+  icon?: Blob[];
+};
+
+type ContactPicker = {
+  select: (properties: string[], options?: { multiple?: boolean }) => Promise<PhoneContact[]>;
+  getProperties?: () => Promise<string[]>;
+};
+
+/** Contact picking exists only in the installed Android app. */
+export function androidContactPicker() {
+  if (typeof navigator === "undefined" || !isInstalledApp()) return null;
+  if (!/Android/i.test(navigator.userAgent)) return null;
+  const contacts = (navigator as Navigator & { contacts?: ContactPicker }).contacts;
+  if (!contacts || typeof contacts.select !== "function") return null;
+  return contacts;
+}
+
+export async function pickAndroidContact() {
+  const picker = androidContactPicker();
+  if (!picker) return null;
+  const available = picker.getProperties ? await picker.getProperties() : ["name", "icon"];
+  const properties = ["name", "icon"].filter((property) => available.includes(property));
+  if (properties.length === 0) return null;
+  const [contact] = await picker.select(properties, { multiple: false });
+  if (!contact) return null;
+  const name = contact.name?.map((value) => value.trim()).find(Boolean)?.slice(0, 80) ?? "";
+  const icon = contact.icon?.find((blob) => blob.size > 0) ?? null;
+  const image = icon ? contactImageFile(icon) : null;
+  return { name, image };
+}
+
+function contactImageFile(blob: Blob) {
+  const type = blob.type.startsWith("image/") ? blob.type : "image/jpeg";
+  const extension = type === "image/png" ? "png" : type === "image/webp" ? "webp" : "jpg";
+  return new File([blob], `contact.${extension}`, { type });
+}
+
 function isIos() {
   const ua = navigator.userAgent;
   if (/iPad|iPhone|iPod/.test(ua)) return true;
