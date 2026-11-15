@@ -2665,21 +2665,28 @@ function CameraShot({
       {open
         ? createPortal(
             <div
-              className="fixed inset-0 flex flex-col bg-black p-4"
-              style={{ zIndex: 90 }}
+              className="fixed inset-0 flex flex-col bg-black"
+              style={{
+                zIndex: 110,
+                paddingTop: "max(1rem, env(safe-area-inset-top))",
+                paddingInline: "1rem",
+                paddingBottom: "max(1rem, env(safe-area-inset-bottom))",
+              }}
               role="dialog"
               aria-modal="true"
               aria-label="מצלמה"
             >
-              <video
-                ref={videoRef}
-                autoPlay
-                playsInline
-                muted
-                className="mx-auto my-auto max-h-[70vh] max-w-full rounded-lg"
-                onLoadedMetadata={() => setReady(true)}
-              />
-              <div className="mx-auto mt-4 flex items-center gap-3">
+              <div className="flex min-h-0 flex-1 items-center justify-center">
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className="max-h-full max-w-full rounded-lg"
+                  onLoadedMetadata={() => setReady(true)}
+                />
+              </div>
+              <div className="mt-4 flex shrink-0 items-center justify-center gap-3">
                 <button
                   type="button"
                   className="grid size-14 place-items-center rounded-full bg-[var(--teal)] text-white disabled:opacity-40"

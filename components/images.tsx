@@ -358,19 +358,34 @@ export function ImagePicker({
           </div>
         </div>
       ) : null}
-      {cameraOpen ? (
-        <div className="fixed inset-0 z-[110] flex flex-col bg-black p-4" role="dialog" aria-modal="true" aria-label="מצלמה">
-          <video ref={videoRef} autoPlay playsInline muted className="mx-auto my-auto max-h-[70vh] max-w-full rounded-lg" />
-          <div className="mx-auto mt-4 flex items-center gap-3">
-            <button type="button" className="grid size-14 place-items-center rounded-full bg-[var(--teal)] text-white" aria-label="צילום" onClick={capture}>
-              <CameraIcon className="size-7" />
-            </button>
-            <button type="button" className="grid size-14 place-items-center rounded-full bg-white text-neutral-700" aria-label="ביטול" onClick={stopCamera}>
-              <CloseIcon className="size-6" />
-            </button>
-          </div>
-        </div>
-      ) : null}
+      {cameraOpen
+        ? createPortal(
+            <div
+              className="fixed inset-0 z-[110] flex flex-col bg-black"
+              style={{
+                paddingTop: "max(1rem, env(safe-area-inset-top))",
+                paddingInline: "1rem",
+                paddingBottom: "max(1rem, env(safe-area-inset-bottom))",
+              }}
+              role="dialog"
+              aria-modal="true"
+              aria-label="מצלמה"
+            >
+              <div className="flex min-h-0 flex-1 items-center justify-center">
+                <video ref={videoRef} autoPlay playsInline muted className="max-h-full max-w-full rounded-lg" />
+              </div>
+              <div className="mt-4 flex shrink-0 items-center justify-center gap-3">
+                <button type="button" className="grid size-14 place-items-center rounded-full bg-[var(--teal)] text-white" aria-label="צילום" onClick={capture}>
+                  <CameraIcon className="size-7" />
+                </button>
+                <button type="button" className="grid size-14 place-items-center rounded-full bg-white text-neutral-700" aria-label="ביטול" onClick={stopCamera}>
+                  <CloseIcon className="size-6" />
+                </button>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
       {adjust ? (
         <ImageAdjust
           file={adjust}
