@@ -5769,7 +5769,6 @@ function Overlay({
       <div
         className="max-h-[90dvh] w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-4"
         style={{
-          maxHeight: "90dvh",
           boxShadow: drop?.over ? "inset 0 0 0 3px var(--teal)" : undefined,
         }}
         onClick={(event) => event.stopPropagation()}

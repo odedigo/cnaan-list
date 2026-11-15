@@ -37,28 +37,62 @@ export function prepareAndroidContacts() {
     .catch(() => undefined);
 }
 
+const CONTACT_KEY = "cnaan-picked-contact";
+
 export function heldAndroidContact() {
   return heldContact;
 }
 
+export function readStoredContact(): { name: string; image: string | null; at: number } | null {
+  try {
+    const raw = sessionStorage.getItem(CONTACT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { name?: unknown; image?: unknown; at?: unknown };
+    if (!parsed || typeof parsed.name !== "string") return null;
+    return { name: parsed.name, image: typeof parsed.image === "string" ? parsed.image : null, at: typeof parsed.at === "number" ? parsed.at : 0 };
+  } catch {
+    return null;
+  }
+}
+
 export function clearHeldAndroidContact() {
   heldContact = null;
+  try {
+    sessionStorage.removeItem(CONTACT_KEY);
+  } catch {
+    // Private browsing can reject storage writes.
+  }
+}
+
+function storePickedContact(name: string, image: string | null) {
+  const current = readStoredContact();
+  const next = { name: name || current?.name || "", image: image ?? current?.image ?? null, at: Date.now() };
+  heldContact = { name: next.name, image: heldContact?.image ?? null };
+  try {
+    sessionStorage.setItem(CONTACT_KEY, JSON.stringify(next));
+  } catch {
+    // The in-memory copy still fills the dialog.
+  }
 }
 
 export async function pickAndroidContact(onName?: (name: string) => void) {
   const picker = androidContactPicker();
   if (!picker) return null;
+  clearHeldAndroidContact();
   const contacts = await picker.select(contactProperties, { multiple: false });
   const [contact] = contactList(contacts);
   if (!contact || typeof contact !== "object") return null;
   const record = contact as Record<string, unknown>;
-  const name = contactName(record);
-  heldContact = { name, image: null };
+  const name = contactName(record) || contactNameFrom(contacts);
+  storePickedContact(name, null);
   if (name) onName?.(name);
   const image = await contactPhoto(record.icon ?? record.icons ?? record.photo ?? record.avatar);
-  const picked = { name: name || contactName(record), image };
-  heldContact = picked;
-  return picked;
+  if (image) {
+    heldContact = { name, image };
+    const dataUrl = await fileDataUrl(image);
+    if (dataUrl) storePickedContact(name, dataUrl);
+  }
+  return { name, image };
 }
 
 function contactPropertyList(available: unknown) {
@@ -81,6 +115,46 @@ function contactList(value: unknown): unknown[] {
 
 function contactName(record: Record<string, unknown>) {
   return firstText(record.name) || firstText(record.names) || firstText(record.displayName);
+}
+
+function contactNameFrom(value: unknown) {
+  const found: string[] = [];
+  collectStrings(value, found, 0, new WeakSet());
+  const name = found.find((text) => text.length <= 80 && !text.includes("@") && !/^https?:/i.test(text) && !/^\+?[\d\s()-]{6,}$/.test(text) && !text.startsWith("image/"));
+  return name?.slice(0, 80) ?? "";
+}
+
+function collectStrings(value: unknown, found: string[], depth: number, seen: WeakSet<object>) {
+  if (depth > 5 || found.length > 30) return;
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (text) found.push(text);
+    return;
+  }
+  if (!value || typeof value !== "object" || isBlob(value) || seen.has(value)) return;
+  seen.add(value);
+  if (Array.isArray(value)) {
+    for (const entry of value) collectStrings(entry, found, depth + 1, seen);
+    return;
+  }
+  const record = value as Record<string, unknown>;
+  for (const key of Object.keys(record)) collectStrings(record[key], found, depth + 1, seen);
+  const length = record.length;
+  if (typeof length === "number" && length > 0 && length <= 20) {
+    for (let index = 0; index < length; index += 1) collectStrings(record[index], found, depth + 1, seen);
+  }
+}
+
+async function fileDataUrl(file: File) {
+  return within(
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    }),
+    1500,
+  );
 }
 
 function firstText(value: unknown) {

@@ -11,7 +11,7 @@ import { CommentIcon, ImageIcon, UserIcon } from "@/components/icons";
 import { ImagePicker } from "@/components/images";
 import { useLists } from "@/components/lists-provider";
 import { countdownText, eventDraftError, eventKinds, eventTypeLabel, eventYears, hebrewMonths, type EventDraft } from "@/lib/events";
-import { androidContactPicker, clearHeldAndroidContact, heldAndroidContact, pickAndroidContact, prepareAndroidContacts } from "@/lib/installed-app";
+import { androidContactPicker, clearHeldAndroidContact, pickAndroidContact, prepareAndroidContacts, readStoredContact } from "@/lib/installed-app";
 import type { AccountEvent, EventKind } from "@/lib/types";
 
 type PickedContact = { token: number; name: string; image: File | null };
@@ -171,6 +171,7 @@ function EventDialog({
   const [canPickContact, setCanPickContact] = useState(false);
   const picking = useRef(false);
   const nameInput = useRef<HTMLInputElement>(null);
+  const loadingContactImage = useRef(false);
   const imageFileRef = useRef(imageFile);
   imageFileRef.current = imageFile;
   const preview = fileUrl || (!removed ? src : null);
@@ -211,28 +212,34 @@ function EventDialog({
   }, [onClose, pending]);
 
   useEffect(() => {
-    function restoreContact() {
-      if (document.visibilityState === "hidden") return;
-      const held = heldAndroidContact();
-      if (!held) return;
-      if (held.name && nameInput.current && nameInput.current.value.trim() === "") {
-        nameInput.current.value = held.name;
-        setName(held.name);
+    if (event) return;
+    const stored = readStoredContact();
+    if (!stored || Date.now() - stored.at > 10000) clearHeldAndroidContact();
+  }, [event]);
+
+  useEffect(() => {
+    if (event) return;
+    const timer = window.setInterval(() => {
+      const stored = readStoredContact();
+      if (!stored?.name || Date.now() - stored.at > 5000) return;
+      setName((current) => current || stored.name);
+      if (nameInput.current && nameInput.current.value.trim() === "") nameInput.current.value = stored.name;
+      if (stored.image && !imageFileRef.current && !loadingContactImage.current) {
+        loadingContactImage.current = true;
+        void fetch(stored.image)
+          .then((response) => response.blob())
+          .then((blob) => {
+            if (!blob.size || imageFileRef.current) return;
+            setImageFile(new File([blob], "contact.jpg", { type: blob.type || "image/jpeg" }));
+            setRemoved(false);
+          })
+          .catch(() => {
+            loadingContactImage.current = false;
+          });
       }
-      if (held.image && !imageFileRef.current) {
-        setImageFile(held.image);
-        setRemoved(false);
-      }
-    }
-    document.addEventListener("visibilitychange", restoreContact);
-    window.addEventListener("pageshow", restoreContact);
-    window.addEventListener("focus", restoreContact);
-    return () => {
-      document.removeEventListener("visibilitychange", restoreContact);
-      window.removeEventListener("pageshow", restoreContact);
-      window.removeEventListener("focus", restoreContact);
-    };
-  }, []);
+    }, 200);
+    return () => window.clearInterval(timer);
+  }, [event]);
 
   function chooseFile(file: File) {
     setImageFile(file);
@@ -300,7 +307,6 @@ function EventDialog({
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true" aria-label={event ? "עריכת אירוע" : "הוספת אירוע"}>
       <form
         className="w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-4 text-start"
-        style={{ maxHeight: "calc(100dvh - 2rem)" }}
         onSubmit={(formEvent) => {
           formEvent.preventDefault();
           if (!pending) void save();
@@ -327,7 +333,18 @@ function EventDialog({
         ) : null}
         <div className="mt-3 flex items-end gap-2">
           <div className="min-w-0 flex-1">
-            <Field label="שם" value={name} maxLength={80} className="" inputRef={nameInput} onChange={setName} />
+            <Field
+              label="שם"
+              value={name}
+              maxLength={80}
+              className=""
+              inputRef={nameInput}
+              onChange={(value) => {
+                const stored = readStoredContact();
+                if (!value && stored?.name && Date.now() - stored.at < 5000) return;
+                setName(value);
+              }}
+            />
           </div>
           {!event && canPickContact ? (
             <button
@@ -341,6 +358,7 @@ function EventDialog({
             </button>
           ) : null}
         </div>
+        {error?.includes("איש קשר") ? <p className="mt-2 text-sm text-red-700">{error}</p> : null}
         <div className="mt-3 grid grid-cols-3 gap-2">
           <Field label="יום" value={day} maxLength={2} inputMode="numeric" className="" onChange={setDay} />
           <label className="block text-sm">

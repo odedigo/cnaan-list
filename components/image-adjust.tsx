@@ -75,7 +75,7 @@ export function ImageAdjust({
 
   return createPortal(
     <div className="fixed inset-0 z-[100] flex items-end justify-center bg-black/40 p-3 sm:items-center" role="dialog" aria-modal="true" aria-label="התאמת תמונה" onClick={onCancel}>
-      <div className="max-h-[90dvh] w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-4" style={{ maxHeight: "90dvh" }} onClick={(event) => event.stopPropagation()}>
+      <div className="max-h-[90dvh] w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-4" onClick={(event) => event.stopPropagation()}>
         <h3 className="text-start text-lg font-semibold">התאמת תמונה</h3>
         <p className="mt-1 text-start text-sm text-neutral-600">גררו את הקצוות או הפינות כדי לחתוך, או סובבו את התמונה.</p>
         {url ? <RecipeCrop src={url} crop={crop} disabled={turning || working || busy} onChange={setCrop} onTurn={(direction) => void turn(direction)} /> : null}

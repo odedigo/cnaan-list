@@ -764,7 +764,6 @@ function StoreColorDialog({
         style={{
           width: "100%",
           maxWidth: 340,
-          maxHeight: "100%",
           overflowY: "auto",
           borderRadius: 16,
           background: "#fff",
