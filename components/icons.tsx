@@ -145,6 +145,24 @@ export function AppsIcon(props: IconProps) {
   );
 }
 
+export function CalendarIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true" {...props}>
+      <rect x="3.5" y="5" width="17" height="15.5" rx="2" />
+      <path d="M3.5 10h17" />
+      <path d="M8 3.5v3M16 3.5v3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+export function CommentIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true" {...props}>
+      <path d="M5 6.5h14v9H8.5L5 18.5v-12Z" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 export function PlaneIcon(props: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true" {...props}>

@@ -79,6 +79,21 @@ export type PackingItem = {
   sort_order: number;
 };
 
+export type EventKind = "birthday" | "anniversary" | "death" | "passing" | "other";
+
+export type AccountEvent = {
+  id: string;
+  account_id: string;
+  kind: EventKind;
+  name: string;
+  label: string;
+  month: number;
+  day: number;
+  year: number | null;
+  comments: string;
+  image_path: string | null;
+};
+
 export type ListsData = {
   accountId: string;
   username: string;
@@ -92,4 +107,6 @@ export type ListsData = {
   packingCategories: PackingCategory[];
   packingItems: PackingItem[];
   packingReady: boolean;
+  events: AccountEvent[];
+  eventsReady: boolean;
 };

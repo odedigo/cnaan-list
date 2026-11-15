@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { normalizeChecklist } from "@/lib/checklist";
 import { colorHex } from "@/lib/colors";
+import { normalizeEvent } from "@/lib/events";
 import { normalizePackingCategory, normalizePackingItem, normalizePackingList } from "@/lib/packing";
 import { normalizeStore, sortStores } from "@/lib/stores";
 import type { Category, GroceryLine, Item, ListsData } from "@/lib/types";
@@ -14,7 +15,7 @@ export async function loadLists(supabase: SupabaseClient, userId: string): Promi
   ]);
   if (!profile || !account) return null;
 
-  const [{ data: categories }, { data: items }, { data: grocery }, checklistResult, storesResult, packingListsResult, packingCategoriesResult, packingItemsResult] = await Promise.all([
+  const [{ data: categories }, { data: items }, { data: grocery }, checklistResult, storesResult, packingListsResult, packingCategoriesResult, packingItemsResult, eventsResult] = await Promise.all([
     supabase.from("categories").select("*").eq("account_id", account.id).order("sort_order"),
     supabase.from("items").select("*").eq("account_id", account.id).order("sort_order"),
     supabase.from("grocery_items").select("*").eq("account_id", account.id),
@@ -23,6 +24,7 @@ export async function loadLists(supabase: SupabaseClient, userId: string): Promi
     supabase.from("packing_lists").select("*").eq("account_id", account.id).order("sort_order"),
     supabase.from("packing_categories").select("*").eq("account_id", account.id).order("sort_order"),
     supabase.from("packing_items").select("*").eq("account_id", account.id).order("sort_order"),
+    supabase.from("events").select("*").eq("account_id", account.id),
   ]);
   const packingReady = !packingListsResult.error && !packingCategoriesResult.error && !packingItemsResult.error;
 
@@ -39,6 +41,8 @@ export async function loadLists(supabase: SupabaseClient, userId: string): Promi
     packingCategories: packingReady ? (packingCategoriesResult.data ?? []).map(normalizePackingCategory) : [],
     packingItems: packingReady ? (packingItemsResult.data ?? []).map(normalizePackingItem) : [],
     packingReady,
+    events: eventsResult.error ? [] : (eventsResult.data ?? []).map(normalizeEvent),
+    eventsReady: !eventsResult.error,
   };
 }
 

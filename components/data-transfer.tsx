@@ -16,6 +16,7 @@ type PendingImport = {
   lists: boolean;
   recipes: boolean;
   packing: boolean;
+  events: boolean;
   packingOnly: boolean;
 };
 
@@ -39,7 +40,7 @@ export function DataTransfer({ children }: { children: ReactNode }) {
   const importInputRef = useRef<HTMLInputElement>(null);
   const importKind = useRef<"all" | "packing">("all");
   const [confirmExport, setConfirmExport] = useState(false);
-  const [exportChoice, setExportChoice] = useState<ExportSelection>({ inventory: true, grocery: true, lists: true, recipes: true, packing: true });
+  const [exportChoice, setExportChoice] = useState<ExportSelection>({ inventory: true, grocery: true, lists: true, recipes: true, packing: true, events: true });
   const [exporting, setExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -50,7 +51,7 @@ export function DataTransfer({ children }: { children: ReactNode }) {
 
   function requestExport() {
     if (busy) return;
-    setExportChoice({ inventory: true, grocery: true, lists: true, recipes: true, packing: true });
+    setExportChoice({ inventory: true, grocery: true, lists: true, recipes: true, packing: true, events: true });
     setConfirmExport(true);
   }
 
@@ -105,11 +106,11 @@ export function DataTransfer({ children }: { children: ReactNode }) {
               const packingOnly = importKind.current === "packing";
               if (packingOnly) {
                 readPackingListFile(new Uint8Array(buffer));
-                setPendingImport({ file, inventory: false, grocery: false, lists: false, recipes: false, packing: true, packingOnly: true });
+                setPendingImport({ file, inventory: false, grocery: false, lists: false, recipes: false, packing: true, events: false, packingOnly: true });
                 return;
               }
               const flags = await inspectArchive(new Uint8Array(buffer));
-              if (!flags.inventory && !flags.grocery && !flags.lists && !flags.recipes && !flags.packing) {
+              if (!flags.inventory && !flags.grocery && !flags.lists && !flags.recipes && !flags.packing && !flags.events) {
                 setExportError("הקובץ אינו ייצוא של הרשימה");
                 return;
               }
@@ -153,14 +154,14 @@ export function DataTransfer({ children }: { children: ReactNode }) {
                   className="mt-4 w-full rounded-xl bg-[var(--teal)] py-3 font-medium text-white"
                   onClick={() => beginImport("replace")}
                 >
-                  {pendingImport.inventory || pendingImport.grocery || pendingImport.lists || pendingImport.packing ? "ייבוא והחלפת המתכונים" : "החלפת המתכונים"}
+                  {pendingImport.inventory || pendingImport.grocery || pendingImport.lists || pendingImport.packing || pendingImport.events ? "ייבוא והחלפת המתכונים" : "החלפת המתכונים"}
                 </button>
                 <button
                   type="button"
                   className="mt-2 w-full rounded-xl bg-[var(--teal)] py-3 font-medium text-white"
                   onClick={() => beginImport("append")}
                 >
-                  {pendingImport.inventory || pendingImport.grocery || pendingImport.lists || pendingImport.packing ? "ייבוא והוספת המתכונים" : "הוספה למתכונים"}
+                  {pendingImport.inventory || pendingImport.grocery || pendingImport.lists || pendingImport.packing || pendingImport.events ? "ייבוא והוספת המתכונים" : "הוספה למתכונים"}
                 </button>
               </>
             ) : (
@@ -198,6 +199,7 @@ export function DataTransfer({ children }: { children: ReactNode }) {
                 ["lists", "רשימות"],
                 ["recipes", "מתכונים"],
                 ["packing", "רשימות אריזה"],
+                ["events", "ארועים"],
               ] as const
             ).map(([key, label]) => (
               <label key={key} className="mt-3 flex items-center gap-3">
@@ -213,7 +215,7 @@ export function DataTransfer({ children }: { children: ReactNode }) {
             <button
               type="button"
               className="mt-4 w-full rounded-xl bg-[var(--teal)] py-3 font-medium text-white disabled:opacity-40"
-              disabled={!exportChoice.inventory && !exportChoice.grocery && !exportChoice.lists && !exportChoice.recipes && !exportChoice.packing}
+              disabled={!exportChoice.inventory && !exportChoice.grocery && !exportChoice.lists && !exportChoice.recipes && !exportChoice.packing && !exportChoice.events}
               onClick={() => {
                 const selection = exportChoice;
                 setConfirmExport(false);
@@ -229,6 +231,7 @@ export function DataTransfer({ children }: { children: ReactNode }) {
                   lists.stores,
                   lists.grocery,
                   { lists: lists.packingLists, categories: lists.packingCategories, items: lists.packingItems },
+                  lists.events,
                   selection,
                   (ratio) => setExportProgress(ratio),
                 )
@@ -252,7 +255,7 @@ export function DataTransfer({ children }: { children: ReactNode }) {
   );
 }
 
-function importNotes(pending: { inventory: boolean; grocery: boolean; lists: boolean; recipes: boolean; packing: boolean; packingOnly: boolean }) {
+function importNotes(pending: { inventory: boolean; grocery: boolean; lists: boolean; recipes: boolean; packing: boolean; events: boolean; packingOnly: boolean }) {
   if (pending.packingOnly) return ["הרשימה בקובץ תתווסף לרשימות האריזה."];
   const notes: string[] = [];
   if (pending.inventory) notes.push("ייבוא יחליף את כל הקטגוריות, המוצרים והתמונות בחשבון זה.");
@@ -260,6 +263,7 @@ function importNotes(pending: { inventory: boolean; grocery: boolean; lists: boo
   if (pending.grocery) notes.push("עגלת הקניות בקובץ תחליף את העגלה בחשבון.");
   if (pending.lists) notes.push("הרשימות בקובץ יחליפו את הרשימות בחשבון.");
   if (pending.packing) notes.push("רשימות האריזה בקובץ יחליפו את רשימות האריזה בחשבון.");
+  if (pending.events) notes.push("הארועים בקובץ יחליפו את הארועים בחשבון.");
   if (pending.recipes) notes.push("הקובץ כולל מתכונים. להחליף את המתכונים בחשבון, או להוסיף אותם למתכונים הקיימים?");
   return notes;
 }

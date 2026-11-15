@@ -1,9 +1,9 @@
-import { openZip, readInventoryFiles, readPackingListFile, type ImportedGroceryLine, type ImportedPackingList, type ImportedPhoto } from "@/lib/inventory-file";
+import { openZip, readInventoryFiles, readPackingListFile, type ImportedEvent, type ImportedGroceryLine, type ImportedPackingList, type ImportedPhoto } from "@/lib/inventory-file";
 import { writeCachedImage } from "@/lib/image-cache";
 import { compressImage } from "@/lib/images";
 import { importRecipes } from "@/lib/recipe-transfer";
 import { createClient } from "@/lib/supabase/client";
-import type { Category, ChecklistRow, GroceryLine, Item, PackingCategory, PackingItem, PackingList } from "@/lib/types";
+import type { AccountEvent, Category, ChecklistRow, GroceryLine, Item, PackingCategory, PackingItem, PackingList } from "@/lib/types";
 
 type Supabase = ReturnType<typeof createClient>;
 
@@ -15,7 +15,7 @@ export async function replaceInventory(
   file: File,
   onProgress?: (ratio: number) => void,
   options?: { recipes?: "replace" | "append"; only?: "packing" | "packing-list" },
-): Promise<{ categories: Category[] | null; items: Item[] | null; grocery: GroceryLine[] | null; checklist: ChecklistRow[] | null; recipes: boolean; packing: { lists: PackingList[]; categories: PackingCategory[]; items: PackingItem[] } | null; packingAppend: boolean }> {
+): Promise<{ categories: Category[] | null; items: Item[] | null; grocery: GroceryLine[] | null; checklist: ChecklistRow[] | null; recipes: boolean; packing: { lists: PackingList[]; categories: PackingCategory[]; items: PackingItem[] } | null; packingAppend: boolean; events: AccountEvent[] | null }> {
   let reported = 0;
   const report = (ratio: number) => {
     const next = Math.max(reported, Math.min(1, ratio));
@@ -29,7 +29,7 @@ export async function replaceInventory(
   if (options?.only === "packing-list") {
     const packing = await appendPacking(supabase, accountId, readPackingListFile(bytes));
     report(1);
-    return { categories: null, items: null, grocery: null, checklist: null, recipes: false, packing, packingAppend: true };
+    return { categories: null, items: null, grocery: null, checklist: null, recipes: false, packing, packingAppend: true, events: null };
   }
   const files = await openZip(bytes, (ratio) => report(0.01 + ratio * 0.07));
   const inventory = readInventoryFiles(files);
@@ -37,7 +37,7 @@ export async function replaceInventory(
     if (!inventory.packing) throw new Error("הקובץ אינו כולל רשימות אריזה");
     const packing = await replacePacking(supabase, accountId, inventory.packing);
     report(1);
-    return { categories: null, items: null, grocery: null, checklist: null, recipes: false, packing, packingAppend: false };
+    return { categories: null, items: null, grocery: null, checklist: null, recipes: false, packing, packingAppend: false, events: null };
   }
   const hasCategories = inventory.categories !== null;
   const plan = (inventory.categories ?? [])
@@ -221,11 +221,16 @@ export async function replaceInventory(
     tick();
   }
   const packing = inventory.packing ? await replacePacking(supabase, accountId, inventory.packing) : null;
+  const events = inventory.events ? await replaceEvents(supabase, accountId, inventory.events) : null;
   if (hasCategories) {
+    const eventPaths = events ? events.flatMap((event) => (event.image_path ? [event.image_path] : [])) : await keptEventImages(supabase, accountId);
     void removeReplacedImages(
       supabase,
       accountId,
-      plan.flatMap((category) => [category.imagePath, ...category.items.map((item) => item.imagePath)]).filter((path): path is string => Boolean(path)),
+      [
+        ...plan.flatMap((category) => [category.imagePath, ...category.items.map((item) => item.imagePath)]).filter((path): path is string => Boolean(path)),
+        ...eventPaths,
+      ],
     );
     tick();
   }
@@ -244,7 +249,81 @@ export async function replaceInventory(
     recipes: Boolean(importRecipeMode && files.has("recipes.json")),
     packing,
     packingAppend: false,
+    events,
   };
+}
+
+async function replaceEvents(supabase: Supabase, accountId: string, imported: ImportedEvent[]) {
+  const { data: existing, error: listError } = await supabase.from("events").select("id, image_path").eq("account_id", accountId);
+  if (listError) throw new Error("לא ניתן לייבא את הרשימה");
+  const rows = imported.map((event) => ({
+    id: crypto.randomUUID(),
+    account_id: accountId,
+    kind: event.kind,
+    name: event.name,
+    label: event.label,
+    month: event.month,
+    day: event.day,
+    year: event.year,
+    comments: event.comments,
+    image_path: null as string | null,
+    photo: event.image,
+  }));
+  const uploaded: string[] = [];
+  try {
+    await mapPool(
+      rows.filter((row) => row.photo),
+      4,
+      async (row) => {
+        const prepared = await imageBody(row.photo as ImportedPhoto);
+        const path = `${accountId}/events/${row.id}/${crypto.randomUUID()}.${extensionFor(prepared.contentType)}`;
+        const { error } = await supabase.storage.from("item-images").upload(path, prepared.body, {
+          contentType: prepared.contentType,
+          upsert: false,
+        });
+        if (error) throw new Error("upload");
+        uploaded.push(path);
+        row.image_path = path;
+        await writeCachedImage(path, prepared.body).catch(() => undefined);
+      },
+    );
+    for (const group of chunks(rows, 100)) {
+      const { error } = await supabase.from("events").insert(group.map(({ photo: _photo, ...row }) => row));
+      if (error) throw new Error("insert");
+    }
+  } catch {
+    for (const group of chunks(rows.map((row) => row.id), 100)) {
+      await supabase.from("events").delete().in("id", group).then(() => undefined, () => undefined);
+    }
+    for (const group of chunks(uploaded, 100)) {
+      await supabase.storage.from("item-images").remove(group).then(() => undefined, () => undefined);
+    }
+    throw new Error("לא ניתן לייבא את הרשימה");
+  }
+  const keep = new Set(rows.map((row) => row.id));
+  const stale = (existing ?? []).filter((row) => !keep.has(row.id));
+  for (const group of chunks(stale.map((row) => row.id), 100)) {
+    const { error } = await supabase.from("events").delete().in("id", group);
+    if (error) throw new Error("לא ניתן לייבא את הרשימה");
+  }
+  const stalePaths = stale.flatMap((row) => (typeof row.image_path === "string" && row.image_path ? [row.image_path] : []));
+  for (const group of chunks(stalePaths, 100)) {
+    await supabase.storage.from("item-images").remove(group).then(() => undefined, () => undefined);
+  }
+  return rows.map(({ photo: _photo, ...row }) => row);
+}
+
+async function keptEventImages(supabase: Supabase, accountId: string) {
+  const { data, error } = await supabase.from("events").select("image_path").eq("account_id", accountId);
+  if (error) {
+    if (missingEventsTable(error)) return [];
+    throw new Error("לא ניתן לייבא את הרשימה");
+  }
+  return (data ?? []).flatMap((row) => (typeof row.image_path === "string" && row.image_path ? [row.image_path] : []));
+}
+
+function missingEventsTable(error: { code?: string; message?: string }) {
+  return error.code === "42P01" || error.code === "PGRST205";
 }
 
 async function replaceGrocery(

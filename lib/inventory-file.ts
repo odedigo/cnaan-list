@@ -1,6 +1,7 @@
 import { checklistPriority } from "@/lib/checklist";
 import { colorHex } from "@/lib/colors";
-import type { ChecklistPriority } from "@/lib/types";
+import { eventDraftError, isEventKind } from "@/lib/events";
+import type { ChecklistPriority, EventKind } from "@/lib/types";
 import { isUnitId, parseQuantity, type UnitId } from "@/lib/units";
 import { unzip } from "@/lib/zip";
 
@@ -74,11 +75,23 @@ export type ImportedPackingList = {
   categories: ImportedPackingCategory[];
 };
 
+export type ImportedEvent = {
+  kind: EventKind;
+  name: string;
+  label: string;
+  month: number;
+  day: number;
+  year: number | null;
+  comments: string;
+  image: ImportedPhoto | null;
+};
+
 export type ImportedInventory = {
   categories: ImportedCategory[] | null;
   grocery: ImportedGroceryLine[] | null;
   lists: ImportedChecklistRow[] | null;
   packing: ImportedPackingList[] | null;
+  events: ImportedEvent[] | null;
 };
 
 export type ArchiveFlags = {
@@ -87,6 +100,7 @@ export type ArchiveFlags = {
   lists: boolean;
   recipes: boolean;
   packing: boolean;
+  events: boolean;
 };
 
 export async function openZip(bytes: Uint8Array, onProgress?: (ratio: number) => void) {
@@ -111,7 +125,7 @@ export async function inspectArchive(bytes: Uint8Array): Promise<ArchiveFlags> {
   const documentBytes = files.get("inventory.json");
   if (!documentBytes) {
     if (!recipes) throw new InventoryFileError();
-    return { inventory: false, grocery: false, lists: false, recipes: true, packing: false };
+    return { inventory: false, grocery: false, lists: false, recipes: true, packing: false, events: false };
   }
   const record = parseDocument(documentBytes);
   return {
@@ -120,6 +134,7 @@ export async function inspectArchive(bytes: Uint8Array): Promise<ArchiveFlags> {
     lists: Array.isArray(record.lists),
     recipes,
     packing: Array.isArray(record.packing),
+    events: Array.isArray(record.events),
   };
 }
 
@@ -131,7 +146,7 @@ export function readInventoryFiles(files: Map<string, Uint8Array>): ImportedInve
   const documentBytes = files.get("inventory.json");
   if (!documentBytes) {
     if (!files.has("recipes.json")) throw new InventoryFileError();
-    return { categories: null, grocery: null, lists: null, packing: null };
+    return { categories: null, grocery: null, lists: null, packing: null, events: null };
   }
   const record = parseDocument(documentBytes);
   const categories = Array.isArray(record.categories)
@@ -140,7 +155,8 @@ export function readInventoryFiles(files: Map<string, Uint8Array>): ImportedInve
   const grocery = Array.isArray(record.grocery) ? record.grocery.map(readGroceryLine) : null;
   const lists = readListRows(record.lists);
   const packing = readPackingLists(record.packing);
-  return { categories, grocery, lists, packing };
+  const events = readEvents(record.events, files);
+  return { categories, grocery, lists, packing, events };
 }
 
 function parseDocument(bytes: Uint8Array) {
@@ -151,7 +167,7 @@ function parseDocument(bytes: Uint8Array) {
     throw new InventoryFileError();
   }
   if (!document || typeof document !== "object") throw new InventoryFileError();
-  return document as { categories?: unknown; grocery?: unknown; lists?: unknown; packing?: unknown };
+  return document as { categories?: unknown; grocery?: unknown; lists?: unknown; packing?: unknown; events?: unknown };
 }
 
 function readListRows(value: unknown) {
@@ -215,6 +231,45 @@ function readPackingItem(value: unknown, index: number): ImportedPackingItem {
     checked: row.checked === true,
     sortOrder: order(row.sortOrder, index),
   };
+}
+
+function readEvents(value: unknown, files: Map<string, Uint8Array>) {
+  if (value == null) return null;
+  if (!Array.isArray(value)) throw new InventoryFileError();
+  return value.map((row) => readEvent(row, files));
+}
+
+function readEvent(value: unknown, files: Map<string, Uint8Array>): ImportedEvent {
+  if (!value || typeof value !== "object") throw new InventoryFileError();
+  const row = value as Record<string, unknown>;
+  const kind = typeof row.kind === "string" && isEventKind(row.kind) ? row.kind : null;
+  const name = clipName(row.name);
+  if (!kind || !name) throw new InventoryFileError();
+  const label = typeof row.label === "string" ? row.label.trim().slice(0, 80) : "";
+  const month = wholeNumber(row.month);
+  const day = wholeNumber(row.day);
+  if (month == null || day == null) throw new InventoryFileError();
+  let year: number | null = null;
+  if (row.year != null && row.year !== "") {
+    year = wholeNumber(row.year);
+    if (year == null) throw new InventoryFileError();
+  }
+  const comments = typeof row.comments === "string" ? row.comments.slice(0, 1000) : "";
+  if (eventDraftError({ kind, name, label, month, day, year, comments })) throw new InventoryFileError();
+  return {
+    kind,
+    name,
+    label: kind === "other" ? label : "",
+    month,
+    day,
+    year,
+    comments: comments.trim(),
+    image: photo(row.image, files),
+  };
+}
+
+function wholeNumber(value: unknown) {
+  return typeof value === "number" && Number.isInteger(value) ? value : null;
 }
 
 function clipName(value: unknown) {

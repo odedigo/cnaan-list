@@ -3,7 +3,7 @@ import { readCachedImage, writeCachedImage } from "@/lib/image-cache";
 import { recipeArchiveFiles } from "@/lib/recipe-transfer";
 import { createClient } from "@/lib/supabase/client";
 import { zipStoreAsync } from "@/lib/zip-async";
-import type { Category, ChecklistRow, GroceryLine, Item, PackingCategory, PackingItem, PackingList, Store } from "@/lib/types";
+import type { AccountEvent, Category, ChecklistRow, GroceryLine, Item, PackingCategory, PackingItem, PackingList, Store } from "@/lib/types";
 
 export type ExportSelection = {
   inventory: boolean;
@@ -11,6 +11,7 @@ export type ExportSelection = {
   lists: boolean;
   recipes: boolean;
   packing: boolean;
+  events: boolean;
 };
 
 type Supabase = ReturnType<typeof createClient>;
@@ -74,10 +75,11 @@ export async function downloadInventoryZip(
   stores: Store[] = [],
   grocery: GroceryLine[] = [],
   packing: { lists: PackingList[]; categories: PackingCategory[]; items: PackingItem[] } = { lists: [], categories: [], items: [] },
-  selection: ExportSelection = { inventory: true, grocery: false, lists: true, recipes: false, packing: false },
+  events: AccountEvent[] = [],
+  selection: ExportSelection = { inventory: true, grocery: false, lists: true, recipes: false, packing: false, events: false },
   onProgress?: (ratio: number) => void,
 ) {
-  if (!selection.inventory && !selection.grocery && !selection.lists && !selection.recipes && !selection.packing) return;
+  if (!selection.inventory && !selection.grocery && !selection.lists && !selection.recipes && !selection.packing && !selection.events) return;
   onProgress?.(0);
   await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
   const jobs: { key: string; path: string; fileName: string }[] = [];
@@ -97,6 +99,17 @@ export async function downloadInventoryZip(
           key: `item:${item.id}`,
           path: item.image_path,
           fileName: `images/item-${item.id}.${extension(item.image_path)}`,
+        });
+      }
+    }
+  }
+  if (selection.events) {
+    for (const event of events) {
+      if (event.image_path) {
+        jobs.push({
+          key: `event:${event.id}`,
+          path: event.image_path,
+          fileName: `images/event-${event.id}.${extension(event.image_path)}`,
         });
       }
     }
@@ -180,8 +193,20 @@ export async function downloadInventoryZip(
       })),
     }));
   }
+  if (selection.events) {
+    document.events = events.map((event) => ({
+      kind: event.kind,
+      name: event.name,
+      label: event.label,
+      month: event.month,
+      day: event.day,
+      year: event.year,
+      comments: event.comments,
+      image: byKey.get(`event:${event.id}`)?.fileName ?? null,
+    }));
+  }
   const archive = [...files];
-  if (selection.inventory || selection.grocery || selection.lists || selection.packing) {
+  if (selection.inventory || selection.grocery || selection.lists || selection.packing || selection.events) {
     archive.unshift({ name: "inventory.json", data: new TextEncoder().encode(JSON.stringify(document, null, 2)) });
   }
   if (selection.recipes) {

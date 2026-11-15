@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState, type DragEvent } from "react";
 import { createPortal } from "react-dom";
 
-import { CameraIcon, CloseIcon, FolderIcon, ImageIcon, SearchIcon, TrashIcon } from "@/components/icons";
+import { CameraIcon, CloseIcon, FolderIcon, ImageIcon, LinkIcon, SearchIcon, TrashIcon } from "@/components/icons";
 import { ImageAdjust } from "@/components/image-adjust";
 
 function denied(error: unknown) {
@@ -145,18 +145,24 @@ export function ImagePicker({
   hasImage,
   variant,
   searchName = "",
+  link = false,
   onFile,
   onRemove,
 }: {
   hasImage: boolean;
   variant: "dark" | "light";
   searchName?: string;
+  link?: boolean;
   onFile: (file: File) => void;
   onRemove?: () => void;
 }) {
   const [adjust, setAdjust] = useState<File | null>(null);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [linkValue, setLinkValue] = useState("");
+  const [linkError, setLinkError] = useState<string | null>(null);
+  const [linkBusy, setLinkBusy] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -190,6 +196,19 @@ export function ImagePicker({
     if (videoRef.current) videoRef.current.srcObject = null;
     setCameraOpen(false);
   }
+
+  useEffect(() => {
+    if (!linkOpen && !cameraOpen) return;
+    function onKey(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (linkOpen && !linkBusy) setLinkOpen(false);
+      if (cameraOpen) stopCamera();
+    }
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [cameraOpen, linkBusy, linkOpen]);
 
   async function openCamera() {
     setCameraError(null);
@@ -228,6 +247,41 @@ export function ImagePicker({
     }, "image/jpeg", 0.9);
   }
 
+  async function loadLink() {
+    const url = linkValue.trim();
+    if (!/^https?:\/\/\S+$/i.test(url)) {
+      setLinkError("הקישור אינו תקין");
+      setLinkOpen(false);
+      return;
+    }
+    setLinkBusy(true);
+    setLinkError(null);
+    try {
+      const response = await fetch("/api/event-image", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+      if (!response.ok) {
+        const body = (await response.json().catch(() => null)) as { error?: unknown } | null;
+        setLinkError(typeof body?.error === "string" ? body.error : "לא ניתן לטעון את התמונה");
+        setLinkOpen(false);
+        return;
+      }
+      const blob = await response.blob();
+      const type = blob.type || "image/jpeg";
+      const extension = type === "image/png" ? "png" : type === "image/webp" ? "webp" : "jpg";
+      setLinkOpen(false);
+      setLinkValue("");
+      setAdjust(new File([blob], `link.${extension}`, { type }));
+    } catch {
+      setLinkError("לא ניתן לטעון את התמונה");
+      setLinkOpen(false);
+    } finally {
+      setLinkBusy(false);
+    }
+  }
+
   return (
     <>
       <div className={`flex items-center justify-center ${variant === "dark" ? "gap-2" : "gap-1"}`}>
@@ -247,6 +301,21 @@ export function ImagePicker({
         <button type="button" className={buttonClass} aria-label="צילום" onClick={() => void openCamera()}>
           <CameraIcon className="size-6" />
         </button>
+        {link ? (
+          <button
+            type="button"
+            className={buttonClass}
+            aria-label="תמונה מקישור"
+            disabled={linkBusy}
+            onClick={() => {
+              setLinkError(null);
+              setLinkValue("");
+              setLinkOpen(true);
+            }}
+          >
+            <LinkIcon className="size-6" />
+          </button>
+        ) : null}
         <button type="button" className={`${buttonClass} hidden`} aria-label="חיפוש תמונה" onClick={() => setSearchOpen(true)}>
           <SearchIcon className="size-6" />
         </button>
@@ -256,9 +325,41 @@ export function ImagePicker({
           </button>
         ) : null}
       </div>
-      {cameraError ? <p className={`mt-1 text-center text-xs ${variant === "dark" ? "text-white" : "text-red-600"}`}>{cameraError}</p> : null}
+      {cameraError || linkError ? <p className={`mt-1 text-center text-xs ${variant === "dark" ? "text-white" : "text-red-600"}`}>{cameraError || linkError}</p> : null}
+      {linkOpen ? (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true" aria-label="תמונה מקישור">
+          <div className="w-full max-w-xs rounded-2xl bg-white p-4 text-start">
+            <p className="text-sm font-semibold">קישור לתמונה</p>
+            <input
+              autoFocus
+              value={linkValue}
+              disabled={linkBusy}
+              onChange={(event) => setLinkValue(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter") return;
+                event.preventDefault();
+                void loadLink();
+              }}
+              className="mt-3 w-full rounded-xl border border-neutral-300 px-3 py-2 outline-none focus:border-[var(--teal)]"
+              aria-label="קישור לתמונה"
+              placeholder="https://"
+            />
+            <button type="button" disabled={linkBusy} className="mt-4 w-full rounded-xl bg-[var(--teal)] py-3 font-medium text-white disabled:opacity-40" onClick={() => void loadLink()}>
+              {linkBusy ? "טוען…" : "הבאה"}
+            </button>
+            <button
+              type="button"
+              disabled={linkBusy}
+              className="mt-2 w-full rounded-xl bg-neutral-100 py-3 font-medium text-neutral-700 disabled:opacity-40"
+              onClick={() => setLinkOpen(false)}
+            >
+              ביטול
+            </button>
+          </div>
+        </div>
+      ) : null}
       {cameraOpen ? (
-        <div className="fixed inset-0 z-[80] flex flex-col bg-black p-4" role="dialog" aria-modal="true" aria-label="מצלמה">
+        <div className="fixed inset-0 z-[110] flex flex-col bg-black p-4" role="dialog" aria-modal="true" aria-label="מצלמה">
           <video ref={videoRef} autoPlay playsInline muted className="mx-auto my-auto max-h-[70vh] max-w-full rounded-lg" />
           <div className="mx-auto mt-4 flex items-center gap-3">
             <button type="button" className="grid size-14 place-items-center rounded-full bg-[var(--teal)] text-white" aria-label="צילום" onClick={capture}>

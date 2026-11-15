@@ -1,6 +1,6 @@
 ﻿"use client";
 
-/** Shared client state for inventory, grocery, stores, checklists, and packing lists, including Supabase sync. */
+/** Shared client state for inventory, grocery, stores, checklists, packing lists, and events, including Supabase sync. */
 
 import {
   createContext,
@@ -25,6 +25,7 @@ import {
   withoutChecklistRow,
 } from "@/lib/checklist";
 import { colorHex, nextCategoryColor, uniqueCategoryColors } from "@/lib/colors";
+import { eventDraftError, eventRecord, normalizeEvent, sortEvents, type EventDraft } from "@/lib/events";
 import { normalizePackingCategory, normalizePackingItem, normalizePackingList, packingCopyName, packingName, reorderRows } from "@/lib/packing";
 import { clearPendingGrocery, forgetPendingGrocery, isOfflineError, mergePendingGrocery, readPendingGrocery, rememberPendingGrocery } from "@/lib/grocery-sync";
 import { recipesImportedEvent } from "@/lib/recipe-transfer";
@@ -35,7 +36,7 @@ import { compressImage } from "@/lib/images";
 import { applyOrder, compareNames, moveVisible, nameInsertIndex, sortByOrder } from "@/lib/order";
 import { defaultStore, normalizeStore, sortStores } from "@/lib/stores";
 import { createClient } from "@/lib/supabase/client";
-import type { Category, ChecklistRow, GroceryLine, Item, ListsData, PackingCategory, PackingItem, PackingList, Store } from "@/lib/types";
+import type { AccountEvent, Category, ChecklistRow, GroceryLine, Item, ListsData, PackingCategory, PackingItem, PackingList, Store } from "@/lib/types";
 import { isUnitId, parseQuantity, type UnitId } from "@/lib/units";
 
 type ListsContextValue = {
@@ -49,7 +50,7 @@ type ListsContextValue = {
   reorderMode: boolean;
   saving: boolean;
   error: string | null;
-  imageSrc: (kind: "item" | "category", id: string, path: string | null) => string | null;
+  imageSrc: (kind: "item" | "category" | "event", id: string, path: string | null) => string | null;
   toggleReorder: () => Promise<void>;
   sortAlphabetically: () => Promise<boolean>;
   moveCategories: (activeId: string, overId: string, visibleIds: string[]) => void;
@@ -107,6 +108,10 @@ type ListsContextValue = {
   deletePackingItem: (id: string) => Promise<void>;
   setPackingItemChecked: (id: string, checked: boolean) => Promise<void>;
   setPackingItemQuantity: (id: string, quantity: number) => Promise<void>;
+  events: AccountEvent[];
+  eventsReady: boolean;
+  saveEvent: (draft: EventDraft & { id?: string; imageFile: File | null; removeImage: boolean }) => Promise<boolean>;
+  deleteEvent: (id: string) => Promise<void>;
   uploadImage: (kind: "item" | "category", id: string, file: File) => Promise<void>;
   removeImage: (kind: "item" | "category", id: string) => Promise<void>;
 };
@@ -138,6 +143,8 @@ export function ListsProvider({ children }: { children: ReactNode }) {
   const [packingCategories, setPackingCategories] = useState<PackingCategory[]>([]);
   const [packingItems, setPackingItems] = useState<PackingItem[]>([]);
   const [packingReady, setPackingReady] = useState(false);
+  const [events, setEvents] = useState<AccountEvent[]>([]);
+  const [eventsReady, setEventsReady] = useState(false);
   const [reorderMode, setReorderMode] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -152,6 +159,9 @@ export function ListsProvider({ children }: { children: ReactNode }) {
   const packingItemsRef = useRef<PackingItem[]>([]);
   const packingGen = useRef(0);
   const packingWrites = useRef(0);
+  const eventsRef = useRef<AccountEvent[]>([]);
+  const eventsGen = useRef(0);
+  const eventsWrites = useRef(0);
   const writeChain = useRef(Promise.resolve());
   const pendingIds = useRef(new Set<string>());
   const pendingDeletes = useRef(new Set<string>());
@@ -184,6 +194,7 @@ export function ListsProvider({ children }: { children: ReactNode }) {
       packingListsRef.current = loaded.packingLists;
       packingCategoriesRef.current = loaded.packingCategories;
       packingItemsRef.current = loaded.packingItems;
+      eventsRef.current = loaded.events;
       setCategories(loaded.categories);
       setStores(loaded.stores);
       setStoresReady(loaded.storesReady);
@@ -195,6 +206,8 @@ export function ListsProvider({ children }: { children: ReactNode }) {
       setPackingCategories(loaded.packingCategories);
       setPackingItems(loaded.packingItems);
       setPackingReady(loaded.packingReady);
+      setEvents(loaded.events);
+      setEventsReady(loaded.eventsReady);
       setData(loaded);
     })();
     return () => {
@@ -206,8 +219,9 @@ export function ListsProvider({ children }: { children: ReactNode }) {
     if (!accountId || reorderRef.current || importingRef.current) return;
     const seenGroceryGen = groceryGen.current;
     const seenPackingGen = packingGen.current;
+    const seenEventsGen = eventsGen.current;
     const supabase = supabaseRef.current;
-    const [{ data: categoryRows }, { data: itemRows }, { data: groceryRows }, checklistResult, storesResult, packingListsResult, packingCategoriesResult, packingItemsResult] = await Promise.all([
+    const [{ data: categoryRows }, { data: itemRows }, { data: groceryRows }, checklistResult, storesResult, packingListsResult, packingCategoriesResult, packingItemsResult, eventsResult] = await Promise.all([
       supabase.from("categories").select("*").eq("account_id", accountId).order("sort_order"),
       supabase.from("items").select("*").eq("account_id", accountId).order("sort_order"),
       supabase.from("grocery_items").select("*").eq("account_id", accountId),
@@ -216,6 +230,7 @@ export function ListsProvider({ children }: { children: ReactNode }) {
       supabase.from("packing_lists").select("*").eq("account_id", accountId).order("sort_order"),
       supabase.from("packing_categories").select("*").eq("account_id", accountId).order("sort_order"),
       supabase.from("packing_items").select("*").eq("account_id", accountId).order("sort_order"),
+      supabase.from("events").select("*").eq("account_id", accountId),
     ]);
     if (reorderRef.current || importingRef.current) return;
     if (categoryRows) setCategories(categoryRows.map(normalizeCategory));
@@ -256,6 +271,13 @@ export function ListsProvider({ children }: { children: ReactNode }) {
       setPackingCategories(nextCategories);
       setPackingItems(nextItems);
       setPackingReady(true);
+    }
+    if (eventsResult.error) setEventsReady(false);
+    else if (eventsWrites.current === 0 && seenEventsGen === eventsGen.current) {
+      const nextEvents = (eventsResult.data ?? []).map(normalizeEvent);
+      eventsRef.current = nextEvents;
+      setEvents(nextEvents);
+      setEventsReady(true);
     }
   }, [accountId]);
 
@@ -320,11 +342,16 @@ export function ListsProvider({ children }: { children: ReactNode }) {
       .on("postgres_changes", { event: "*", schema: "public", table: "packing_categories", filter: `account_id=eq.${accountId}` }, schedule)
       .on("postgres_changes", { event: "*", schema: "public", table: "packing_items", filter: `account_id=eq.${accountId}` }, schedule)
       .subscribe();
+    const eventsChannel = supabase
+      .channel(`account-${accountId}-events`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "events", filter: `account_id=eq.${accountId}` }, schedule)
+      .subscribe();
     return () => {
       window.clearTimeout(timer);
       document.removeEventListener("visibilitychange", onVisible);
       void supabase.removeChannel(channel);
       void supabase.removeChannel(packingChannel);
+      void supabase.removeChannel(eventsChannel);
     };
   }, [accountId, refetch, storesReady]);
 
@@ -343,8 +370,9 @@ export function ListsProvider({ children }: { children: ReactNode }) {
     }
     for (const category of categories) add(category.image_path, later);
     for (const item of items) add(item.image_path, later);
+    for (const event of events) add(event.image_path, later);
     return { urgent, later, key: [...seen].sort().join("|") };
-  }, [categories, grocery, items]);
+  }, [categories, events, grocery, items]);
   const imagePlanRef = useRef(imagePlan);
   imagePlanRef.current = imagePlan;
 
@@ -404,7 +432,7 @@ export function ListsProvider({ children }: { children: ReactNode }) {
   }, [imagePlan.key]);
 
   const imageSrc = useCallback(
-    (kind: "item" | "category", id: string, path: string | null) => {
+    (kind: "item" | "category" | "event", id: string, path: string | null) => {
       return previews[`${kind}:${id}`] ?? (path ? imageSrcs[path] ?? null : null);
     },
     [previews, imageSrcs],
@@ -1007,6 +1035,120 @@ export function ListsProvider({ children }: { children: ReactNode }) {
       });
     },
     [rememberPacking, runPacking],
+  );
+
+  const rememberEvents = useCallback((next: AccountEvent[]) => {
+    eventsGen.current += 1;
+    eventsRef.current = next;
+    flushSync(() => setEvents(next));
+  }, []);
+
+  const saveEvent = useCallback(
+    async (draft: EventDraft & { id?: string; imageFile: File | null; removeImage: boolean }) => {
+      const message = eventDraftError(draft);
+      if (message) {
+        setError(message);
+        return false;
+      }
+      const fields = eventRecord(draft);
+      const existing = draft.id ? eventsRef.current.find((row) => row.id === draft.id) : undefined;
+      const id = existing?.id ?? crypto.randomUUID();
+      const imagePath = draft.removeImage ? null : existing?.image_path ?? null;
+      const row: AccountEvent = {
+        id,
+        account_id: accountId,
+        kind: fields.kind,
+        name: fields.name,
+        label: fields.label,
+        month: fields.month,
+        day: fields.day,
+        year: fields.year,
+        comments: fields.comments,
+        image_path: imagePath,
+      };
+      rememberEvents(existing ? eventsRef.current.map((entry) => (entry.id === id ? row : entry)) : [...eventsRef.current, row]);
+      eventsWrites.current += 1;
+      const previousPath = existing?.image_path ?? null;
+      let failed = false;
+      try {
+        const payload = {
+          id,
+          account_id: accountId,
+          kind: row.kind,
+          name: row.name,
+          label: row.label,
+          month: row.month,
+          day: row.day,
+          year: row.year,
+          comments: row.comments,
+          image_path: row.image_path,
+        };
+        const { error: saveError } = existing
+          ? await supabaseRef.current.from("events").update(payload).eq("id", id)
+          : await supabaseRef.current.from("events").insert(payload);
+        if (saveError) throw new Error("save");
+        if (draft.imageFile) {
+          const uploaded = await uploadEventImage(supabaseRef.current, accountId, id, draft.imageFile, previousPath);
+          if (!uploaded) {
+            if (!existing) {
+              await supabaseRef.current.from("events").delete().eq("id", id);
+              rememberEvents(eventsRef.current.filter((entry) => entry.id !== id));
+            }
+            throw new Error("image");
+          }
+          const next = eventsRef.current.map((entry) => (entry.id === id ? { ...entry, image_path: uploaded } : entry));
+          rememberEvents(next);
+          const previewUrl = URL.createObjectURL(draft.imageFile);
+          setPreviews((current) => ({ ...current, [`event:${id}`]: previewUrl }));
+          setImageSrcs((current) => ({ ...current, [uploaded]: previewUrl }));
+        } else if (previousPath && previousPath !== row.image_path) {
+          await supabaseRef.current.storage.from("item-images").remove([previousPath]);
+          await forgetCachedImage(previousPath);
+        }
+        setError(null);
+      } catch {
+        failed = true;
+        setError("לא ניתן לשמור את האירוע");
+      } finally {
+        eventsWrites.current = Math.max(0, eventsWrites.current - 1);
+        eventsGen.current += 1;
+        if (eventsWrites.current === 0) await refetch();
+      }
+      return !failed;
+    },
+    [accountId, rememberEvents, refetch],
+  );
+
+  const deleteEvent = useCallback(
+    async (id: string) => {
+      const current = eventsRef.current.find((row) => row.id === id);
+      if (!current) return;
+      rememberEvents(eventsRef.current.filter((row) => row.id !== id));
+      eventsWrites.current += 1;
+      try {
+        const { error: deleteError } = await supabaseRef.current.from("events").delete().eq("id", id);
+        if (deleteError) throw new Error("delete");
+        setPreviews((existing) => {
+          const key = `event:${id}`;
+          if (!existing[key]) return existing;
+          const next = { ...existing };
+          delete next[key];
+          return next;
+        });
+        if (current.image_path) {
+          await supabaseRef.current.storage.from("item-images").remove([current.image_path]);
+          await forgetCachedImage(current.image_path);
+        }
+        setError(null);
+      } catch {
+        setError("לא ניתן למחוק את האירוע");
+      } finally {
+        eventsWrites.current = Math.max(0, eventsWrites.current - 1);
+        eventsGen.current += 1;
+        if (eventsWrites.current === 0) await refetch();
+      }
+    },
+    [rememberEvents, refetch],
   );
 
   const syncingGrocery = useRef({ running: false, again: false });
@@ -1625,6 +1767,12 @@ export function ListsProvider({ children }: { children: ReactNode }) {
             setPackingItems(nextItems);
             setPackingReady(true);
           }
+          if (imported.events) {
+            eventsGen.current += 1;
+            eventsRef.current = imported.events;
+            setEvents(imported.events);
+            setEventsReady(true);
+          }
           if (imported.recipes) window.dispatchEvent(new Event(recipesImportedEvent));
         } catch (error) {
           setError(error instanceof Error && error.message ? error.message : "לא ניתן לייבא את הרשימה");
@@ -1698,6 +1846,10 @@ export function ListsProvider({ children }: { children: ReactNode }) {
       deletePackingItem,
       setPackingItemChecked,
       setPackingItemQuantity,
+      events: sortEvents(events),
+      eventsReady,
+      saveEvent,
+      deleteEvent,
     };
   }, [
     addChecklistRow,
@@ -1715,7 +1867,10 @@ export function ListsProvider({ children }: { children: ReactNode }) {
     deletePackingCategory,
     deletePackingItem,
     deletePackingList,
+    deleteEvent,
     error,
+    events,
+    eventsReady,
     grocery,
     imageSrc,
     accountId,
@@ -1738,6 +1893,7 @@ export function ListsProvider({ children }: { children: ReactNode }) {
     setPackingListChecked,
     sortPackingItems,
     syncPendingGrocery,
+    saveEvent,
     saving,
     setChecklistBody,
     setChecklistChecked,
@@ -1810,6 +1966,34 @@ function normalizeItem(row: {
     quantity: Number(row.quantity) || 1,
     sort_order: row.sort_order,
   };
+}
+
+async function uploadEventImage(
+  supabase: ReturnType<typeof createClient>,
+  accountId: string,
+  id: string,
+  file: File,
+  previousPath: string | null,
+) {
+  const compressed = await compressImage(file);
+  const extension = compressed.contentType === "image/webp" ? "webp" : "jpg";
+  const path = `${accountId}/events/${id}/${crypto.randomUUID()}.${extension}`;
+  const { error: uploadError } = await supabase.storage.from("item-images").upload(path, compressed.blob, {
+    contentType: compressed.contentType,
+    upsert: false,
+  });
+  if (uploadError) return null;
+  await writeCachedImage(path, compressed.blob);
+  const { error: updateError } = await supabase.from("events").update({ image_path: path }).eq("id", id);
+  if (updateError) {
+    await supabase.storage.from("item-images").remove([path]);
+    return null;
+  }
+  if (previousPath && previousPath !== path) {
+    await supabase.storage.from("item-images").remove([previousPath]);
+    await forgetCachedImage(previousPath);
+  }
+  return path;
 }
 
 async function upload(
