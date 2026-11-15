@@ -2,7 +2,7 @@
 
 /** Important events: birthdays, anniversaries, death anniversaries, and custom dates. */
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type Ref } from "react";
 import { flushSync } from "react-dom";
 
 import { AppHeader } from "@/components/app-header";
@@ -11,7 +11,7 @@ import { CommentIcon, ImageIcon, UserIcon } from "@/components/icons";
 import { ImagePicker } from "@/components/images";
 import { useLists } from "@/components/lists-provider";
 import { countdownText, eventDraftError, eventKinds, eventTypeLabel, eventYears, hebrewMonths, type EventDraft } from "@/lib/events";
-import { androidContactPicker, pickAndroidContact, prepareAndroidContacts } from "@/lib/installed-app";
+import { androidContactPicker, clearHeldAndroidContact, heldAndroidContact, pickAndroidContact, prepareAndroidContacts } from "@/lib/installed-app";
 import type { AccountEvent, EventKind } from "@/lib/types";
 
 type PickedContact = { token: number; name: string; image: File | null };
@@ -65,16 +65,23 @@ export function DatesPage({ active }: { active: boolean }) {
             const contact = { token: contactToken.current, name, image };
             setEditor((current) => (current && current.id == null ? { ...current, contact } : current));
           }}
-          onClose={() => setEditor(null)}
+          onClose={() => {
+            clearHeldAndroidContact();
+            setEditor(null);
+          }}
           onSave={async (draft, imageFile, removeImage) => {
             const saved = await lists.saveEvent({ ...draft, id: editing?.id, imageFile, removeImage });
-            if (saved) setEditor(null);
+            if (saved) {
+              clearHeldAndroidContact();
+              setEditor(null);
+            }
             return saved;
           }}
           onDelete={
             editing
               ? async () => {
                   await lists.deleteEvent(editing.id);
+                  clearHeldAndroidContact();
                   setEditor(null);
                 }
               : null
@@ -162,6 +169,10 @@ function EventDialog({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [pending, setPending] = useState(false);
   const [canPickContact, setCanPickContact] = useState(false);
+  const picking = useRef(false);
+  const nameInput = useRef<HTMLInputElement>(null);
+  const imageFileRef = useRef(imageFile);
+  imageFileRef.current = imageFile;
   const preview = fileUrl || (!removed ? src : null);
 
   useEffect(() => {
@@ -192,11 +203,36 @@ function EventDialog({
 
   useEffect(() => {
     function onKey(keyEvent: KeyboardEvent) {
+      if (picking.current) return;
       if (keyEvent.key === "Escape" && !pending) onClose();
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose, pending]);
+
+  useEffect(() => {
+    function restoreContact() {
+      if (document.visibilityState === "hidden") return;
+      const held = heldAndroidContact();
+      if (!held) return;
+      if (held.name && nameInput.current && nameInput.current.value.trim() === "") {
+        nameInput.current.value = held.name;
+        setName(held.name);
+      }
+      if (held.image && !imageFileRef.current) {
+        setImageFile(held.image);
+        setRemoved(false);
+      }
+    }
+    document.addEventListener("visibilitychange", restoreContact);
+    window.addEventListener("pageshow", restoreContact);
+    window.addEventListener("focus", restoreContact);
+    return () => {
+      document.removeEventListener("visibilitychange", restoreContact);
+      window.removeEventListener("pageshow", restoreContact);
+      window.removeEventListener("focus", restoreContact);
+    };
+  }, []);
 
   function chooseFile(file: File) {
     setImageFile(file);
@@ -204,19 +240,36 @@ function EventDialog({
     setConfirmDelete(false);
   }
 
+  function applyContact(nextName: string, image: File | null) {
+    if (nextName) {
+      setName(nextName);
+      if (nameInput.current) nameInput.current.value = nextName;
+    }
+    if (image) {
+      setImageFile(image);
+      setRemoved(false);
+    }
+    onContact(nextName, image);
+  }
+
   async function pickContact() {
+    picking.current = true;
     try {
-      const picked = await pickAndroidContact();
+      const picked = await pickAndroidContact((nextName) => {
+        flushSync(() => applyContact(nextName, null));
+      });
       if (!picked) return;
       if (!picked.name && !picked.image) {
         setError("לא התקבל שם או תמונה מהאיש קשר");
         return;
       }
       setError(null);
-      flushSync(() => onContact(picked.name, picked.image));
+      flushSync(() => applyContact(picked.name, picked.image));
     } catch (pickError) {
       if (pickError instanceof DOMException && pickError.name === "AbortError") return;
       setError("לא ניתן לבחור איש קשר");
+    } finally {
+      picking.current = false;
     }
   }
 
@@ -274,7 +327,7 @@ function EventDialog({
         ) : null}
         <div className="mt-3 flex items-end gap-2">
           <div className="min-w-0 flex-1">
-            <Field label="שם" value={name} maxLength={80} className="" onChange={setName} />
+            <Field label="שם" value={name} maxLength={80} className="" inputRef={nameInput} onChange={setName} />
           </div>
           {!event && canPickContact ? (
             <button
@@ -376,6 +429,7 @@ function Field({
   inputMode,
   className = "mt-3",
   placeholder,
+  inputRef,
   onChange,
 }: {
   label: string;
@@ -384,12 +438,14 @@ function Field({
   inputMode?: "numeric" | "text";
   className?: string;
   placeholder?: string;
+  inputRef?: Ref<HTMLInputElement>;
   onChange: (value: string) => void;
 }) {
   return (
     <label className={`block text-sm ${className}`}>
       {label}
       <input
+        ref={inputRef}
         value={value}
         maxLength={maxLength}
         inputMode={inputMode}

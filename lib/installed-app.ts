@@ -9,8 +9,11 @@ type ContactPicker = {
   getProperties?: () => Promise<unknown>;
 };
 
+export type PickedAndroidContact = { name: string; image: File | null };
+
 const wantedContactProperties = ["name", "icon"];
 let contactProperties = wantedContactProperties;
+let heldContact: PickedAndroidContact | null = null;
 
 /** Contact picking exists only in the installed Android app. */
 export function androidContactPicker() {
@@ -34,40 +37,46 @@ export function prepareAndroidContacts() {
     .catch(() => undefined);
 }
 
-export async function pickAndroidContact() {
+export function heldAndroidContact() {
+  return heldContact;
+}
+
+export function clearHeldAndroidContact() {
+  heldContact = null;
+}
+
+export async function pickAndroidContact(onName?: (name: string) => void) {
   const picker = androidContactPicker();
   if (!picker) return null;
   const contacts = await picker.select(contactProperties, { multiple: false });
-  const contact = selectedContact(contacts);
-  if (!contact) return null;
+  const [contact] = contactList(contacts);
+  if (!contact || typeof contact !== "object") return null;
   const record = contact as Record<string, unknown>;
-  let name = "";
-  try {
-    name = contactName(record);
-  } catch {
-    name = "";
-  }
-  // Copy the photo during this task. Android drops the picker bytes afterwards.
+  const name = contactName(record);
+  heldContact = { name, image: null };
+  if (name) onName?.(name);
   const image = await contactPhoto(record.icon ?? record.icons ?? record.photo ?? record.avatar);
-  if (!name) {
-    try {
-      name = contactName(record);
-    } catch {
-      name = "";
-    }
-  }
-  return { name, image };
-}
-
-function selectedContact(contacts: unknown) {
-  if (contacts && typeof contacts === "object" && !Array.isArray(contacts) && ("name" in contacts || "icon" in contacts)) return contacts;
-  const [contact] = contactItems(contacts);
-  return contact && typeof contact === "object" ? contact : null;
+  const picked = { name: name || contactName(record), image };
+  heldContact = picked;
+  return picked;
 }
 
 function contactPropertyList(available: unknown) {
-  const values = contactItems(available).filter((value): value is string => typeof value === "string");
+  const values = contactList(available).filter((value): value is string => typeof value === "string");
   return wantedContactProperties.filter((property) => values.includes(property));
+}
+
+function contactList(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value;
+  if (!value || typeof value !== "object") return [];
+  if (Symbol.iterator in value) {
+    try {
+      return Array.from(value as Iterable<unknown>);
+    } catch {
+      return [value];
+    }
+  }
+  return [value];
 }
 
 function contactName(record: Record<string, unknown>) {
@@ -75,110 +84,97 @@ function contactName(record: Record<string, unknown>) {
 }
 
 function firstText(value: unknown) {
-  for (const entry of contactItems(value)) {
-    const text = textOf(entry).trim();
+  for (const entry of textList(value)) {
+    const text = entry.trim();
     if (text) return text.slice(0, 80);
   }
   return "";
 }
 
-function textOf(entry: unknown): string {
-  if (typeof entry === "string") return entry;
-  if (!entry || typeof entry !== "object") return "";
-  const record = entry as Record<string, unknown>;
-  for (const key of ["displayName", "name", "formatted", "givenName", "familyName"]) {
-    if (typeof record[key] === "string") return record[key];
-  }
-  return "";
+function textList(value: unknown): string[] {
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value)) return value.flatMap(textList);
+  if (!value || typeof value !== "object") return [];
+  const record = value as Record<string, unknown>;
+  return ["displayName", "name", "formatted", "givenName", "familyName"].flatMap((key) => textList(record[key]));
 }
 
 async function contactPhoto(value: unknown) {
-  for (const entry of contactItems(value)) {
-    try {
-      const file = await contactImageFile(entry);
-      if (file) return file;
-    } catch {
-      // Try the next photo the contact offered.
-    }
+  for (const blob of photoBlobs(value)) {
+    const file = await snapshotContactPhoto(blob);
+    if (file) return file;
   }
   return null;
 }
 
-async function contactImageFile(entry: unknown) {
-  const blob = await imageBlob(entry);
-  if (!blob) return null;
-  const bytes = await blob.arrayBuffer();
-  if (bytes.byteLength === 0) return null;
-  const type = imageType(blob.type, bytes);
-  if (!type) return null;
-  const extension = type === "image/png" ? "png" : type === "image/webp" ? "webp" : type === "image/gif" ? "gif" : "jpg";
-  return new File([bytes], `contact.${extension}`, { type });
+function photoBlobs(value: unknown): Blob[] {
+  if (isBlob(value)) return [value];
+  if (Array.isArray(value)) return value.flatMap(photoBlobs);
+  if (!value || typeof value !== "object" || !("length" in value)) return [];
+  const length = (value as { length?: unknown }).length;
+  if (typeof length !== "number" || length <= 0 || length > 5) return [];
+  return Array.from({ length }, (_, index) => (value as Record<number, unknown>)[index]).flatMap(photoBlobs);
 }
 
-async function imageBlob(entry: unknown): Promise<Blob | null> {
-  if (isBinary(entry)) return entry;
-  if (typeof entry !== "string") return null;
-  const text = entry.trim();
-  if (text.startsWith("data:image/")) {
-    const response = await fetch(text);
-    return response.blob();
+async function snapshotContactPhoto(blob: Blob) {
+  try {
+    const drawn = await drawContactPhoto(blob);
+    if (drawn) return drawn;
+    const bytes = await within(blob.arrayBuffer(), 1500);
+    if (!bytes || bytes.byteLength === 0) return null;
+    const type = blob.type.toLowerCase() === "image/png" ? "image/png" : blob.type.toLowerCase() === "image/webp" ? "image/webp" : "image/jpeg";
+    const extension = type === "image/png" ? "png" : type === "image/webp" ? "webp" : "jpg";
+    return new File([bytes], `contact.${extension}`, { type });
+  } catch {
+    return null;
   }
-  if (text.length < 128 || !/^[A-Za-z0-9+/=\s]+$/.test(text)) return null;
-  const binary = atob(text.replace(/\s/g, ""));
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
-  return new Blob([bytes]);
 }
 
-function imageType(claimed: string, bytes: ArrayBuffer) {
-  const sniffed = sniffImage(bytes);
-  if (sniffed) return sniffed;
-  const type = claimed.toLowerCase();
-  if (!type.startsWith("image/") || type === "image/svg+xml") return null;
-  return type === "image/jpg" ? "image/jpeg" : type;
-}
-
-function sniffImage(bytes: ArrayBuffer) {
-  const view = new Uint8Array(bytes);
-  if (view.length >= 3 && view[0] === 0xff && view[1] === 0xd8 && view[2] === 0xff) return "image/jpeg";
-  if (view.length >= 8 && view[0] === 0x89 && view[1] === 0x50 && view[2] === 0x4e && view[3] === 0x47) return "image/png";
-  if (view.length >= 6 && view[0] === 0x47 && view[1] === 0x49 && view[2] === 0x46) return "image/gif";
-  if (
-    view.length >= 12 &&
-    view[0] === 0x52 &&
-    view[1] === 0x49 &&
-    view[2] === 0x46 &&
-    view[3] === 0x46 &&
-    view[8] === 0x57 &&
-    view[9] === 0x45 &&
-    view[10] === 0x42 &&
-    view[11] === 0x50
-  ) {
-    return "image/webp";
+async function drawContactPhoto(blob: Blob) {
+  if (typeof createImageBitmap !== "function") return null;
+  let bitmap: ImageBitmap | null = null;
+  try {
+    bitmap = await within(createImageBitmap(blob), 1500);
+  } catch {
+    return null;
   }
-  return null;
-}
-
-function contactItems(value: unknown): unknown[] {
-  if (typeof value === "string" || isBinary(value)) return [value];
-  if (Array.isArray(value)) return value;
-  if (value && typeof value === "object") {
-    if (Symbol.iterator in value) {
-      try {
-        return Array.from(value as Iterable<unknown>);
-      } catch {
-        return [value];
-      }
-    }
-    const length = (value as { length?: unknown }).length;
-    if (typeof length === "number" && length >= 0 && length <= 20) {
-      return Array.from({ length }, (_, index) => (value as Record<number, unknown>)[index]).filter((entry) => entry != null);
-    }
+  if (!bitmap) return null;
+  if (bitmap.width < 1 || bitmap.height < 1) {
+    bitmap.close();
+    return null;
   }
-  return value == null ? [] : [value];
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const context = canvas.getContext("2d");
+    if (!context) return null;
+    context.drawImage(bitmap, 0, 0);
+    const output = await new Promise<Blob | null>((resolve) => canvas.toBlob((value) => resolve(value), "image/jpeg", 0.92));
+    if (!output || output.size === 0) return null;
+    return new File([output], "contact.jpg", { type: "image/jpeg" });
+  } finally {
+    bitmap.close();
+  }
 }
 
-function isBinary(value: unknown): value is Blob {
+function within<T>(promise: Promise<T>, ms: number) {
+  return new Promise<T | null>((resolve) => {
+    const timer = window.setTimeout(() => resolve(null), ms);
+    promise.then(
+      (value) => {
+        window.clearTimeout(timer);
+        resolve(value);
+      },
+      () => {
+        window.clearTimeout(timer);
+        resolve(null);
+      },
+    );
+  });
+}
+
+function isBlob(value: unknown): value is Blob {
   if (!value || typeof value !== "object") return false;
   if (typeof Blob !== "undefined" && value instanceof Blob) return true;
   const blob = value as Blob;
