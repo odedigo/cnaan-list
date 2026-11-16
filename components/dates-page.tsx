@@ -24,6 +24,7 @@ export function DatesPage({ active }: { active: boolean }) {
   const [editor, setEditor] = useState<Editor | null>(null);
   const contactToken = useRef(0);
   const busy = lists.saving || Boolean(transfer?.busy);
+  const editing = editor?.id ? lists.events.find((event) => event.id === editor.id) ?? null : null;
   const passedNames = new Set(lists.events.filter((event) => event.kind === "passing" && event.name.trim()).map((event) => event.name.trim()));
 
   useEffect(() => {
