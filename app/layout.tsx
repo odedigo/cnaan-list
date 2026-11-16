@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Rubik } from "next/font/google";
 
+import { AppFrame } from "@/components/app-frame";
 import { FitDialogs } from "@/components/fit-dialogs";
 import { ShareWorker } from "@/components/share-worker";
 
@@ -35,7 +36,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       <body className={`${rubik.variable} font-[family-name:var(--font-rubik)] antialiased`}>
         <ShareWorker />
         <FitDialogs />
-        <div className="mx-auto min-h-dvh w-full max-w-[480px] bg-[var(--cream)]">{children}</div>
+        <AppFrame>{children}</AppFrame>
       </body>
     </html>
   );

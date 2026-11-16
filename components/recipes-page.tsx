@@ -63,6 +63,7 @@ import {
 } from "@/lib/images";
 import { pushAppHistory, replaceAppHistory } from "@/lib/history";
 import { nameInsertIndex } from "@/lib/order";
+import { recipeAiAllowed } from "@/lib/account-role";
 import { readRecipeAdvanced, recipeAdvancedEvent } from "@/lib/recipe-advanced";
 import type {
   CategoryChoice,
@@ -228,6 +229,8 @@ export function RecipesPage({ active }: { active: boolean }) {
   const [textOpen, setTextOpen] = useState(false);
   const [photoOpen, setPhotoOpen] = useState(false);
   const [sharedLink, setSharedLink] = useState<SharedLink | null>(null);
+  const [recipeAi, setRecipeAi] = useState(false);
+  const [recipeAiKnown, setRecipeAiKnown] = useState(false);
 
   const byId = useMemo(
     () => new Map(categories.map((category) => [category.id, category])),
@@ -332,6 +335,26 @@ export function RecipesPage({ active }: { active: boolean }) {
     }
     return false;
   }
+
+  useEffect(() => {
+    let cancel = false;
+    async function loadRecipeAi() {
+      const { data } = await supabase.auth.getUser();
+      if (cancel || !data.user) return;
+      const { data: profile, error } = await supabase.from("profiles").select("user_type").eq("id", data.user.id).maybeSingle();
+      if (cancel) return;
+      setRecipeAi(!error && recipeAiAllowed(profile?.user_type));
+      setRecipeAiKnown(true);
+    }
+    void loadRecipeAi();
+    const { data: auth } = supabase.auth.onAuthStateChange(() => {
+      void loadRecipeAi();
+    });
+    return () => {
+      cancel = true;
+      auth.subscription.unsubscribe();
+    };
+  }, [supabase]);
 
   useEffect(() => {
     if (!opened) return;
@@ -441,9 +464,16 @@ export function RecipesPage({ active }: { active: boolean }) {
   }, []);
 
   useEffect(() => {
-    if (!opened || loading) return;
+    if (!opened || loading || !recipeAiKnown) return;
     const params = new URLSearchParams(window.location.search);
     if (params.get("share") !== "1") return;
+    if (!recipeAi) {
+      params.delete("share");
+      const next = `${window.location.pathname}${params.size > 0 ? `?${params}` : ""}${window.location.hash}`;
+      const entry = recipeHistoryFrom(window.history.state);
+      replaceAppHistory(next, entry ? { cnaanRecipes: entry } : undefined);
+      return;
+    }
     params.delete("share");
     const next = `${window.location.pathname}${params.size > 0 ? `?${params}` : ""}${window.location.hash}`;
     const entry = recipeHistoryFrom(window.history.state);
@@ -459,7 +489,7 @@ export function RecipesPage({ active }: { active: boolean }) {
     return () => {
       cancel = true;
     };
-  }, [opened, loading]);
+  }, [opened, loading, recipeAi, recipeAiKnown]);
 
   const openId = open?.id ?? null;
   useLayoutEffect(() => {
@@ -1757,15 +1787,10 @@ export function RecipesPage({ active }: { active: boolean }) {
             Boolean(open) && !recipeEditing && Boolean(value.trim()),
           );
         }}
-        onLink={
-          !loading && !open && !searching ? () => setLinkOpen(true) : undefined
-        }
-        onPasteRecipe={
-          !loading && !open && !searching ? () => setTextOpen(true) : undefined
-        }
-        onPhotoRecipe={
-          !loading && !open && !searching ? () => setPhotoOpen(true) : undefined
-        }
+        onLink={!loading && !open && !searching ? () => { if (recipeAi) setLinkOpen(true); } : undefined}
+        onPasteRecipe={!loading && !open && !searching ? () => { if (recipeAi) setTextOpen(true); } : undefined}
+        onPhotoRecipe={!loading && !open && !searching ? () => { if (recipeAi) setPhotoOpen(true); } : undefined}
+        recipeAiEnabled={recipeAi}
         onReloadRecipes={() => setRecipeReload((value) => value + 1)}
         onExportFile={() => {
           if (!open) return;
@@ -1883,6 +1908,7 @@ export function RecipesPage({ active }: { active: boolean }) {
       {!loading && !showResults && open ? (
         <RecipeDetail
           recipe={open}
+          ai={recipeAi}
           tab={tab}
           slides={slides}
           slide={slide}
@@ -1935,7 +1961,7 @@ export function RecipesPage({ active }: { active: boolean }) {
           onEditingChange={setRecipeEditing}
         />
       ) : null}
-      {linkOpen || sharedLink ? (
+      {recipeAi && (linkOpen || sharedLink) ? (
         <LinkRecipeDialog
           kind="link"
           shared={sharedLink}
@@ -1954,7 +1980,7 @@ export function RecipesPage({ active }: { active: boolean }) {
           }}
         />
       ) : null}
-      {textOpen ? (
+      {textOpen && recipeAi ? (
         <LinkRecipeDialog
           kind="text"
           shared={null}
@@ -1967,7 +1993,7 @@ export function RecipesPage({ active }: { active: boolean }) {
           }}
         />
       ) : null}
-      {photoOpen ? (
+      {photoOpen && recipeAi ? (
         <LinkRecipeDialog
           kind="image"
           shared={null}
@@ -2977,6 +3003,7 @@ function BackMark() {
 
 function RecipeDetail({
   recipe,
+  ai,
   tab,
   slides,
   slide,
@@ -3007,6 +3034,7 @@ function RecipeDetail({
   onEditingChange,
 }: {
   recipe: OpenRecipe;
+  ai: boolean;
   tab: TabId;
   slides: { id: string; url: string }[];
   slide: number;
@@ -3349,6 +3377,7 @@ function RecipeDetail({
         editing ? (
           <StepEditor
             steps={recipe.document.steps}
+            ai={ai}
             busy={busy}
             onCancel={() => setEditing(false)}
             onSave={(steps) => onSaveSteps(steps, title)}
@@ -3427,6 +3456,7 @@ function RecipeDetail({
         editing ? (
           <IngredientEditor
             ingredients={recipe.document.ingredients}
+            ai={ai}
             busy={busy}
             onCancel={() => setEditing(false)}
             onSave={(ingredients) => onSaveIngredients(ingredients, title)}
@@ -3678,11 +3708,13 @@ function ClearMarksButton({ onClick }: { onClick: () => void }) {
 
 function IngredientEditor({
   ingredients,
+  ai,
   busy,
   onCancel,
   onSave,
 }: {
   ingredients: RecipeIngredient[];
+  ai: boolean;
   busy: boolean;
   onCancel: () => void;
   onSave: (ingredients: RecipeIngredient[]) => Promise<boolean>;
@@ -3899,10 +3931,10 @@ function IngredientEditor({
             setFocusKey(key);
           }}
         />
-        <PasteButton onClick={() => setPasteOpen(true)} />
+        <PasteButton disabled={!ai} onClick={() => setPasteOpen(true)} />
       </div>
       {usage ? <TokenNote usage={usage} /> : null}
-      {pasteOpen ? (
+      {pasteOpen && ai ? (
         <PasteRecipeDialog
           kind="ingredients"
           onClose={() => setPasteOpen(false)}
@@ -3928,11 +3960,13 @@ function IngredientEditor({
 
 function StepEditor({
   steps,
+  ai,
   busy,
   onCancel,
   onSave,
 }: {
   steps: RecipeStep[];
+  ai: boolean;
   busy: boolean;
   onCancel: () => void;
   onSave: (steps: RecipeStep[]) => Promise<boolean>;
@@ -4074,10 +4108,10 @@ function StepEditor({
             setFocusKey(key);
           }}
         />
-        <PasteButton onClick={() => setPasteOpen(true)} />
+        <PasteButton disabled={!ai} onClick={() => setPasteOpen(true)} />
       </div>
       {usage ? <TokenNote usage={usage} /> : null}
-      {pasteOpen ? (
+      {pasteOpen && ai ? (
         <PasteRecipeDialog
           kind="steps"
           onClose={() => setPasteOpen(false)}
@@ -4324,11 +4358,12 @@ function TokenNote({
   );
 }
 
-function PasteButton({ onClick }: { onClick: () => void }) {
+function PasteButton({ disabled, onClick }: { disabled?: boolean; onClick: () => void }) {
   return (
     <button
       type="button"
-      className="grid h-8 place-items-center rounded border border-neutral-800 px-2 text-sm font-medium"
+      disabled={disabled}
+      className="grid h-8 place-items-center rounded border border-neutral-800 px-2 text-sm font-medium disabled:opacity-40"
       onClick={onClick}
     >
       הדבקה

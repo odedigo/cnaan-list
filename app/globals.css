@@ -78,3 +78,21 @@ select:focus-visible {
     animation: none;
   }
 }
+
+.admin-phone {
+  display: none;
+}
+
+@media (max-width: 767px) {
+  .admin-desk {
+    display: none;
+  }
+
+  .admin-phone {
+    display: grid;
+    min-height: 100dvh;
+    place-items: center;
+    padding: 2rem;
+    text-align: center;
+  }
+}

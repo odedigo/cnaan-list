@@ -11,11 +11,12 @@ import {
 } from "react";
 import Link from "next/link";
 
-import { login, logout } from "@/app/actions/auth";
+import { login, logout, requestPasswordReset } from "@/app/actions/auth";
 import { AppHeader } from "@/components/app-header";
 import { eventRemindersEvent } from "@/components/event-reminders";
 import { ChevronIcon, UserIcon } from "@/components/icons";
 import { useLists } from "@/components/lists-provider";
+import { userTypeLabel } from "@/lib/account-role";
 import { colorHex } from "@/lib/colors";
 import { readKeepAwake, writeKeepAwake } from "@/lib/keep-awake";
 import { readRecipeAdvanced, writeRecipeAdvanced } from "@/lib/recipe-advanced";
@@ -43,6 +44,8 @@ export function SignedOutSettings({
   version?: string;
 }) {
   const [state, action, pending] = useActionState(login, null);
+  const [resetState, resetAction, resetPending] = useActionState(requestPasswordReset, null);
+  const [resetting, setResetting] = useState(false);
   const [accounts, setAccounts] = useState<SavedAccount[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [switching, setSwitching] = useState(false);
@@ -101,7 +104,7 @@ export function SignedOutSettings({
         </div>
       ) : null}
       <form
-        className={`mx-4 space-y-4 rounded-xl border border-neutral-200 bg-white px-4 py-6 ${accounts.length > 0 ? "mt-4" : "mt-8"}`}
+        className={`mx-4 space-y-4 rounded-xl border border-neutral-200 bg-white px-4 py-6 ${accounts.length > 0 ? "mt-4" : "mt-8"} ${resetting ? "hidden" : ""}`}
         action={action}
       >
         {accounts.length > 0 ? (
@@ -149,9 +152,40 @@ export function SignedOutSettings({
         </button>
         <div className="flex justify-between text-sm text-[var(--teal)]">
           <Link href="/signup">יצירת חשבון</Link>
-          <Link href="/forgot-password">שכחתי סיסמה</Link>
+          <button type="button" onClick={() => setResetting(true)}>
+            שכחתי סיסמה
+          </button>
         </div>
       </form>
+      {resetting ? (
+        <form
+          className={`mx-4 space-y-4 rounded-xl border border-neutral-200 bg-white px-4 py-6 ${accounts.length > 0 ? "mt-4" : "mt-8"}`}
+          action={resetAction}
+        >
+          <p className="text-sm text-neutral-500">שחזור סיסמה</p>
+          <label className="block">
+            <span className="mb-1 block text-sm">שם משתמש או אימייל</span>
+            <input
+              name="identifier"
+              autoComplete="username"
+              required
+              className="w-full rounded-xl border border-neutral-200 bg-white px-3 py-3 outline-none focus:border-[var(--teal)]"
+            />
+          </label>
+          {resetState?.error ? <p className="text-sm text-red-600">{resetState.error}</p> : null}
+          {resetState?.message ? <p className="text-sm text-emerald-700">{resetState.message}</p> : null}
+          <button
+            type="submit"
+            disabled={resetPending}
+            className="w-full rounded-xl bg-[var(--teal)] py-3 font-medium text-white disabled:opacity-60"
+          >
+            {resetPending ? "שולח…" : "שליחת קישור לאיפוס"}
+          </button>
+          <button type="button" onClick={() => setResetting(false)} className="text-sm text-[var(--teal)]">
+            חזרה לכניסה
+          </button>
+        </form>
+      ) : null}
     </div>
   );
 }
@@ -171,6 +205,8 @@ export function SignedInSettings({ username }: { username: string }) {
   const [reminderMessage, setReminderMessage] = useState("");
   const [reminderOk, setReminderOk] = useState(false);
   const [eventReminders, setEventReminders] = useState(true);
+  const [adminUser, setAdminUser] = useState(false);
+  const [userTypeLabelText, setUserTypeLabelText] = useState("");
   useEffect(() => {
     setKeepAwake(readKeepAwake());
     setRecipeAdvanced(readRecipeAdvanced());
@@ -201,6 +237,8 @@ export function SignedInSettings({ username }: { username: string }) {
   useEffect(() => {
     if (!userId) return;
     let cancel = false;
+    setAdminUser(false);
+    setUserTypeLabelText("");
     const supabase = createClient();
     void (async () => {
       const [{ data: sessionData }, { data: profile }, { data: account }] = await Promise.all([
@@ -222,6 +260,12 @@ export function SignedInSettings({ username }: { username: string }) {
         typeof profile?.email === "string" ? profile.email.trim() : "";
       const email = sessionEmail || profileEmail;
       if (email) setAccountEmail(email);
+      const { data: roleRow } = await supabase.from("profiles").select("role").eq("id", userId).maybeSingle();
+      const { data: typeRow } = await supabase.from("profiles").select("user_type").eq("id", userId).maybeSingle();
+      if (!cancel) {
+        setAdminUser(roleRow?.role === "ADMIN");
+        if (typeof typeRow?.user_type === "string") setUserTypeLabelText(userTypeLabel(typeRow.user_type));
+      }
     })();
     return () => {
       cancel = true;
@@ -315,6 +359,12 @@ export function SignedInSettings({ username }: { username: string }) {
           }}
           onAction={() => void handleLogout()}
         />
+        {adminUser ? (
+          <Link href="/admin" className="mt-4 block rounded-xl border border-neutral-200 bg-white px-4 py-3 text-sm font-medium">
+            ניהול חשבונות
+          </Link>
+        ) : null}
+        {userTypeLabelText ? <p className="mt-4 rounded-xl border border-neutral-200 bg-white px-4 py-3 text-sm">סוג משתמש: {userTypeLabelText}</p> : null}
         <div className="mt-4 rounded-xl border border-neutral-200 bg-white px-4 py-3 text-start">
           <label className="flex items-center gap-3 text-sm">
             <input

@@ -10,10 +10,22 @@ create table if not exists public.profiles (
   id uuid primary key references auth.users (id) on delete cascade,
   username text not null,
   email text not null,
-  constraint profiles_username_format check (username ~ '^[A-Za-z0-9_א-ת]{3,24}$')
+  role text not null default 'USER',
+  user_type text not null default 'NORM',
+  constraint profiles_username_format check (username ~ '^[A-Za-z0-9_א-ת]{3,24}$'),
+  constraint profiles_role_check check (role in ('USER', 'ADMIN')),
+  constraint profiles_user_type_check check (user_type in ('NORM', 'PRO', 'PREMIUM'))
 );
 
 create unique index if not exists profiles_username_lower_idx on public.profiles (lower(username));
+
+alter table public.profiles add column if not exists role text not null default 'USER';
+alter table public.profiles drop constraint if exists profiles_role_check;
+alter table public.profiles add constraint profiles_role_check check (role in ('USER', 'ADMIN'));
+
+alter table public.profiles add column if not exists user_type text not null default 'NORM';
+alter table public.profiles drop constraint if exists profiles_user_type_check;
+alter table public.profiles add constraint profiles_user_type_check check (user_type in ('NORM', 'PRO', 'PREMIUM'));
 
 create table if not exists public.accounts (
   id uuid primary key default gen_random_uuid(),

@@ -3,6 +3,7 @@
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 
+import { recipeAiAllowed } from "@/lib/account-role";
 import { createClient } from "@/lib/supabase/server";
 import { normalizeIngredients, normalizeSteps, recipeUnits, type TokenUsage } from "@/lib/recipe-parse";
 import { blockedHost, facebookChannelName, facebookPostText, findHttpUrl, matchCategoryIds, pageImageUrl, pageRecipeText, pluginImageUrl, safePageUrl, type CategoryChoice, type SharedLink } from "@/lib/recipe-link";
@@ -577,5 +578,7 @@ async function requireUser() {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return Response.json({ error: "יש להתחבר" }, { status: 401 });
+  const { data, error } = await supabase.from("profiles").select("user_type").eq("id", user.id).maybeSingle();
+  if (!error && !recipeAiAllowed(data?.user_type)) return Response.json({ error: "האפשרות אינה כלולה בסוג החשבון" }, { status: 403 });
   return null;
 }

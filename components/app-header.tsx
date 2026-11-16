@@ -54,6 +54,7 @@ export function AppHeader({
   onLink,
   onPasteRecipe,
   onPhotoRecipe,
+  recipeAiEnabled = true,
   onReloadRecipes,
   onExportFile,
   onTopCategories,
@@ -92,6 +93,7 @@ export function AppHeader({
   onLink?: () => void;
   onPasteRecipe?: () => void;
   onPhotoRecipe?: () => void;
+  recipeAiEnabled?: boolean;
   onReloadRecipes?: () => void;
   onExportFile?: () => void;
   onTopCategories?: () => void;
@@ -353,8 +355,8 @@ export function AppHeader({
                   <>
                     <div role="separator" className="mx-3 my-1 h-px bg-neutral-200" />
                     <MenuItem
-                      label="מתכון מקישור"
-                      disabled={!actionsEnabled}
+                      label={recipeAiEnabled ? "מתכון מקישור" : "מתכון מקישור - פרימיום"}
+                      disabled={!actionsEnabled || !recipeAiEnabled}
                       onClick={() => {
                         setMenuOpen(false);
                         onLink();
@@ -366,8 +368,8 @@ export function AppHeader({
                 ) : null}
                 {onPasteRecipe ? (
                   <MenuItem
-                    label="מתכון מטקסט"
-                    disabled={!actionsEnabled}
+                    label={recipeAiEnabled ? "מתכון מטקסט" : "מתכון מטקסט - פרימיום"}
+                    disabled={!actionsEnabled || !recipeAiEnabled}
                     onClick={() => {
                       setMenuOpen(false);
                       onPasteRecipe();
@@ -378,8 +380,8 @@ export function AppHeader({
                 ) : null}
                 {onPhotoRecipe ? (
                   <MenuItem
-                    label="מתכון מתמונה"
-                    disabled={!actionsEnabled}
+                    label={recipeAiEnabled ? "מתכון מתמונה" : "מתכון מתמונה - פרימיום"}
+                    disabled={!actionsEnabled || !recipeAiEnabled}
                     onClick={() => {
                       setMenuOpen(false);
                       onPhotoRecipe();

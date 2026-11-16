@@ -1,5 +1,6 @@
 /** Converts pasted recipe text into ingredient or step rows with Gemini. */
 
+import { recipeAiAllowed } from "@/lib/account-role";
 import { createClient } from "@/lib/supabase/server";
 import { normalizeIngredients, normalizeSteps, recipeUnits, type TokenUsage } from "@/lib/recipe-parse";
 
@@ -143,5 +144,7 @@ async function requireUser() {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return Response.json({ error: "יש להתחבר" }, { status: 401 });
+  const { data, error } = await supabase.from("profiles").select("user_type").eq("id", user.id).maybeSingle();
+  if (!error && !recipeAiAllowed(data?.user_type)) return Response.json({ error: "האפשרות אינה כלולה בסוג החשבון" }, { status: 403 });
   return null;
 }
