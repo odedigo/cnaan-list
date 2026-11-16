@@ -65,7 +65,6 @@ export function AppHeader({
   onSortWithin,
   onExportList,
   onImportList,
-  onAddList,
   exportFileEnabled = true,
   showCredit = false,
   creditVersion = "",
@@ -104,7 +103,6 @@ export function AppHeader({
   onSortWithin?: () => void;
   onExportList?: () => void;
   onImportList?: () => void;
-  onAddList?: () => void;
   exportFileEnabled?: boolean;
   showCredit?: boolean;
   creditVersion?: string;
@@ -112,7 +110,7 @@ export function AppHeader({
   const [menuOpen, setMenuOpen] = useState(false);
   const [creditOpen, setCreditOpen] = useState(false);
   const showMenu = Boolean(
-    onAdd || onSort || onReorder || onPlus || onLink || onPasteRecipe || onPhotoRecipe || onReloadRecipes || onExportFile || onMarkAll || onClearMarks || onSortWithin || onExportList || onImportList || onAddList,
+    onAdd || onSort || onReorder || onPlus || onLink || onPasteRecipe || onPhotoRecipe || onReloadRecipes || onExportFile || onMarkAll || onClearMarks || onSortWithin || onExportList || onImportList,
   );
   const searchButton = onSearchToggle ? (
     <button
@@ -225,21 +223,6 @@ export function AppHeader({
                 role="menu"
                 className="absolute right-0 top-12 z-30 w-max min-w-52 overflow-hidden rounded-xl bg-white py-1 text-start shadow-lg"
               >
-                {onAddList ? (
-                  <>
-                    <MenuItem
-                      label="הוספת רשימה"
-                      disabled={!actionsEnabled}
-                      onClick={() => {
-                        setMenuOpen(false);
-                        onAddList();
-                      }}
-                    >
-                      <PlusIcon className="size-5" />
-                    </MenuItem>
-                    <div role="separator" className="mx-3 my-1 h-px bg-neutral-200" />
-                  </>
-                ) : null}
                 {onExportList ? (
                   <MenuItem
                     label="ייצוא רשימה"

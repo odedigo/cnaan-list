@@ -17,7 +17,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { AppHeader } from "@/components/app-header";
 import { useDataTransfer } from "@/components/data-transfer";
-import { CloseIcon, CopyIcon, DotsIcon, DownloadIcon, GripIcon, PenIcon, PlusIcon } from "@/components/icons";
+import { CheckIcon, ClearMarksIcon, CloseIcon, CopyIcon, DotsIcon, DownloadIcon, GripIcon, PenIcon, PlusIcon } from "@/components/icons";
 import { useLists } from "@/components/lists-provider";
 import { downloadPackingList } from "@/lib/export-inventory";
 import { pushAppHistory, replaceAppHistory } from "@/lib/history";
@@ -267,7 +267,8 @@ function PackingIndex({
       <AppHeader
         title="רשימות אריזה"
         actionsEnabled={!busy}
-        onAddList={onAdd}
+        onHeaderPlus={onAdd}
+        headerPlusLabel="הוספת רשימה"
         onImportList={onImport}
       />
       {rows.length === 0 ? <p className="px-4 py-8 text-center text-neutral-500">אין רשימות אריזה</p> : null}
@@ -277,59 +278,75 @@ function PackingIndex({
             {rows.map((row) => (
               <SortableRow key={row.id} id={row.id} raised={menu?.kind === "list" && menu.id === row.id}>
                 {(handle) => (
-                  <div dir="rtl" className="mb-2 flex items-center gap-1">
-                    <div className="flex min-w-0 flex-1 items-center gap-1 rounded-lg bg-white py-2 pe-1 ps-3 shadow-sm">
-                      <button type="button" className="min-w-0 flex-1 truncate text-start text-base" onClick={() => onOpen(row.id)}>
-                        {row.name}
+                  <div dir="rtl" className="relative mb-2 flex items-center gap-1 rounded-lg bg-white py-2 pe-1 ps-3 shadow-sm">
+                    <button type="button" className="min-w-0 flex-1 truncate text-start text-base" onClick={() => onOpen(row.id)}>
+                      {row.name}
+                    </button>
+                    <div className="relative">
+                      <button
+                        type="button"
+                        className="grid size-8 place-items-center text-neutral-500"
+                        aria-label="פעולות הרשימה"
+                        aria-expanded={menu?.kind === "list" && menu.id === row.id}
+                        onClick={() => onMenu(menu?.kind === "list" && menu.id === row.id ? null : { kind: "list", id: row.id })}
+                      >
+                        <DotsIcon className="size-4" />
                       </button>
-                      <div className="relative">
-                        <button
-                          type="button"
-                          className="grid size-8 place-items-center text-neutral-500"
-                          aria-label="פעולות הרשימה"
-                          aria-expanded={menu?.kind === "list" && menu.id === row.id}
-                          onClick={() => onMenu(menu?.kind === "list" && menu.id === row.id ? null : { kind: "list", id: row.id })}
-                        >
-                          <PenIcon className="size-4" />
-                        </button>
-                        {menu?.kind === "list" && menu.id === row.id ? (
-                          <div role="menu" className="absolute end-0 top-9 z-30 w-max min-w-44 rounded-xl bg-white py-1 text-start shadow-lg">
-                            <RowMenuItem
-                              label="שינוי שם הרשימה"
-                              onClick={() => {
-                                onMenu(null);
-                                onRename(row);
-                              }}
-                            />
-                            <RowMenuItem
-                              label="סימון הכל"
-                              onClick={() => {
-                                onMenu(null);
-                                onMarkAll(row);
-                              }}
-                            />
-                            <RowMenuItem
-                              label="ביטול סימונים"
-                              onClick={() => {
-                                onMenu(null);
-                                onClearMarks(row);
-                              }}
-                            />
-                          </div>
-                        ) : null}
-                      </div>
-                      <button type="button" className="grid size-8 place-items-center text-neutral-500" aria-label="שכפול הרשימה" onClick={() => onDuplicate(row)}>
-                        <CopyIcon className="size-5" />
-                      </button>
-                      <button type="button" className="grid size-8 place-items-center text-neutral-500" aria-label="ייצוא הרשימה" onClick={() => onExport(row)}>
-                        <DownloadIcon className="size-5" />
-                      </button>
-                      <button type="button" className="grid size-8 cursor-grab touch-none place-items-center text-neutral-500 active:cursor-grabbing" aria-label="גרירה" {...handle}>
-                        <GripIcon className="size-5" />
-                      </button>
+                      {menu?.kind === "list" && menu.id === row.id ? (
+                        <div role="menu" className="absolute end-0 top-9 z-30 w-max min-w-48 rounded-xl bg-white py-1 text-start shadow-lg">
+                          <RowMenuItem
+                            label="שינוי שם הרשימה"
+                            icon={<PenIcon className="size-5" />}
+                            onClick={() => {
+                              onMenu(null);
+                              onRename(row);
+                            }}
+                          />
+                          <RowMenuItem
+                            label="סימון הכל"
+                            icon={<CheckIcon className="size-5" />}
+                            onClick={() => {
+                              onMenu(null);
+                              onMarkAll(row);
+                            }}
+                          />
+                          <RowMenuItem
+                            label="ביטול סימונים"
+                            icon={<ClearMarksIcon className="size-5" />}
+                            onClick={() => {
+                              onMenu(null);
+                              onClearMarks(row);
+                            }}
+                          />
+                          <RowMenuItem
+                            label="שכפול הרשימה"
+                            icon={<CopyIcon className="size-5" />}
+                            onClick={() => {
+                              onMenu(null);
+                              onDuplicate(row);
+                            }}
+                          />
+                          <RowMenuItem
+                            label="ייצוא הרשימה"
+                            icon={<DownloadIcon className="size-5" />}
+                            onClick={() => {
+                              onMenu(null);
+                              onExport(row);
+                            }}
+                          />
+                          <RowMenuItem
+                            label="מחיקת רשימה"
+                            icon={<CloseIcon className="size-5" />}
+                            onClick={() => {
+                              onMenu(null);
+                              onDelete(row);
+                            }}
+                          />
+                        </div>
+                      ) : null}
                     </div>
-                    <button type="button" className="grid size-8 place-items-center text-neutral-500" aria-label="מחיקת רשימה" onClick={() => onDelete(row)}>
-                      <CloseIcon className="size-5" />
+                    <button type="button" className="grid size-8 cursor-grab touch-none place-items-center text-neutral-500 active:cursor-grabbing" aria-label="גרירה" {...handle}>
+                      <GripIcon className="size-5" />
                     </button>
                   </div>
                 )}
@@ -579,9 +596,10 @@ function Stepper({ quantity, onChange }: { quantity: number; onChange: (quantity
   );
 }
 
-function RowMenuItem({ label, onClick }: { label: string; onClick: () => void }) {
+function RowMenuItem({ label, icon, onClick }: { label: string; icon?: ReactNode; onClick: () => void }) {
   return (
-    <button type="button" role="menuitem" className="block w-full px-3 py-2.5 text-start text-sm" onClick={onClick}>
+    <button type="button" role="menuitem" className="flex w-full items-center gap-2 px-3 py-2.5 text-start text-sm" onClick={onClick}>
+      {icon ? <span className="grid size-5 shrink-0 place-items-center">{icon}</span> : null}
       {label}
     </button>
   );

@@ -33,6 +33,18 @@ export function eventTypeLabel(event: Pick<AccountEvent, "kind" | "label">) {
   return kindLabels[event.kind];
 }
 
+const eventTypeTones: Record<EventKind, { background: string; color: string }> = {
+  birthday: { background: "#d7f0dc", color: "#176b34" },
+  anniversary: { background: "#d7ecfb", color: "#0c5f8a" },
+  death: { background: "#ddd6fe", color: "#5b21b6" },
+  passing: { background: "#f8d0d0", color: "#9f1239" },
+  other: { background: "#e4e4e7", color: "#3f3f46" },
+};
+
+export function eventTypeTone(kind: EventKind) {
+  return eventTypeTones[kind];
+}
+
 export function sortEvents(events: AccountEvent[], today = new Date()) {
   return [...events].sort((a, b) => {
     const byUpcoming = daysUntil(a.month, a.day, today) - daysUntil(b.month, b.day, today);

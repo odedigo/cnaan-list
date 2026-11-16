@@ -7,10 +7,10 @@ import { flushSync } from "react-dom";
 
 import { AppHeader } from "@/components/app-header";
 import { useDataTransfer } from "@/components/data-transfer";
-import { CommentIcon, ImageIcon, UserIcon } from "@/components/icons";
+import { CommentIcon, ImageIcon, PassedIcon, UserIcon } from "@/components/icons";
 import { ImagePicker } from "@/components/images";
 import { useLists } from "@/components/lists-provider";
-import { countdownText, eventDraftError, eventKinds, eventTypeLabel, eventYears, hebrewMonths, type EventDraft } from "@/lib/events";
+import { countdownText, eventDraftError, eventKinds, eventTypeLabel, eventTypeTone, eventYears, hebrewMonths, type EventDraft } from "@/lib/events";
 import { androidContactPicker, clearHeldAndroidContact, pickAndroidContact, prepareAndroidContacts, readStoredContact } from "@/lib/installed-app";
 import type { AccountEvent, EventKind } from "@/lib/types";
 
@@ -24,7 +24,7 @@ export function DatesPage({ active }: { active: boolean }) {
   const [editor, setEditor] = useState<Editor | null>(null);
   const contactToken = useRef(0);
   const busy = lists.saving || Boolean(transfer?.busy);
-  const editing = editor?.id ? lists.events.find((event) => event.id === editor.id) ?? null : null;
+  const passedNames = new Set(lists.events.filter((event) => event.kind === "passing" && event.name.trim()).map((event) => event.name.trim()));
 
   useEffect(() => {
     if (!active) setEditor(null);
@@ -51,7 +51,13 @@ export function DatesPage({ active }: { active: boolean }) {
       ) : (
         <div className="flex flex-col gap-2 py-2">
           {lists.events.map((event) => (
-            <EventStrip key={event.id} event={event} src={eventImage(lists.imageSrc, event)} onOpen={() => setEditor({ id: event.id })} />
+            <EventStrip
+              key={event.id}
+              event={event}
+              src={eventImage(lists.imageSrc, event)}
+              passed={event.kind !== "passing" && passedNames.has(event.name.trim())}
+              onOpen={() => setEditor({ id: event.id })}
+            />
           ))}
         </div>
       )}
@@ -96,8 +102,9 @@ function eventImage(imageSrc: (kind: "event", id: string, path: string | null) =
   return imageSrc("event", event.id, event.image_path);
 }
 
-function EventStrip({ event, src, onOpen }: { event: AccountEvent; src: string | null; onOpen: () => void }) {
+function EventStrip({ event, src, passed, onOpen }: { event: AccountEvent; src: string | null; passed: boolean; onOpen: () => void }) {
   const label = eventTypeLabel(event);
+  const tone = eventTypeTone(event.kind);
   const countdown = countdownText(event.month, event.day);
   const years = eventYears(event);
   const hasComment = event.comments.trim().length > 0;
@@ -107,17 +114,20 @@ function EventStrip({ event, src, onOpen }: { event: AccountEvent; src: string |
       onClick={onOpen}
       className="grid w-full items-center gap-2 px-2 py-2 text-start"
       style={{ gridTemplateColumns: "4.75rem minmax(0, 1fr) 4.5rem 4.25rem", background: "linear-gradient(180deg, #e7e7e7 0%, #f4f4f4 100%)" }}
-      aria-label={`${event.name}, ${label}, ${countdown}${hasComment ? ", יש הערה" : ""}`}
+      aria-label={`${event.name}, ${label}, ${countdown}${passed ? ", אינם בחיים" : ""}${hasComment ? ", יש הערה" : ""}`}
     >
       <span className="relative block h-[5.5rem] overflow-hidden bg-neutral-300 text-neutral-500">
         {src ? <img src={src} alt="" className="absolute inset-0 size-full object-cover" /> : <ImageIcon className="absolute inset-0 m-auto size-8" />}
       </span>
       <span className="min-w-0">
         <span className="flex items-center gap-1">
+          {passed ? <PassedIcon className="size-4 shrink-0 text-red-700" /> : null}
           <span className="truncate text-lg font-semibold leading-tight">{event.name}</span>
           {hasComment ? <CommentIcon className="size-4 shrink-0 text-neutral-500" /> : null}
         </span>
-        <span className="mt-0.5 block text-sm leading-tight">{label}</span>
+        <span className="mt-1 inline-block max-w-full truncate rounded-full px-2 py-0.5 text-xs font-medium leading-5" style={{ background: tone.background, color: tone.color }}>
+          {label}
+        </span>
         <span className="mt-0.5 block text-sm leading-tight text-neutral-600">{countdown}</span>
       </span>
       <span className="text-center">

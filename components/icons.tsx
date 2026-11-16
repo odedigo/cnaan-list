@@ -163,6 +163,15 @@ export function CommentIcon(props: IconProps) {
   );
 }
 
+export function PassedIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true" {...props}>
+      <path d="M12 10.2c1.3-1.7 1.3-3.4 0-5.2-1.3 1.8-1.3 3.5 0 5.2Z" strokeLinejoin="round" />
+      <path d="M9 10.2h6V18a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1v-7.8Z" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 export function PlaneIcon(props: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true" {...props}>
