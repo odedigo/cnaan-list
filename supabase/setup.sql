@@ -130,6 +130,17 @@ create table if not exists public.events (
   constraint events_comments_length check (char_length(comments) <= 1000)
 );
 
+create table if not exists public.push_subscriptions (
+  id uuid primary key default gen_random_uuid(),
+  account_id uuid not null references public.accounts (id) on delete cascade,
+  endpoint text not null unique,
+  p256dh text not null,
+  auth text not null,
+  last_reminder_on date,
+  constraint push_subscriptions_endpoint_length check (char_length(endpoint) between 1 and 2000),
+  constraint push_subscriptions_key_length check (char_length(p256dh) between 1 and 200 and char_length(auth) between 1 and 200)
+);
+
 create table if not exists public.recipe_categories (
   id uuid primary key default gen_random_uuid(),
   account_id uuid not null references public.accounts (id) on delete cascade,
@@ -175,6 +186,7 @@ create index if not exists packing_lists_account_sort_idx on public.packing_list
 create index if not exists packing_categories_list_sort_idx on public.packing_categories (list_id, sort_order);
 create index if not exists packing_items_category_sort_idx on public.packing_items (category_id, sort_order);
 create index if not exists events_account_idx on public.events (account_id);
+create index if not exists push_subscriptions_account_idx on public.push_subscriptions (account_id);
 alter table public.recipe_categories add column if not exists protected boolean not null default false;
 
 create unique index if not exists recipe_categories_sibling_name_idx
@@ -202,6 +214,7 @@ alter table public.packing_lists enable row level security;
 alter table public.packing_categories enable row level security;
 alter table public.packing_items enable row level security;
 alter table public.events enable row level security;
+alter table public.push_subscriptions enable row level security;
 alter table public.recipe_categories enable row level security;
 alter table public.recipes enable row level security;
 alter table public.recipe_labels enable row level security;
@@ -294,6 +307,12 @@ create policy "own events"
   using (account_id in (select id from public.accounts where owner_id = auth.uid()))
   with check (account_id in (select id from public.accounts where owner_id = auth.uid()));
 
+drop policy if exists "own push subscriptions" on public.push_subscriptions;
+create policy "own push subscriptions"
+  on public.push_subscriptions for all to authenticated
+  using (account_id in (select id from public.accounts where owner_id = auth.uid()))
+  with check (account_id in (select id from public.accounts where owner_id = auth.uid()));
+
 drop policy if exists "own recipe categories" on public.recipe_categories;
 create policy "own recipe categories"
   on public.recipe_categories for all to authenticated
@@ -349,6 +368,7 @@ revoke all on public.packing_lists from anon;
 revoke all on public.packing_categories from anon;
 revoke all on public.packing_items from anon;
 revoke all on public.events from anon;
+revoke all on public.push_subscriptions from anon;
 revoke all on public.recipe_categories from anon;
 revoke all on public.recipes from anon;
 revoke all on public.recipe_labels from anon;
@@ -364,6 +384,7 @@ grant select, insert, update, delete on public.packing_lists to authenticated;
 grant select, insert, update, delete on public.packing_categories to authenticated;
 grant select, insert, update, delete on public.packing_items to authenticated;
 grant select, insert, update, delete on public.events to authenticated;
+grant select, insert, update, delete on public.push_subscriptions to authenticated;
 grant select, insert, update, delete on public.recipe_categories to authenticated;
 grant select, insert, update, delete on public.recipes to authenticated;
 grant select, insert, update, delete on public.recipe_labels to authenticated;

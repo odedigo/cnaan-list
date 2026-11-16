@@ -166,6 +166,9 @@ export function SignedInSettings({ username }: { username: string }) {
   const [accounts, setAccounts] = useState<SavedAccount[]>([]);
   const [userId, setUserId] = useState("");
   const [accountEmail, setAccountEmail] = useState("");
+  const [reminderPending, setReminderPending] = useState(false);
+  const [reminderMessage, setReminderMessage] = useState("");
+  const [reminderOk, setReminderOk] = useState(false);
   useEffect(() => {
     setKeepAwake(readKeepAwake());
     setRecipeAdvanced(readRecipeAdvanced());
@@ -242,6 +245,21 @@ export function SignedInSettings({ username }: { username: string }) {
           !accounts.some((account) => account.userId === currentValue)
         ? [...accounts, currentOption]
         : accounts;
+  async function sendReminder() {
+    setReminderPending(true);
+    setReminderMessage("");
+    try {
+      const response = await fetch("/api/event-reminders", { method: "POST" });
+      const body = (await response.json().catch(() => null)) as { ok?: boolean; message?: string } | null;
+      setReminderOk(response.ok && body?.ok === true);
+      setReminderMessage(body?.message || "לא ניתן לשלוח תזכורת");
+    } catch {
+      setReminderOk(false);
+      setReminderMessage("לא ניתן לשלוח תזכורת");
+    } finally {
+      setReminderPending(false);
+    }
+  }
   async function handleLogout() {
     setPending(true);
     try {
@@ -333,6 +351,15 @@ export function SignedInSettings({ username }: { username: string }) {
             />
             <span>הצגת פעולות מתקדמות במתכונים</span>
           </label>
+          <button
+            type="button"
+            disabled={reminderPending}
+            onClick={() => void sendReminder()}
+            className="mt-4 w-full rounded-lg border border-neutral-300 py-2.5 text-sm font-medium disabled:opacity-60"
+          >
+            {reminderPending ? "שולח…" : "שליחת תזכורת לארועים"}
+          </button>
+          {reminderMessage ? <p className={`mt-2 text-sm ${reminderOk ? "text-neutral-600" : "text-red-600"}`}>{reminderMessage}</p> : null}
         </div>
         <StoresEditor />
       </div>

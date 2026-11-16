@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 
 import { AppShell } from "@/components/app-shell";
+import { EventReminders } from "@/components/event-reminders";
 import { StartAtGrocery } from "@/components/start-at-grocery";
 import { ListsProvider } from "@/components/lists-provider";
 
@@ -23,5 +24,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     </>
   );
 
-  return signedIn ? <ListsProvider>{content}</ListsProvider> : content;
+  return signedIn ? (
+    <ListsProvider>
+      <EventReminders />
+      {content}
+    </ListsProvider>
+  ) : (
+    content
+  );
 }

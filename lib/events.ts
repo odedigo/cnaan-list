@@ -98,6 +98,25 @@ export function eventDraftError(draft: EventDraft) {
   return null;
 }
 
+/** Events whose next occurrence is today or within the following days. `days` includes today. */
+export function eventsWithinDays<T extends { month: number; day: number; name: string }>(events: T[], days: number, today = new Date()) {
+  const span = Math.min(30, Math.max(1, Math.floor(days)));
+  return events
+    .filter((event) => daysUntil(event.month, event.day, today) < span)
+    .sort((a, b) => {
+      const byDay = daysUntil(a.month, a.day, today) - daysUntil(b.month, b.day, today);
+      if (byDay !== 0) return byDay;
+      return a.name.localeCompare(b.name, "he");
+    });
+}
+
+export function eventReminderCopy(event: Pick<AccountEvent, "kind" | "label" | "name" | "year" | "month" | "day">, today = new Date()) {
+  const years = eventYears(event, today);
+  const count = years == null ? "" : years.upcoming ? `יהיה ${years.years}` : String(years.years);
+  const body = [eventTypeLabel(event), countdownText(event.month, event.day, today), count].filter((part) => part.length > 0).join(" · ");
+  return { title: event.name.trim() || "אירוע", body };
+}
+
 export function eventRecord(draft: EventDraft) {
   return {
     kind: draft.kind,
