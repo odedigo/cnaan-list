@@ -13,6 +13,7 @@ import Link from "next/link";
 
 import { login, logout } from "@/app/actions/auth";
 import { AppHeader } from "@/components/app-header";
+import { eventRemindersEvent } from "@/components/event-reminders";
 import { ChevronIcon, UserIcon } from "@/components/icons";
 import { useLists } from "@/components/lists-provider";
 import { colorHex } from "@/lib/colors";
@@ -169,6 +170,7 @@ export function SignedInSettings({ username }: { username: string }) {
   const [reminderPending, setReminderPending] = useState(false);
   const [reminderMessage, setReminderMessage] = useState("");
   const [reminderOk, setReminderOk] = useState(false);
+  const [eventReminders, setEventReminders] = useState(true);
   useEffect(() => {
     setKeepAwake(readKeepAwake());
     setRecipeAdvanced(readRecipeAdvanced());
@@ -201,15 +203,17 @@ export function SignedInSettings({ username }: { username: string }) {
     let cancel = false;
     const supabase = createClient();
     void (async () => {
-      const [{ data: sessionData }, { data: profile }] = await Promise.all([
+      const [{ data: sessionData }, { data: profile }, { data: account }] = await Promise.all([
         supabase.auth.getSession(),
         supabase
           .from("profiles")
           .select("email")
           .eq("id", userId)
           .maybeSingle(),
+        supabase.from("accounts").select("event_reminders").eq("owner_id", userId).maybeSingle(),
       ]);
       if (cancel) return;
+      if (account) setEventReminders(account.event_reminders !== false);
       const sessionEmail =
         sessionData.session?.user.id === userId
           ? (sessionData.session.user.email?.trim() ?? "")
@@ -245,6 +249,19 @@ export function SignedInSettings({ username }: { username: string }) {
           !accounts.some((account) => account.userId === currentValue)
         ? [...accounts, currentOption]
         : accounts;
+  async function writeEventReminders(enabled: boolean) {
+    if (!userId) return;
+    const previous = eventReminders;
+    setEventReminders(enabled);
+    const { error } = await createClient().from("accounts").update({ event_reminders: enabled }).eq("owner_id", userId);
+    if (error) {
+      setEventReminders(previous);
+      setReminderOk(false);
+      setReminderMessage("לא ניתן לשמור את ההגדרה");
+      return;
+    }
+    window.dispatchEvent(new CustomEvent(eventRemindersEvent, { detail: enabled }));
+  }
   async function sendReminder() {
     setReminderPending(true);
     setReminderMessage("");
@@ -350,6 +367,17 @@ export function SignedInSettings({ username }: { username: string }) {
               className="size-5 accent-[var(--teal)]"
             />
             <span>הצגת פעולות מתקדמות במתכונים</span>
+          </label>
+          <label className="mt-3 flex items-center gap-3 text-sm">
+            <input
+              type="checkbox"
+              checked={eventReminders}
+              onChange={(event) => {
+                void writeEventReminders(event.target.checked);
+              }}
+              className="size-5 accent-[var(--teal)]"
+            />
+            <span>תזכורות לארועים</span>
           </label>
           <button
             type="button"

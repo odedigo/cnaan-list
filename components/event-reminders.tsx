@@ -4,7 +4,10 @@
 
 import { useEffect } from "react";
 
+import { createClient } from "@/lib/supabase/client";
 import { isInstalledApp } from "@/lib/installed-app";
+
+export const eventRemindersEvent = "cnaanlist-event-reminders";
 
 export function EventReminders() {
   useEffect(() => {
@@ -13,15 +16,38 @@ export function EventReminders() {
     const key = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? "";
     if (!key) return;
 
-    const enable = () => {
-      void subscribe(key);
+    let cancelled = false;
+    let detachGesture = () => {};
+    const arm = () => {
+      detachGesture();
+      const enable = () => {
+        void subscribe(key);
+      };
+      if (Notification.permission === "granted") enable();
+      else if (Notification.permission === "default") {
+        enable();
+        window.addEventListener("pointerdown", enable, { once: true });
+        detachGesture = () => window.removeEventListener("pointerdown", enable);
+      }
     };
-    if (Notification.permission === "granted") enable();
-    else if (Notification.permission === "default") {
-      enable();
-      window.addEventListener("pointerdown", enable, { once: true });
-    }
-    return () => window.removeEventListener("pointerdown", enable);
+    const onChange = (event: Event) => {
+      if ((event as CustomEvent<boolean>).detail) arm();
+    };
+
+    void (async () => {
+      const supabase = createClient();
+      const { data: userData } = await supabase.auth.getUser();
+      if (!userData.user || cancelled) return;
+      const { data } = await supabase.from("accounts").select("event_reminders").eq("owner_id", userData.user.id).maybeSingle();
+      if (cancelled || data?.event_reminders === false) return;
+      arm();
+    })();
+    window.addEventListener(eventRemindersEvent, onChange);
+    return () => {
+      cancelled = true;
+      detachGesture();
+      window.removeEventListener(eventRemindersEvent, onChange);
+    };
   }, []);
 
   return null;

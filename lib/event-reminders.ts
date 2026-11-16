@@ -40,7 +40,11 @@ export async function sendDueReminders(now = new Date()) {
   const subscriptions = (data ?? []) as SubscriptionRow[];
   if (subscriptions.length === 0) return { sent: 0, waiting: false, configured: true };
 
-  const events = await loadEvents([...new Set(subscriptions.map((row) => row.account_id))]);
+  const enabledAccounts = await reminderAccounts(subscriptions.map((row) => row.account_id));
+  const pending = subscriptions.filter((row) => enabledAccounts.has(row.account_id));
+  if (pending.length === 0) return { sent: 0, waiting: false, configured: true };
+
+  const events = await loadEvents([...new Set(pending.map((row) => row.account_id))]);
   const byAccount = new Map<string, typeof events>();
   for (const event of events) {
     const list = byAccount.get(event.account_id) ?? [];
@@ -49,8 +53,8 @@ export async function sendDueReminders(now = new Date()) {
   }
 
   let sent = 0;
-  for (let index = 0; index < subscriptions.length; index += 8) {
-    const batch = subscriptions.slice(index, index + 8);
+  for (let index = 0; index < pending.length; index += 8) {
+    const batch = pending.slice(index, index + 8);
     const results = await Promise.all(batch.map((subscription) => deliver(subscription, byAccount.get(subscription.account_id) ?? [], settings.days, zoned)));
     sent += results.filter(Boolean).length;
   }
@@ -61,6 +65,8 @@ export async function sendAccountReminder(accountId: string, now = new Date()) {
   const settings = reminderSettings();
   const zoned = zonedNow(settings.timeZone, now);
   if (!hasServiceEnv() || !configureVapid()) return { ok: false, message: "התזכורות אינן מוגדרות" };
+  const enabledAccounts = await reminderAccounts([accountId]);
+  if (!enabledAccounts.has(accountId)) return { ok: false, message: "תזכורות הארועים כבויות" };
 
   const admin = createAdminClient();
   const { data, error } = await admin
@@ -133,6 +139,20 @@ async function claim(subscription: SubscriptionRow, iso: string) {
     .select("id");
   if (error) throw new Error(error.message);
   return (data ?? []).length > 0;
+}
+
+async function reminderAccounts(accountIds: string[]) {
+  const ids = [...new Set(accountIds)];
+  const enabled = new Set<string>();
+  const admin = createAdminClient();
+  for (let index = 0; index < ids.length; index += 100) {
+    const { data, error } = await admin.from("accounts").select("id, event_reminders").in("id", ids.slice(index, index + 100));
+    if (error) throw new Error(error.message);
+    for (const account of data ?? []) {
+      if (account.event_reminders !== false) enabled.add(account.id);
+    }
+  }
+  return enabled;
 }
 
 async function loadEvents(accountIds: string[]) {

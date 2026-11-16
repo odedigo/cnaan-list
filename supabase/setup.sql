@@ -17,7 +17,8 @@ create unique index if not exists profiles_username_lower_idx on public.profiles
 
 create table if not exists public.accounts (
   id uuid primary key default gen_random_uuid(),
-  owner_id uuid not null unique references public.profiles (id) on delete cascade
+  owner_id uuid not null unique references public.profiles (id) on delete cascade,
+  event_reminders boolean not null default true
 );
 
 create table if not exists public.stores (
@@ -229,6 +230,14 @@ create policy "read own account"
   on public.accounts for select to authenticated
   using (owner_id = auth.uid());
 
+alter table public.accounts add column if not exists event_reminders boolean not null default true;
+
+drop policy if exists "update own event reminders" on public.accounts;
+create policy "update own event reminders"
+  on public.accounts for update to authenticated
+  using (owner_id = auth.uid())
+  with check (owner_id = auth.uid());
+
 drop policy if exists "own stores" on public.stores;
 create policy "own stores"
   on public.stores for all to authenticated
@@ -375,6 +384,7 @@ revoke all on public.recipe_labels from anon;
 
 grant select on public.profiles to authenticated;
 grant select on public.accounts to authenticated;
+grant update (event_reminders) on public.accounts to authenticated;
 grant select, insert, update, delete on public.stores to authenticated;
 grant select, insert, update, delete on public.categories to authenticated;
 grant select, insert, update, delete on public.items to authenticated;
