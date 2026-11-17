@@ -1,6 +1,6 @@
 "use client";
 
-/** Full-screen family chart. A portrait phone asks to rotate; landscape shows the chart. */
+/** Full-screen family chart. It stays available in portrait and in landscape. */
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
@@ -45,7 +45,6 @@ export function TreeEditor({
   onPersonImage: (personId: string, file: File | null) => Promise<void>;
 }) {
   const [ready, setReady] = useState(false);
-  const portraitPhone = usePortraitPhone();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -59,14 +58,6 @@ export function TreeEditor({
     document.body.style.overflow = "hidden";
     return () => {
       document.body.style.overflow = previous;
-    };
-  }, []);
-  useEffect(() => {
-    const orientation = window.screen?.orientation;
-    if (!orientation?.lock) return;
-    void orientation.lock("landscape").catch(() => undefined);
-    return () => {
-      void orientation.unlock?.();
     };
   }, []);
   useEffect(() => {
@@ -91,43 +82,34 @@ export function TreeEditor({
   const panel = (
     <div dir="rtl" className="fixed inset-0 z-[80] flex flex-col bg-[var(--cream)] text-neutral-900" role="dialog" aria-modal="true" aria-label={name}>
       {error ? <p className="mx-3 mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p> : null}
-      {portraitPhone ? (
-        <div className="flex flex-1 flex-col items-center justify-center px-8 text-center">
-          <p className="text-2xl font-semibold">סובבו את המסך לרוחב</p>
-          <p className="mt-3 text-neutral-600">עריכת העץ נפתחת לרוחב</p>
-        </div>
-      ) : (
-        <>
-        <Chart
-          graph={graph}
-          loading={!graph && !error}
-          selectedId={selected?.id ?? null}
-          detailsOpen={detailsOpen}
-          busy={busy}
-          jumpId={jump?.id ?? null}
-          jumpToken={jump?.token ?? 0}
-          onSelect={(id) => {
-            setSelectedId(id);
-            setDetailsOpen(true);
-            setQuery("");
-            setSearchOpen(false);
-          }}
-          onDismiss={() => setDetailsOpen(false)}
-          onCreate={async () => {
-            const id = await onCreatePerson();
-            if (!id) return;
-            setSelectedId(id);
-            setDetailsOpen(true);
-          }}
-          onLoadImage={onLoadImage}
-        />
-        </>
-      )}
+      <Chart
+        graph={graph}
+        loading={!graph && !error}
+        selectedId={selected?.id ?? null}
+        detailsOpen={detailsOpen}
+        busy={busy}
+        jumpId={jump?.id ?? null}
+        jumpToken={jump?.token ?? 0}
+        onSelect={(id) => {
+          setSelectedId(id);
+          setDetailsOpen(true);
+          setQuery("");
+          setSearchOpen(false);
+        }}
+        onDismiss={() => setDetailsOpen(false)}
+        onCreate={async () => {
+          const id = await onCreatePerson();
+          if (!id) return;
+          setSelectedId(id);
+          setDetailsOpen(true);
+        }}
+        onLoadImage={onLoadImage}
+      />
       <div className="absolute start-3 top-3 z-20 flex items-start gap-2">
         <button type="button" className="grid size-10 shrink-0 place-items-center rounded-full bg-white shadow" aria-label="חזרה" onClick={onBack}>
           <ChevronIcon className="size-6 rotate-90" />
         </button>
-        {!portraitPhone && graph && graph.people.length > 0 ? (
+        {graph && graph.people.length > 0 ? (
           <PersonSearch
             open={searchOpen}
             query={query}
@@ -142,7 +124,7 @@ export function TreeEditor({
           />
         ) : null}
       </div>
-      {graph && selected && detailsOpen && !portraitPhone ? (
+      {graph && selected && detailsOpen ? (
         <PersonDialog
           person={selected}
           graph={graph}
@@ -859,37 +841,6 @@ function DateField({ label, value, onChange }: { label: string; value: string; o
       ) : null}
     </label>
   );
-}
-
-function usePortraitPhone() {
-  const [portraitPhone, setPortraitPhone] = useState(false);
-  useLayoutEffect(() => {
-    const coarse = window.matchMedia("(hover: none), (pointer: coarse)");
-    const update = () => setPortraitPhone(phoneIsPortrait(coarse.matches));
-    update();
-    coarse.addEventListener("change", update);
-    window.addEventListener("resize", update);
-    window.addEventListener("orientationchange", update);
-    window.screen?.orientation?.addEventListener("change", update);
-    const viewport = window.visualViewport;
-    viewport?.addEventListener("resize", update);
-    return () => {
-      coarse.removeEventListener("change", update);
-      window.removeEventListener("resize", update);
-      window.removeEventListener("orientationchange", update);
-      window.screen?.orientation?.removeEventListener("change", update);
-      viewport?.removeEventListener("resize", update);
-    };
-  }, []);
-  return portraitPhone;
-}
-
-function phoneIsPortrait(coarse: boolean) {
-  const shortSide = Math.min(window.innerWidth, window.innerHeight);
-  if (!coarse || shortSide > 900) return false;
-  const type = window.screen?.orientation?.type ?? "";
-  if (type.startsWith("landscape") || window.innerWidth > window.innerHeight) return false;
-  return true;
 }
 
 function draftOf(person: FamilyPerson): PersonDraft {
