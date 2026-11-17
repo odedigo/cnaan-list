@@ -1,6 +1,6 @@
 "use client";
 
-/** Full-screen family chart. On a phone in portrait it asks to rotate. */
+/** Full-screen family chart. A portrait phone asks to rotate; landscape shows the chart. */
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
@@ -244,25 +244,31 @@ function Chart({
   useLayoutEffect(() => {
     const node = canvas.current;
     if (!node || layout.boxes.length === 0) return;
-    const rect = node.getBoundingClientRect();
-    if (rect.width < 40 || rect.height < 40) return;
-    const next = new Map(layout.boxes.map((box) => [box.id, box]));
-    const previous = placed.current;
-    const before = selectedId ? previous.get(selectedId) : undefined;
-    const after = selectedId ? next.get(selectedId) : undefined;
-    placed.current = next;
-    if (before && after) {
-      if (before.x === after.x && before.y === after.y) return;
-      setView((current) => ({
-        ...current,
-        x: current.x + (before.x - after.x) * current.scale,
-        y: current.y + (before.y - after.y) * current.scale,
-      }));
-      return;
-    }
-    const sameTree = layout.boxes.some((box) => previous.has(box.id));
-    if (previous.size > 0 && sameTree) return;
-    setView(centerView(layout.boxes, rect.width, rect.height));
+    const place = () => {
+      const rect = node.getBoundingClientRect();
+      if (rect.width < 40 || rect.height < 40) return;
+      const next = new Map(layout.boxes.map((box) => [box.id, box]));
+      const previous = placed.current;
+      const before = selectedId ? previous.get(selectedId) : undefined;
+      const after = selectedId ? next.get(selectedId) : undefined;
+      placed.current = next;
+      if (before && after) {
+        if (before.x === after.x && before.y === after.y) return;
+        setView((current) => ({
+          ...current,
+          x: current.x + (before.x - after.x) * current.scale,
+          y: current.y + (before.y - after.y) * current.scale,
+        }));
+        return;
+      }
+      const sameTree = layout.boxes.some((box) => previous.has(box.id));
+      if (previous.size > 0 && sameTree) return;
+      setView(centerView(layout.boxes, rect.width, rect.height));
+    };
+    place();
+    const observer = new ResizeObserver(place);
+    observer.observe(node);
+    return () => observer.disconnect();
   }, [layout.boxes, selectedId]);
 
   useLayoutEffect(() => {
@@ -858,13 +864,32 @@ function DateField({ label, value, onChange }: { label: string; value: string; o
 function usePortraitPhone() {
   const [portraitPhone, setPortraitPhone] = useState(false);
   useLayoutEffect(() => {
-    const query = window.matchMedia("(orientation: portrait) and (max-width: 900px) and (hover: none), (orientation: portrait) and (max-width: 900px) and (pointer: coarse)");
-    const update = () => setPortraitPhone(query.matches);
+    const coarse = window.matchMedia("(hover: none), (pointer: coarse)");
+    const update = () => setPortraitPhone(phoneIsPortrait(coarse.matches));
     update();
-    query.addEventListener("change", update);
-    return () => query.removeEventListener("change", update);
+    coarse.addEventListener("change", update);
+    window.addEventListener("resize", update);
+    window.addEventListener("orientationchange", update);
+    window.screen?.orientation?.addEventListener("change", update);
+    const viewport = window.visualViewport;
+    viewport?.addEventListener("resize", update);
+    return () => {
+      coarse.removeEventListener("change", update);
+      window.removeEventListener("resize", update);
+      window.removeEventListener("orientationchange", update);
+      window.screen?.orientation?.removeEventListener("change", update);
+      viewport?.removeEventListener("resize", update);
+    };
   }, []);
   return portraitPhone;
+}
+
+function phoneIsPortrait(coarse: boolean) {
+  const shortSide = Math.min(window.innerWidth, window.innerHeight);
+  if (!coarse || shortSide > 900) return false;
+  const type = window.screen?.orientation?.type ?? "";
+  if (type.startsWith("landscape") || window.innerWidth > window.innerHeight) return false;
+  return true;
 }
 
 function draftOf(person: FamilyPerson): PersonDraft {
