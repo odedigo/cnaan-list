@@ -42,8 +42,10 @@ export function ChecklistPage({ active = true }: { active?: boolean }) {
   const moved = useRef(false);
   const drag = useRef<{ id: string; x: number; y: number } | null>(null);
   const saveTimer = useRef(0);
+  const listsRef = useRef(lists);
   draftRef.current = draft;
   selectedRef.current = selectedId;
+  listsRef.current = lists;
 
   const openRows = activeEntries(lists.checklist);
   const done = doneEntries(lists.checklist);
@@ -69,13 +71,14 @@ export function ChecklistPage({ active = true }: { active?: boolean }) {
 
   useEffect(() => {
     if (active) return;
-    setMenuId(null);
+    setMenuId((current) => (current === null ? current : null));
     const id = selectedRef.current;
     if (!id) return;
+    selectedRef.current = null;
     window.clearTimeout(saveTimer.current);
-    void lists.setChecklistBody(id, draftRef.current);
+    void listsRef.current.setChecklistBody(id, draftRef.current);
     setSelectedId(null);
-  }, [active, lists]);
+  }, [active]);
 
   useEffect(() => {
     if (!active || !selectedId) return;
@@ -85,12 +88,12 @@ export function ChecklistPage({ active = true }: { active?: boolean }) {
       const id = selectedRef.current;
       if (!id) return;
       window.clearTimeout(saveTimer.current);
-      void lists.setChecklistBody(id, draftRef.current);
+      void listsRef.current.setChecklistBody(id, draftRef.current);
       setSelectedId(null);
     }
     document.addEventListener("pointerdown", onPointerDown, true);
     return () => document.removeEventListener("pointerdown", onPointerDown, true);
-  }, [active, lists, selectedId]);
+  }, [active, selectedId]);
 
   function flushDraft(id: string | null, text: string) {
     window.clearTimeout(saveTimer.current);

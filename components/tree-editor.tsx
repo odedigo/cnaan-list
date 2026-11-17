@@ -558,11 +558,13 @@ function PersonDialog({
   const [spouseName, setSpouseName] = useState("");
   const [spouseStatus, setSpouseStatus] = useState<UnionStatus>("married");
   const [photoOpen, setPhotoOpen] = useState(false);
+  const [tab, setTab] = useState<PersonTab>("details");
   useEffect(() => setDraft(draftOf(person)), [person]);
   useEffect(() => {
     setSpouseName("");
     setSpouseStatus("married");
     setPhotoOpen(false);
+    setTab("details");
   }, [person.id]);
   useEffect(() => {
     const path = person.image_path;
@@ -590,10 +592,10 @@ function PersonDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true" aria-label={personName(person)}>
+    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/40 p-2" role="dialog" aria-modal="true" aria-label={personName(person)}>
       <form
-        className="overflow-y-auto rounded-2xl bg-white p-4 text-start text-base"
-        style={{ width: "min(920px, calc(100vw - 2rem))", maxHeight: "calc(100vh - 2rem)" }}
+        className="flex flex-col overflow-hidden rounded-2xl bg-white p-4 text-start"
+        style={{ width: "min(1040px, calc(100vw - 1rem))", height: "min(720px, calc(100dvh - 1rem))", fontSize: "1.25rem" }}
         onSubmit={(event) => {
           event.preventDefault();
           void onSave(draft);
@@ -601,104 +603,144 @@ function PersonDialog({
       >
         <div className="flex items-center gap-3">
           {src ? (
-            <button type="button" className="grid size-14 shrink-0 place-items-center overflow-hidden rounded-full bg-neutral-100" aria-label={`הגדלת התמונה של ${personName(person)}`} onClick={() => setPhotoOpen(true)}>
+            <button type="button" className="grid size-16 shrink-0 place-items-center overflow-hidden rounded-full bg-neutral-100" aria-label={`הגדלת התמונה של ${personName(person)}`} onClick={() => setPhotoOpen(true)}>
               <img src={src} alt="" className="size-full object-cover" />
             </button>
           ) : (
-            <span className="grid size-14 shrink-0 place-items-center overflow-hidden rounded-full bg-neutral-100 text-sm text-neutral-400">אין תמונה</span>
+            <span className="grid size-16 shrink-0 place-items-center overflow-hidden rounded-full bg-neutral-100 text-neutral-400" style={{ fontSize: "1rem" }}>אין תמונה</span>
           )}
-          <p className="min-w-0 text-xl font-semibold">{personName(person)}</p>
+          <p className="min-w-0 font-semibold" style={{ fontSize: "1.5rem" }}>{personName(person)}</p>
         </div>
-        <div className="mt-3 grid grid-cols-2 gap-3">
-          <Field label="שם פרטי" value={draft.given_name} maxLength={80} onChange={(value) => setField("given_name", value)} />
-          <Field label="שם משפחה" value={draft.surname} maxLength={80} onChange={(value) => setField("surname", value)} />
-          <label className="block">
-            <span className="text-neutral-600">מין</span>
-            <select className="mt-1 w-full rounded-xl border border-neutral-300 bg-white py-2 ps-3 text-base outline-none" value={draft.sex} onChange={(event) => setField("sex", event.target.value as PersonDraft["sex"])}>
-              <option value="m">זכר</option>
-              <option value="f">נקבה</option>
-              <option value="u">לא ידוע</option>
-            </select>
-          </label>
-          <label className="flex items-end gap-2 pb-2">
-            <input type="checkbox" className="size-5" checked={draft.deceased} onChange={(event) => setField("deceased", event.target.checked)} />
-            <span>נפטר/ה</span>
-          </label>
-          <DateField label="תאריך לידה" value={draft.birth_date} onChange={(value) => setField("birth_date", value)} />
-          <Field label="מקום לידה" value={draft.birth_place} maxLength={120} onChange={(value) => setField("birth_place", value)} />
-          <DateField
-            label="תאריך פטירה"
-            value={draft.death_date}
-            onChange={(value) => setDraft((current) => ({ ...current, death_date: value, deceased: value.trim() ? true : current.deceased }))}
-          />
-          <Field label="מקום פטירה" value={draft.death_place} maxLength={120} onChange={(value) => setField("death_place", value)} />
-          <label className="col-span-2 block">
-            <span className="text-neutral-600">הערה</span>
-            <textarea value={draft.note} maxLength={1000} rows={2} onChange={(event) => setField("note", event.target.value)} className="mt-1 w-full rounded-xl border border-neutral-300 px-3 py-2 text-base outline-none" aria-label="הערה" />
-          </label>
+        <div role="tablist" aria-label="פרטי האדם" className="mt-3 flex shrink-0 flex-wrap gap-1 border-b border-neutral-200">
+          {personTabs.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              role="tab"
+              aria-selected={tab === item.id}
+              className="px-3 py-2 font-medium"
+              style={{ borderBottom: tab === item.id ? "3px solid var(--teal)" : "3px solid transparent", color: tab === item.id ? "#171717" : "#737373" }}
+              onClick={() => setTab(item.id)}
+            >
+              {item.label}
+            </button>
+          ))}
         </div>
-        <div className="mt-3">
-          <p className="text-neutral-600">בן/בת זוג</p>
-          {spouses.length === 0 ? <p className="mt-1 text-neutral-500">אין</p> : null}
-          <ul className="mt-2 flex flex-col gap-2">
-            {spouses.map((link) => (
-              <li key={link.unionId} className="flex items-center gap-2">
-                <button type="button" className="min-w-0 flex-1 truncate rounded-xl bg-neutral-100 px-3 py-2 text-start text-base" onClick={() => onOpenPerson(link.person.id)}>
-                  {personName(link.person)}
+        <div role="tabpanel" className="mt-4 min-h-0 flex-1 overflow-y-auto">
+          {tab === "details" ? (
+            <div className="grid gap-4">
+              <Field label="שם פרטי" value={draft.given_name} maxLength={80} onChange={(value) => setField("given_name", value)} />
+              <Field label="שם משפחה" value={draft.surname} maxLength={80} onChange={(value) => setField("surname", value)} />
+              <label className="block">
+                <span className="text-neutral-600">מין</span>
+                <select className="mt-1 w-full rounded-xl border border-neutral-300 bg-white py-3 ps-3 outline-none" style={{ fontSize: "1.25rem" }} value={draft.sex} onChange={(event) => setField("sex", event.target.value as PersonDraft["sex"])}>
+                  <option value="m">זכר</option>
+                  <option value="f">נקבה</option>
+                  <option value="u">לא ידוע</option>
+                </select>
+              </label>
+              <label className="flex items-center gap-3">
+                <input type="checkbox" className="size-6" checked={draft.deceased} onChange={(event) => setField("deceased", event.target.checked)} />
+                <span>נפטר/ה</span>
+              </label>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" className="rounded-xl bg-neutral-100 px-4 py-3 font-medium disabled:opacity-40" disabled={busy} onClick={() => fileRef.current?.click()}>
+                  {person.image_path ? "החלפת תמונה" : "הוספת תמונה"}
                 </button>
-                <select
-                  className="w-44 rounded-xl border border-neutral-300 bg-white py-2 ps-3 text-base outline-none"
-                  aria-label={`סטטוס של ${personName(link.person)}`}
-                  value={link.status}
-                  disabled={busy}
-                  onChange={(event) => void onSetUnionStatus(link.unionId, event.target.value as UnionStatus)}
-                >
+                {person.image_path ? (
+                  <button type="button" className="rounded-xl bg-neutral-100 px-4 py-3 font-medium text-red-700 disabled:opacity-40" disabled={busy} onClick={() => onImage(null)}>
+                    הסרת תמונה
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+          {tab === "dates" ? (
+            <div className="grid gap-4">
+              <DateField label="תאריך לידה" value={draft.birth_date} onChange={(value) => setField("birth_date", value)} />
+              <Field label="מקום לידה" value={draft.birth_place} maxLength={120} onChange={(value) => setField("birth_place", value)} />
+              <DateField
+                label="תאריך פטירה"
+                value={draft.death_date}
+                onChange={(value) => setDraft((current) => ({ ...current, death_date: value, deceased: value.trim() ? true : current.deceased }))}
+              />
+              <Field label="מקום פטירה" value={draft.death_place} maxLength={120} onChange={(value) => setField("death_place", value)} />
+            </div>
+          ) : null}
+          {tab === "family" ? (
+            <div>
+              <p className="text-neutral-600">בן/בת זוג</p>
+              {spouses.length === 0 ? <p className="mt-2 text-neutral-500">אין</p> : null}
+              <ul className="mt-3 flex flex-col gap-3">
+                {spouses.map((link) => (
+                  <li key={link.unionId} className="flex flex-col gap-2">
+                    <button type="button" className="min-w-0 truncate rounded-xl bg-neutral-100 px-3 py-3 text-start" onClick={() => onOpenPerson(link.person.id)}>
+                      {personName(link.person)}
+                    </button>
+                    <select
+                      className="w-full rounded-xl border border-neutral-300 bg-white py-3 ps-3 outline-none"
+                      style={{ fontSize: "1.25rem" }}
+                      aria-label={`סטטוס של ${personName(link.person)}`}
+                      value={link.status}
+                      disabled={busy}
+                      onChange={(event) => void onSetUnionStatus(link.unionId, event.target.value as UnionStatus)}
+                    >
+                      {UNION_STATUSES.map((status) => (
+                        <option key={status} value={status}>
+                          {unionStatusLabel(status)}
+                        </option>
+                      ))}
+                    </select>
+                  </li>
+                ))}
+              </ul>
+              <div className="mt-4 grid gap-2">
+                <input
+                  value={spouseName}
+                  maxLength={80}
+                  onChange={(event) => setSpouseName(event.target.value)}
+                  placeholder="שם"
+                  aria-label="שם בן או בת הזוג"
+                  className="w-full rounded-xl border border-neutral-300 px-3 py-3 outline-none"
+                  style={{ fontSize: "1.25rem" }}
+                />
+                <select className="w-full rounded-xl border border-neutral-300 bg-white py-3 ps-3 outline-none" style={{ fontSize: "1.25rem" }} aria-label="סטטוס הזוגיות" value={spouseStatus} onChange={(event) => setSpouseStatus(event.target.value as UnionStatus)}>
                   {UNION_STATUSES.map((status) => (
                     <option key={status} value={status}>
                       {unionStatusLabel(status)}
                     </option>
                   ))}
                 </select>
-              </li>
-            ))}
-          </ul>
-          <div className="mt-2 flex items-center gap-2">
-            <input
-              value={spouseName}
-              maxLength={80}
-              onChange={(event) => setSpouseName(event.target.value)}
-              placeholder="שם"
-              aria-label="שם בן או בת הזוג"
-              className="min-w-0 flex-1 rounded-xl border border-neutral-300 px-3 py-2 text-base outline-none"
-            />
-            <select className="w-44 rounded-xl border border-neutral-300 bg-white py-2 ps-3 text-base outline-none" aria-label="סטטוס הזוגיות" value={spouseStatus} onChange={(event) => setSpouseStatus(event.target.value as UnionStatus)}>
-              {UNION_STATUSES.map((status) => (
-                <option key={status} value={status}>
-                  {unionStatusLabel(status)}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              className="shrink-0 rounded-xl bg-neutral-100 px-4 py-2 font-medium disabled:opacity-40"
-              disabled={busy}
-              onClick={() => {
-                const typed = spouseName.trim();
-                const match = typed ? graph.people.find((item) => item.id !== person.id && personName(item) === typed) : undefined;
-                const parts = splitName(typed);
-                void onAddSpouse({
-                  given_name: match ? match.given_name : parts.given,
-                  surname: match ? match.surname : parts.surname,
-                  status: spouseStatus,
-                  spouseId: match?.id ?? null,
-                }).then((id) => {
-                  if (id) setSpouseName("");
-                });
-              }}
-            >
-              הוספה לעץ
-            </button>
-          </div>
+                <button
+                  type="button"
+                  className="rounded-xl bg-neutral-100 px-4 py-3 font-medium disabled:opacity-40"
+                  disabled={busy}
+                  onClick={() => {
+                    const typed = spouseName.trim();
+                    const match = typed ? graph.people.find((item) => item.id !== person.id && personName(item) === typed) : undefined;
+                    const parts = splitName(typed);
+                    void onAddSpouse({
+                      given_name: match ? match.given_name : parts.given,
+                      surname: match ? match.surname : parts.surname,
+                      status: spouseStatus,
+                      spouseId: match?.id ?? null,
+                    }).then((id) => {
+                      if (id) setSpouseName("");
+                    });
+                  }}
+                >
+                  הוספה לעץ
+                </button>
+              </div>
+            </div>
+          ) : null}
+          {tab === "connections" ? <ConnectionSummary personId={person.id} graph={graph} onOpenPerson={onOpenPerson} /> : null}
+          {tab === "note" ? (
+            <label className="block">
+              <span className="text-neutral-600">הערה</span>
+              <textarea value={draft.note} maxLength={1000} rows={8} onChange={(event) => setField("note", event.target.value)} className="mt-1 w-full rounded-xl border border-neutral-300 px-3 py-3 outline-none" style={{ fontSize: "1.25rem" }} aria-label="הערה" />
+            </label>
+          ) : null}
         </div>
         <input
           ref={fileRef}
@@ -711,28 +753,20 @@ function PersonDialog({
             if (file) onImage(file);
           }}
         />
-        <div className="mt-3 flex flex-wrap gap-2">
-          <button type="button" className="rounded-xl bg-neutral-100 px-4 py-2.5 font-medium disabled:opacity-40" disabled={busy} onClick={() => fileRef.current?.click()}>
-            {person.image_path ? "החלפת תמונה" : "הוספת תמונה"}
-          </button>
-          {person.image_path ? (
-            <button type="button" className="rounded-xl bg-neutral-100 px-4 py-2.5 font-medium text-red-700 disabled:opacity-40" disabled={busy} onClick={() => onImage(null)}>
-              הסרת תמונה
-            </button>
-          ) : null}
-          <button type="submit" className="rounded-xl bg-[var(--teal)] px-4 py-2.5 font-medium text-white disabled:opacity-40" disabled={busy}>
+        <div className="mt-3 flex shrink-0 flex-wrap gap-2">
+          <button type="submit" className="rounded-xl bg-[var(--teal)] px-4 py-3 font-medium text-white disabled:opacity-40" disabled={busy}>
             שמירה
           </button>
-          <button type="button" className="rounded-xl bg-neutral-100 px-4 py-2.5 font-medium text-neutral-800 disabled:opacity-40" disabled={busy} onClick={() => void onAddChild()}>
+          <button type="button" className="rounded-xl bg-neutral-100 px-4 py-3 font-medium text-neutral-800 disabled:opacity-40" disabled={busy} onClick={() => void onAddChild()}>
             הוספת ילד
           </button>
-          <button type="button" className="rounded-xl bg-neutral-100 px-4 py-2.5 font-medium text-neutral-800 disabled:opacity-40" disabled={busy || hasParents} onClick={() => void onAddParents()}>
+          <button type="button" className="rounded-xl bg-neutral-100 px-4 py-3 font-medium text-neutral-800 disabled:opacity-40" disabled={busy || hasParents} onClick={() => void onAddParents()}>
             הוספת הורים
           </button>
-          <button type="button" className="rounded-xl bg-red-50 px-4 py-2.5 font-medium text-red-700 disabled:opacity-40" disabled={busy} onClick={onDelete}>
+          <button type="button" className="rounded-xl bg-red-50 px-4 py-3 font-medium text-red-700 disabled:opacity-40" disabled={busy} onClick={onDelete}>
             מחיקה
           </button>
-          <button type="button" className="rounded-xl bg-neutral-100 px-4 py-2.5 font-medium text-neutral-700" onClick={onClose}>
+          <button type="button" className="rounded-xl bg-neutral-100 px-4 py-3 font-medium text-neutral-700" onClick={onClose}>
             סגירה
           </button>
         </div>
@@ -746,6 +780,16 @@ function PersonDialog({
   );
 }
 
+type PersonTab = "details" | "dates" | "family" | "connections" | "note";
+
+const personTabs: { id: PersonTab; label: string }[] = [
+  { id: "details", label: "פרטים" },
+  { id: "dates", label: "תאריכים" },
+  { id: "family", label: "משפחה" },
+  { id: "connections", label: "קשרים" },
+  { id: "note", label: "הערה" },
+];
+
 function matchingPeople(people: FamilyPerson[], query: string) {
   const needle = query.trim().toLocaleLowerCase("he");
   if (!needle) return [];
@@ -757,9 +801,9 @@ function matchingPeople(people: FamilyPerson[], query: string) {
 
 function Field({ label, value, maxLength, ltr = false, onChange }: { label: string; value: string; maxLength: number; ltr?: boolean; onChange: (value: string) => void }) {
   return (
-    <label className="block text-base">
+    <label className="block">
       <span className="text-neutral-600">{label}</span>
-      <input value={value} maxLength={maxLength} dir={ltr ? "ltr" : undefined} onChange={(event) => onChange(event.target.value)} className={`mt-1 w-full rounded-xl border border-neutral-300 px-3 py-2 text-base outline-none ${ltr ? "text-end" : ""}`} aria-label={label} />
+      <input value={value} maxLength={maxLength} dir={ltr ? "ltr" : undefined} onChange={(event) => onChange(event.target.value)} className={`mt-1 w-full rounded-xl border border-neutral-300 px-3 py-3 outline-none ${ltr ? "text-end" : ""}`} style={{ fontSize: "1.25rem" }} aria-label={label} />
     </label>
   );
 }
@@ -791,14 +835,15 @@ function calendarValue(value: string) {
 function DateField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
   const iso = calendarValue(value);
   return (
-    <label className="block text-base">
+    <label className="block">
       <span className="text-neutral-600">{label}</span>
       <input
         type="date"
         value={iso}
         dir="ltr"
         onChange={(event) => onChange(event.target.value)}
-        className="mt-1 w-full rounded-xl border border-neutral-300 px-3 py-2 text-end text-base outline-none"
+        className="mt-1 w-full rounded-xl border border-neutral-300 px-3 py-3 text-end outline-none"
+        style={{ fontSize: "1.25rem" }}
         aria-label={label}
       />
       {value.trim() && !iso ? (
@@ -846,6 +891,104 @@ function spouseLinks(personId: string, graph: FamilyGraph) {
     links.push({ unionId: union.id, person, status: union.status });
   }
   return links;
+}
+
+function parentsOf(personId: string, graph: FamilyGraph, byId: Map<string, FamilyPerson>, unionById: Map<string, FamilyGraph["unions"][number]>) {
+  const found: FamilyPerson[] = [];
+  const seen = new Set<string>();
+  for (const link of graph.children) {
+    if (link.person_id !== personId) continue;
+    const union = unionById.get(link.union_id);
+    if (!union) continue;
+    for (const parentId of [union.partner_a, union.partner_b]) {
+      if (!parentId || seen.has(parentId)) continue;
+      const parent = byId.get(parentId);
+      if (!parent) continue;
+      seen.add(parentId);
+      found.push(parent);
+    }
+  }
+  return found;
+}
+
+function ConnectionSummary({ personId, graph, onOpenPerson }: { personId: string; graph: FamilyGraph; onOpenPerson: (id: string) => void }) {
+  const byId = new Map(graph.people.map((person) => [person.id, person]));
+  const unionById = new Map(graph.unions.map((union) => [union.id, union]));
+  const parents = parentsOf(personId, graph, byId, unionById);
+  const grandSeen = new Set<string>();
+  const grandparents: FamilyPerson[] = [];
+  for (const parent of parents) {
+    for (const grand of parentsOf(parent.id, graph, byId, unionById)) {
+      if (grandSeen.has(grand.id)) continue;
+      grandSeen.add(grand.id);
+      grandparents.push(grand);
+    }
+  }
+  const spouses = spouseLinks(personId, graph).filter((link) => link.status === "married").map((link) => link.person);
+  const children: { child: FamilyPerson; other: FamilyPerson | null }[] = [];
+  const childSeen = new Set<string>();
+  for (const union of graph.unions) {
+    if (union.partner_a !== personId && union.partner_b !== personId) continue;
+    const otherId = union.partner_a === personId ? union.partner_b : union.partner_a;
+    const other = otherId ? byId.get(otherId) ?? null : null;
+    const kids = graph.children.filter((link) => link.union_id === union.id).sort((a, b) => a.sort_order - b.sort_order);
+    for (const link of kids) {
+      if (childSeen.has(link.person_id)) continue;
+      const child = byId.get(link.person_id);
+      if (!child) continue;
+      childSeen.add(child.id);
+      children.push({ child, other });
+    }
+  }
+
+  return (
+    <div className="grid gap-5">
+      <ConnectionGroup title="סבים וסבתות" people={grandparents} onOpenPerson={onOpenPerson} />
+      <ConnectionGroup title="הורים" people={parents} onOpenPerson={onOpenPerson} />
+      <ConnectionGroup title="בן/בת זוג נוכחי" people={spouses} onOpenPerson={onOpenPerson} />
+      <section>
+        <h3 className="font-medium text-neutral-600">ילדים</h3>
+        {children.length === 0 ? <p className="mt-1 text-neutral-500">אין</p> : null}
+        <ul className="mt-2 flex flex-col gap-2">
+          {children.map(({ child, other }) => (
+            <li key={child.id} className="rounded-xl bg-neutral-100 px-3 py-3">
+              <button type="button" className="block w-full truncate text-start font-medium" onClick={() => onOpenPerson(child.id)}>
+                {personName(child)}
+              </button>
+              <p className="mt-1 text-neutral-600">
+                ההורה השני:{" "}
+                {other ? (
+                  <button type="button" className="font-medium text-neutral-900" onClick={() => onOpenPerson(other.id)}>
+                    {personName(other)}
+                  </button>
+                ) : (
+                  "לא ידוע"
+                )}
+              </p>
+            </li>
+          ))}
+        </ul>
+      </section>
+    </div>
+  );
+}
+
+function ConnectionGroup({ title, people, onOpenPerson }: { title: string; people: FamilyPerson[]; onOpenPerson: (id: string) => void }) {
+  return (
+    <section>
+      <h3 className="font-medium text-neutral-600">{title}</h3>
+      {people.length === 0 ? <p className="mt-1 text-neutral-500">אין</p> : null}
+      <ul className="mt-2 flex flex-col gap-2">
+        {people.map((person) => (
+          <li key={person.id}>
+            <button type="button" className="w-full truncate rounded-xl bg-neutral-100 px-3 py-3 text-start" onClick={() => onOpenPerson(person.id)}>
+              {personName(person)}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
 }
 
 function splitName(value: string) {
