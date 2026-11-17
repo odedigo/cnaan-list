@@ -5,7 +5,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
 
-import { ChevronIcon, SearchIcon } from "@/components/icons";
+import { ChevronIcon, FolderIcon, PlusIcon, SearchIcon, TrashIcon } from "@/components/icons";
 import { CARD_H, CARD_W, layoutTree, rootPersonId } from "@/lib/family-layout";
 import { personName, UNION_STATUSES, unionStatusLabel, type FamilyGraph, type FamilyPerson, type PersonDraft, type SpouseInput, type UnionStatus } from "@/lib/family-trees";
 
@@ -599,6 +599,7 @@ function PersonDialog({
   }, [onLoadImage, person.image_path]);
 
   const spouses = spouseLinks(person.id, graph);
+  const compact = useCompactDialog();
 
   function setField<Key extends keyof PersonDraft>(key: Key, value: PersonDraft[Key]) {
     setDraft((current) => ({ ...current, [key]: value }));
@@ -608,7 +609,7 @@ function PersonDialog({
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/40 p-2" role="dialog" aria-modal="true" aria-label={personName(person)}>
       <form
         className="flex flex-col overflow-hidden rounded-2xl bg-white p-4 text-start"
-        style={{ width: "min(1040px, calc(100vw - 1rem))", height: "min(720px, calc(100dvh - 1rem))", fontSize: "1.25rem" }}
+        style={{ width: "min(1040px, calc(100vw - 1rem))", height: "min(720px, calc(100dvh - 1rem))", fontSize: "1.25rem", zoom: compact ? 0.86 : 1 }}
         onSubmit={(event) => {
           event.preventDefault();
           void onSave(draft);
@@ -658,13 +659,36 @@ function PersonDialog({
                 <input type="checkbox" className="size-6" checked={draft.deceased} onChange={(event) => setField("deceased", event.target.checked)} />
                 <span>נפטר/ה</span>
               </label>
-              <div className="flex flex-wrap gap-2">
-                <button type="button" className="rounded-xl bg-neutral-100 px-4 py-3 font-medium disabled:opacity-40" disabled={busy} onClick={() => fileRef.current?.click()}>
-                  {person.image_path ? "החלפת תמונה" : "הוספת תמונה"}
+            </div>
+          ) : null}
+          {tab === "photo" ? (
+            <div className="relative flex h-full min-h-64 items-center justify-center overflow-hidden rounded-2xl bg-neutral-100">
+              {src ? (
+                <button type="button" className="flex h-full max-h-full w-full items-center justify-center" aria-label={`הגדלת התמונה של ${personName(person)}`} onClick={() => setPhotoOpen(true)}>
+                  <img src={src} alt="" className="max-h-full max-w-full object-contain" />
                 </button>
-                {person.image_path ? (
-                  <button type="button" className="rounded-xl bg-neutral-100 px-4 py-3 font-medium text-red-700 disabled:opacity-40" disabled={busy} onClick={() => onImage(null)}>
-                    הסרת תמונה
+              ) : (
+                <span className="text-neutral-500" style={{ fontSize: "1rem" }}>אין תמונה</span>
+              )}
+              <div className="absolute bottom-3 start-3 flex gap-2">
+                <button
+                  type="button"
+                  className="grid size-11 place-items-center rounded-full bg-white text-neutral-800 shadow disabled:opacity-40"
+                  aria-label={src ? "החלפת תמונה" : "הוספת תמונה"}
+                  disabled={busy}
+                  onClick={() => fileRef.current?.click()}
+                >
+                  {src ? <FolderIcon className="size-6" /> : <PlusIcon className="size-6" />}
+                </button>
+                {src ? (
+                  <button
+                    type="button"
+                    className="grid size-11 place-items-center rounded-full bg-white text-red-700 shadow disabled:opacity-40"
+                    aria-label="הסרת תמונה"
+                    disabled={busy}
+                    onClick={() => onImage(null)}
+                  >
+                    <TrashIcon className="size-6" />
                   </button>
                 ) : null}
               </div>
@@ -749,6 +773,14 @@ function PersonDialog({
               </div>
             </div>
           ) : null}
+          {tab === "children" ? (
+            <div>
+              <ChildList personId={person.id} graph={graph} onOpenPerson={onOpenPerson} />
+              <button type="button" className="mt-4 rounded-xl bg-neutral-100 px-4 py-3 font-medium text-neutral-800 disabled:opacity-40" disabled={busy} onClick={() => void onAddChild()}>
+                הוספת ילד
+              </button>
+            </div>
+          ) : null}
           {tab === "connections" ? <ConnectionSummary personId={person.id} graph={graph} onOpenPerson={onOpenPerson} /> : null}
           {tab === "note" ? (
             <label className="block">
@@ -768,21 +800,18 @@ function PersonDialog({
             if (file) onImage(file);
           }}
         />
-        <div className="mt-3 flex shrink-0 flex-wrap gap-2">
+        <button type="button" className="mt-3 shrink-0 self-start rounded-xl bg-neutral-100 px-4 py-3 font-medium text-neutral-800 disabled:opacity-40" disabled={busy || hasParents} onClick={() => void onAddParents()}>
+          הוספת הורים
+        </button>
+        <div className="mt-3 flex shrink-0 items-center gap-2">
           <button type="submit" className="rounded-xl bg-[var(--teal)] px-4 py-3 font-medium text-white disabled:opacity-40" disabled={busy}>
             שמירה
           </button>
-          <button type="button" className="rounded-xl bg-neutral-100 px-4 py-3 font-medium text-neutral-800 disabled:opacity-40" disabled={busy} onClick={() => void onAddChild()}>
-            הוספת ילד
-          </button>
-          <button type="button" className="rounded-xl bg-neutral-100 px-4 py-3 font-medium text-neutral-800 disabled:opacity-40" disabled={busy || hasParents} onClick={() => void onAddParents()}>
-            הוספת הורים
-          </button>
-          <button type="button" className="rounded-xl bg-red-50 px-4 py-3 font-medium text-red-700 disabled:opacity-40" disabled={busy} onClick={onDelete}>
-            מחיקה
-          </button>
           <button type="button" className="rounded-xl bg-neutral-100 px-4 py-3 font-medium text-neutral-700" onClick={onClose}>
-            סגירה
+            ביטול
+          </button>
+          <button type="button" className="ms-auto grid size-11 shrink-0 place-items-center rounded-full bg-red-50 text-red-700 disabled:opacity-40" aria-label="מחיקה" disabled={busy} onClick={onDelete}>
+            <TrashIcon className="size-6" />
           </button>
         </div>
       </form>
@@ -795,15 +824,29 @@ function PersonDialog({
   );
 }
 
-type PersonTab = "details" | "dates" | "family" | "connections" | "note";
+type PersonTab = "details" | "photo" | "dates" | "family" | "children" | "connections" | "note";
 
 const personTabs: { id: PersonTab; label: string }[] = [
   { id: "details", label: "פרטים" },
+  { id: "photo", label: "תמונה" },
   { id: "dates", label: "תאריכים" },
-  { id: "family", label: "משפחה" },
+  { id: "family", label: "בני זוג" },
+  { id: "children", label: "ילדים" },
   { id: "connections", label: "קשרים" },
   { id: "note", label: "הערה" },
 ];
+
+function useCompactDialog() {
+  const [compact, setCompact] = useState(false);
+  useLayoutEffect(() => {
+    const query = window.matchMedia("(max-width: 700px)");
+    const update = () => setCompact(query.matches);
+    update();
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+  return compact;
+}
 
 function matchingPeople(people: FamilyPerson[], query: string) {
   const needle = query.trim().toLocaleLowerCase("he");
@@ -930,21 +973,6 @@ function ConnectionSummary({ personId, graph, onOpenPerson }: { personId: string
     }
   }
   const spouses = spouseLinks(personId, graph).filter((link) => link.status === "married").map((link) => link.person);
-  const children: { child: FamilyPerson; other: FamilyPerson | null }[] = [];
-  const childSeen = new Set<string>();
-  for (const union of graph.unions) {
-    if (union.partner_a !== personId && union.partner_b !== personId) continue;
-    const otherId = union.partner_a === personId ? union.partner_b : union.partner_a;
-    const other = otherId ? byId.get(otherId) ?? null : null;
-    const kids = graph.children.filter((link) => link.union_id === union.id).sort((a, b) => a.sort_order - b.sort_order);
-    for (const link of kids) {
-      if (childSeen.has(link.person_id)) continue;
-      const child = byId.get(link.person_id);
-      if (!child) continue;
-      childSeen.add(child.id);
-      children.push({ child, other });
-    }
-  }
 
   return (
     <div className="grid gap-5">
@@ -953,28 +981,55 @@ function ConnectionSummary({ personId, graph, onOpenPerson }: { personId: string
       <ConnectionGroup title="בן/בת זוג נוכחי" people={spouses} onOpenPerson={onOpenPerson} />
       <section>
         <h3 className="font-medium text-neutral-600">ילדים</h3>
-        {children.length === 0 ? <p className="mt-1 text-neutral-500">אין</p> : null}
-        <ul className="mt-2 flex flex-col gap-2">
-          {children.map(({ child, other }) => (
-            <li key={child.id} className="rounded-xl bg-neutral-100 px-3 py-3">
-              <button type="button" className="block w-full truncate text-start font-medium" onClick={() => onOpenPerson(child.id)}>
-                {personName(child)}
-              </button>
-              <p className="mt-1 text-neutral-600">
-                ההורה השני:{" "}
-                {other ? (
-                  <button type="button" className="font-medium text-neutral-900" onClick={() => onOpenPerson(other.id)}>
-                    {personName(other)}
-                  </button>
-                ) : (
-                  "לא ידוע"
-                )}
-              </p>
-            </li>
-          ))}
-        </ul>
+        <ChildList personId={personId} graph={graph} onOpenPerson={onOpenPerson} />
       </section>
     </div>
+  );
+}
+
+function childrenOf(personId: string, graph: FamilyGraph) {
+  const byId = new Map(graph.people.map((person) => [person.id, person]));
+  const children: { child: FamilyPerson; other: FamilyPerson | null }[] = [];
+  const seen = new Set<string>();
+  for (const union of graph.unions) {
+    if (union.partner_a !== personId && union.partner_b !== personId) continue;
+    const otherId = union.partner_a === personId ? union.partner_b : union.partner_a;
+    const other = otherId ? byId.get(otherId) ?? null : null;
+    const kids = graph.children.filter((link) => link.union_id === union.id).sort((a, b) => a.sort_order - b.sort_order);
+    for (const link of kids) {
+      if (seen.has(link.person_id)) continue;
+      const child = byId.get(link.person_id);
+      if (!child) continue;
+      seen.add(child.id);
+      children.push({ child, other });
+    }
+  }
+  return children;
+}
+
+function ChildList({ personId, graph, onOpenPerson }: { personId: string; graph: FamilyGraph; onOpenPerson: (id: string) => void }) {
+  const children = childrenOf(personId, graph);
+  if (children.length === 0) return <p className="text-neutral-500">אין</p>;
+  return (
+    <ul className="flex flex-col gap-2">
+      {children.map(({ child, other }) => (
+        <li key={child.id} className="rounded-xl bg-neutral-100 px-3 py-3">
+          <button type="button" className="block w-full truncate text-start font-medium" onClick={() => onOpenPerson(child.id)}>
+            {personName(child)}
+          </button>
+          <p className="mt-1 text-neutral-600">
+            ההורה השני:{" "}
+            {other ? (
+              <button type="button" className="font-medium text-neutral-900" onClick={() => onOpenPerson(other.id)}>
+                {personName(other)}
+              </button>
+            ) : (
+              "לא ידוע"
+            )}
+          </p>
+        </li>
+      ))}
+    </ul>
   );
 }
 
