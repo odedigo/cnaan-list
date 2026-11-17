@@ -14,6 +14,7 @@ import { DatesPage } from "@/components/dates-page";
 import { ListPage } from "@/components/list-page";
 import { PackingPage } from "@/components/packing-page";
 import { RecipesPage } from "@/components/recipes-page";
+import { TreesPage } from "@/components/trees-page";
 import { useBootError, useLists, useListsOptional } from "@/components/lists-provider";
 import { pushAppHistory } from "@/lib/history";
 import { bindKeepAwake } from "@/lib/keep-awake";
@@ -56,7 +57,7 @@ export function AppShell({
   useEffect(() => {
     const onPop = () => {
       const next = window.location.pathname;
-      if (next === "/grocery" || next === "/inventory" || next === "/lists" || next === "/recipes" || next === "/packing" || next === "/dates") restoreRef.current = next;
+      if (next === "/grocery" || next === "/inventory" || next === "/lists" || next === "/recipes" || next === "/packing" || next === "/dates" || next === "/trees") restoreRef.current = next;
       pathRef.current = next;
       setPath(next);
     };
@@ -69,7 +70,7 @@ export function AppShell({
     if (current === href) return;
     scrolls.current[current] = window.scrollY;
     pathRef.current = href;
-    if (href === "/grocery" || href === "/inventory" || href === "/lists" || href === "/recipes" || href === "/packing" || href === "/dates") restoreRef.current = href;
+    if (href === "/grocery" || href === "/inventory" || href === "/lists" || href === "/recipes" || href === "/packing" || href === "/dates" || href === "/trees") restoreRef.current = href;
     if (window.location.pathname !== href) pushAppHistory(href);
     setPath(href);
     if (href === "/settings") window.scrollTo(0, 0);
@@ -129,6 +130,7 @@ export function AppShell({
       <LazyRecipes active={path === "/recipes"} warm={warm} scrolls={scrolls} restoreRef={restoreRef} />
       <LazyPacking active={path === "/packing"} warm={warm} scrolls={scrolls} restoreRef={restoreRef} />
       <LazyDates active={path === "/dates"} warm={warm} scrolls={scrolls} restoreRef={restoreRef} />
+      <LazyTrees active={path === "/trees"} warm={warm} scrolls={scrolls} restoreRef={restoreRef} />
       {path === "/settings" ? <SignedInSettingsView version={version} /> : null}
     </>
   );
@@ -271,6 +273,37 @@ function LazyDates({
   );
 }
 
+function LazyTrees({
+  active,
+  warm,
+  scrolls,
+  restoreRef,
+}: {
+  active: boolean;
+  warm: boolean;
+  scrolls: RefObject<Record<string, number>>;
+  restoreRef: RefObject<string | null>;
+}) {
+  const [mounted, setMounted] = useState(active);
+
+  useEffect(() => {
+    if (active || warm) setMounted(true);
+  }, [active, warm]);
+
+  useLayoutEffect(() => {
+    if (!active || restoreRef.current !== "/trees") return;
+    restoreRef.current = null;
+    window.scrollTo(0, scrolls.current?.["/trees"] ?? 0);
+  }, [active, restoreRef, scrolls]);
+
+  if (!mounted) return null;
+  return (
+    <div hidden={!active}>
+      <TreesPage active={active} />
+    </div>
+  );
+}
+
 function LoadingScreen({ path, version, message }: { path: string; version: string; message?: string }) {
   const title =
     path === "/inventory"
@@ -283,6 +316,8 @@ function LoadingScreen({ path, version, message }: { path: string; version: stri
           ? "רשימות אריזה"
           : path === "/dates"
             ? "ארועים"
+            : path === "/trees"
+              ? "עצי משפחה"
           : path === "/settings"
             ? "הגדרות"
             : "עגלת קניות";

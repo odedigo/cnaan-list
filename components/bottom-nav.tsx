@@ -19,6 +19,7 @@ import {
   ProductsIcon,
   RecipesIcon,
   ReloadIcon,
+  TreeIcon,
   SettingsIcon,
   UploadIcon,
 } from "@/components/icons";
@@ -48,6 +49,7 @@ export function BottomNav({ signedIn }: { signedIn: boolean }) {
   const packingActive =
     pathname === "/packing" || pathname.startsWith("/packing/");
   const datesActive = pathname === "/dates" || pathname.startsWith("/dates/");
+  const treesActive = pathname === "/trees" || pathname.startsWith("/trees/");
   useEffect(() => {
     if (!launcherOpen && !actionsOpen) return;
     function onPointer(event: PointerEvent) {
@@ -156,12 +158,12 @@ export function BottomNav({ signedIn }: { signedIn: boolean }) {
       })}
       <div
         ref={launcherRef}
-        className={`relative flex min-w-0 flex-1 flex-col items-center ${packingActive || datesActive || launcherOpen ? "text-black" : "text-neutral-400"}`}
+        className={`relative flex min-w-0 flex-1 flex-col items-center ${packingActive || datesActive || treesActive || launcherOpen ? "text-black" : "text-neutral-400"}`}
       >
         {launcherOpen ? (
           <div
             className="absolute bottom-full z-10 mb-2 flex rounded-xl border border-neutral-200 bg-white p-2 text-neutral-800 shadow-lg"
-            style={{ left: "50%", transform: "translateX(-50%)" }}
+            style={{ right: 0 }}
           >
             <button
               type="button"
@@ -195,13 +197,29 @@ export function BottomNav({ signedIn }: { signedIn: boolean }) {
               <PlaneIcon className="size-7" />
               <span className="text-xs">אריזות</span>
             </button>
+            <button
+              type="button"
+              className="flex w-16 flex-col items-center gap-1 rounded-lg px-1 py-2 text-neutral-800"
+              aria-current={treesActive ? "page" : undefined}
+              onClick={() => {
+                setLauncherOpen(false);
+                if (!signedIn) {
+                  appPath?.go("/settings");
+                  return;
+                }
+                appPath?.go("/trees");
+              }}
+            >
+              <TreeIcon className="size-7" />
+              <span className="text-xs">יוחסין</span>
+            </button>
           </div>
         ) : null}
         <button
           type="button"
           className="flex w-full flex-col items-center gap-1 px-0.5 py-2 text-center"
           style={{ fontSize: "10px", lineHeight: "12.5px" }}
-          aria-current={packingActive || datesActive ? "page" : undefined}
+          aria-current={packingActive || datesActive || treesActive ? "page" : undefined}
           aria-expanded={launcherOpen}
           aria-haspopup="menu"
           aria-label="עוד"

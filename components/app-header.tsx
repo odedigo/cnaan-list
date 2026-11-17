@@ -66,6 +66,7 @@ export function AppHeader({
   onSortWithin,
   onExportList,
   onImportList,
+  importListLabel = "ייבוא רשימה",
   exportFileEnabled = true,
   showCredit = false,
   creditVersion = "",
@@ -105,6 +106,7 @@ export function AppHeader({
   onSortWithin?: () => void;
   onExportList?: () => void;
   onImportList?: () => void;
+  importListLabel?: string;
   exportFileEnabled?: boolean;
   showCredit?: boolean;
   creditVersion?: string;
@@ -239,7 +241,7 @@ export function AppHeader({
                 ) : null}
                 {onImportList ? (
                   <MenuItem
-                    label="ייבוא רשימה"
+                    label={importListLabel}
                     disabled={!actionsEnabled}
                     onClick={() => {
                       setMenuOpen(false);

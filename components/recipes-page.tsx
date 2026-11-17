@@ -4878,6 +4878,7 @@ function LinkRecipeDialog({
             <CategoryCheckTree
               categories={categories}
               selected={categoryIds}
+              columns={2}
               disabled={saving}
               onToggle={(id) => {
                 const checked = categoryIds.includes(id);
@@ -5897,11 +5898,13 @@ function categoryChildren(categories: CategoryRow[]) {
 function CategoryCheckTree({
   categories,
   selected,
+  columns = 1,
   disabled,
   onToggle,
 }: {
   categories: CategoryRow[];
   selected: string[];
+  columns?: 1 | 2;
   disabled?: boolean;
   onToggle: (id: string) => void;
 }) {
@@ -5928,58 +5931,66 @@ function CategoryCheckTree({
       return next;
     });
   }
-  function rows(parentId: string | null, level: number): React.ReactNode {
-    return (children.get(parentId) ?? []).map((category) => {
-      const nested = children.get(category.id) ?? [];
-      const expanded = open.has(category.id);
-      return (
-        <div key={category.id}>
-          <div
-            className="flex items-center"
-            style={{ minHeight: 32, paddingInlineStart: level * 12 }}
-          >
-            {nested.length > 0 ? (
-              <button
-                type="button"
-                className="grid shrink-0 place-items-center text-neutral-500"
-                style={{ width: 28, height: 28 }}
-                aria-expanded={expanded}
-                aria-label={
-                  expanded ? `סגירת ${category.name}` : `פתיחת ${category.name}`
-                }
-                disabled={disabled}
-                onClick={() => toggleOpen(category.id)}
-              >
-                <ChevronIcon
-                  className="size-4"
-                  style={{
-                    transform: expanded ? "rotate(180deg)" : "rotate(-90deg)",
-                  }}
-                />
-              </button>
-            ) : (
-              <span className="shrink-0" style={{ width: 28 }} />
-            )}
-            <label
-              className="flex min-w-0 flex-1 items-center gap-2 text-start"
-              style={{ minHeight: 32 }}
+  function branch(category: CategoryRow, level: number): React.ReactNode {
+    const nested = children.get(category.id) ?? [];
+    const expanded = open.has(category.id);
+    return (
+      <div key={category.id} className="min-w-0">
+        <div
+          className="flex items-center"
+          style={{ minHeight: 32, paddingInlineStart: level * 12 }}
+        >
+          {nested.length > 0 ? (
+            <button
+              type="button"
+              className="grid shrink-0 place-items-center text-neutral-500"
+              style={{ width: 28, height: 28 }}
+              aria-expanded={expanded}
+              aria-label={
+                expanded ? `סגירת ${category.name}` : `פתיחת ${category.name}`
+              }
+              disabled={disabled}
+              onClick={() => toggleOpen(category.id)}
             >
-              <input
-                type="checkbox"
-                checked={selected.includes(category.id)}
-                disabled={disabled}
-                style={{ width: 18, height: 18 }}
-                onChange={() => onToggle(category.id)}
+              <ChevronIcon
+                className="size-4"
+                style={{
+                  transform: expanded ? "rotate(180deg)" : "rotate(-90deg)",
+                }}
               />
-              <span className="min-w-0 truncate text-sm">{category.name}</span>
-            </label>
-          </div>
-          {nested.length > 0 && expanded ? rows(category.id, level + 1) : null}
+            </button>
+          ) : (
+            <span className="shrink-0" style={{ width: 28 }} />
+          )}
+          <label
+            className="flex min-w-0 flex-1 items-center gap-2 text-start"
+            style={{ minHeight: 32 }}
+          >
+            <input
+              type="checkbox"
+              checked={selected.includes(category.id)}
+              disabled={disabled}
+              style={{ width: 18, height: 18 }}
+              onChange={() => onToggle(category.id)}
+            />
+            <span className="min-w-0 truncate text-sm">{category.name}</span>
+          </label>
         </div>
-      );
-    });
+        {nested.length > 0 && expanded
+          ? nested.map((child) => branch(child, level + 1))
+          : null}
+      </div>
+    );
   }
-  return <div>{rows(null, 0)}</div>;
+  const roots = children.get(null) ?? [];
+  if (columns === 2) {
+    return (
+      <div className="grid grid-cols-2 gap-2">
+        {roots.map((category) => branch(category, 0))}
+      </div>
+    );
+  }
+  return <div>{roots.map((category) => branch(category, 0))}</div>;
 }
 
 function chooseLeaf(

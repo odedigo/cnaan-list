@@ -172,6 +172,18 @@ export function PassedIcon(props: IconProps) {
   );
 }
 
+export function TreeIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true" {...props}>
+      <circle cx="7" cy="6.2" r="2.1" />
+      <circle cx="17" cy="6.2" r="2.1" />
+      <circle cx="12" cy="17.6" r="2.1" />
+      <path d="M7 8.3v1.6c0 1.5 1.2 2.5 5 2.5s5-1 5-2.5V8.3" strokeLinejoin="round" />
+      <path d="M12 12.4v3.1" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export function PlaneIcon(props: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true" {...props}>
