@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AppHeader } from "@/components/app-header";
-import { CloseIcon, DotsIcon, PenIcon } from "@/components/icons";
+import { CloseIcon, DotsIcon, DownloadIcon, PenIcon } from "@/components/icons";
 import { useLists } from "@/components/lists-provider";
 import { TreeEditor } from "@/components/tree-editor";
 import {
@@ -16,6 +16,7 @@ import {
   createFamilyTree,
   deleteFamilyPerson,
   deleteFamilyTree,
+  exportFamilyGedcom,
   importGedcomFile,
   loadFamilyGraph,
   loadFamilyTrees,
@@ -234,6 +235,28 @@ export function TreesPage({ active }: { active: boolean }) {
                     className="flex w-full items-center gap-2 px-3 py-2.5 text-start text-sm"
                     onClick={() => {
                       setMenuId(null);
+                      void run(async () => {
+                        const file = await exportFamilyGedcom(supabase, row);
+                        const blob = new Blob([file.text], { type: "text/plain;charset=utf-8" });
+                        const url = URL.createObjectURL(blob);
+                        const link = document.createElement("a");
+                        link.href = url;
+                        link.download = file.name;
+                        link.click();
+                        URL.revokeObjectURL(url);
+                        return true;
+                      });
+                    }}
+                  >
+                    <DownloadIcon className="size-5" />
+                    ייצוא GEDCOM
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="flex w-full items-center gap-2 px-3 py-2.5 text-start text-sm"
+                    onClick={() => {
+                      setMenuId(null);
                       setConfirm({
                         title: "מחיקת עץ",
                         body: `למחוק את "${row.name}"?`,
@@ -292,12 +315,13 @@ export function TreesPage({ active }: { active: boolean }) {
           }}
           onSavePerson={async (personId, draft) => {
             const saved = await run(() => saveFamilyPerson(supabase, personId, draft));
-            if (!saved) return;
+            if (!saved) return false;
             setGraph((current) =>
               current
                 ? { ...current, people: current.people.map((person) => (person.id === personId ? { ...person, ...saved } : person)) }
                 : current,
             );
+            return true;
           }}
           onAddSpouse={async (personId, input) => {
             const result = await run(() => addFamilySpouse(supabase, accountId, tree.id, personId, input));

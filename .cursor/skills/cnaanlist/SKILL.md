@@ -48,7 +48,7 @@ The signed-in shell paints before grocery, inventory, and checklist data. `loadL
 - An installed app (`display-mode: standalone` or `navigator.standalone`) uses that same `pushState`. The system back button then returns to the previous tab.
 - `/lists` returns null; the shell renders `ChecklistPage`. `/recipes` returns null; the shell renders `RecipesPage`. `/packing` returns null; the shell renders `PackingPage`. `/dates` returns null; the shell renders `DatesPage`. `/trees` returns null; the shell renders `TreesPage`. Signed-in `/settings` returns null; the shell renders `SignedInSettings`, and that screen unmounts when the path leaves `/settings`.
 - Grocery, inventory, lists, recipes, packing, dates, and trees stay mounted after the 250ms warm. Swipe only between grocery and inventory.
-- Bottom nav order, visually left to right: `/inventory` רשימת מוצרים, `/grocery` עגלת קניות, `/lists` רשימות, `/recipes` מתכונים, then עוד..., then a vertical three-dot button. עוד... opens a launcher above the button; ארועים opens `/dates`, ארזות opens `/packing`, and יוחסין opens `/trees`. The three-dot button opens ייצוא נתונים and ייבוא נתונים, then a separator, then רענון האפליקציה, then a separator, then הגדרות which opens `/settings`. The grocery badge is `grocery.length`, including purchased lines. עוד... is active on `/dates`, `/packing`, and `/trees`.
+- Bottom nav order, visually left to right: `/inventory` רשימת מוצרים, `/grocery` עגלת קניות, `/lists` רשימות, `/recipes` מתכונים, then עוד..., then a vertical three-dot button. עוד... opens a launcher above the button; ארועים opens `/dates`, ארזות opens `/packing`, and יוחסין opens `/trees`. The three-dot button opens ייצוא נתונים and ייבוא נתונים, then a separator, then רענון האפליקציה, then a separator, then הגדרות which opens `/settings`. The grocery badge is `grocery.length`, including purchased lines. עוד... is active on `/dates`, `/packing`, and `/trees`. `accounts.sections` chooses which of those appear: shopping covers inventory and grocery, then lists, recipes, packing, trees, and events. A missing section hides its toolbar icon and its page; a direct visit moves to the first allowed section. Settings stays available. Existing and new accounts include every section. The admin account page is where those checkboxes are saved.
 
 ## Grocery
 
@@ -68,6 +68,7 @@ An inventory click toggles grocery membership. The teal card (`bg-[#d7efe9]`) me
 - One store per account has `protected` set. It cannot be deleted. When store badges are on, show that store's current name too.
 - `cnaanlist-show-store-badge`: missing or any value other than `"0"` means on. The same flag controls inventory and grocery badges.
 - `cnaanlist-single-open-category` uses the same default-on pattern. Inventory treats a category as expanded when `collapsed[id] === false`.
+- `cnaanlist-packing-single-open-category` uses that same default-on pattern. It applies only to packing lists. Opening a packing category closes the others.
 - `cnaanlist-recipe-advanced`: missing or any value other than `"1"` means off. When on, recipe ingredient and step rows show the move, subheader, and step actions on every screen. When off, those actions stay hidden.
 - These flags live in `localStorage` only. Write them and dispatch the matching event so both lists update.
 

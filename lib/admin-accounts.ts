@@ -4,6 +4,7 @@ import { headers } from "next/headers";
 
 import type { AccountRole, ManagedAccount, UserType } from "@/lib/account-role";
 import { isUserType } from "@/lib/account-role";
+import { ACCOUNT_SECTIONS, accountSections, type AccountSection } from "@/lib/account-sections";
 import { createAdminClient, hasServiceEnv } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -23,10 +24,14 @@ export async function requireAdmin() {
 export async function listManagedAccounts() {
   if (!hasServiceEnv()) return { error: "השרת לא מוגדר. בדקו את משתני הסביבה." as const, accounts: [] as ManagedAccount[] };
   const admin = createAdminClient();
-  const [{ data: profiles, error: profileError }, { data: accounts, error: accountError }] = await Promise.all([
+  const [{ data: profiles, error: profileError }, accountsQuery] = await Promise.all([
     admin.from("profiles").select("id, username, email, role, user_type").order("username"),
-    admin.from("accounts").select("id, owner_id, event_reminders"),
+    admin.from("accounts").select("id, owner_id, event_reminders, sections"),
   ]);
+  const accountsResult = accountsQuery.error?.code === "42703" || accountsQuery.error?.code === "PGRST204"
+    ? await admin.from("accounts").select("id, owner_id, event_reminders")
+    : accountsQuery;
+  const { data: accounts, error: accountError } = accountsResult;
   if (profileError || accountError) return { error: "לא ניתן לטעון את החשבונות" as const, accounts: [] as ManagedAccount[] };
 
   const byOwner = new Map((accounts ?? []).map((account) => [account.owner_id, account]));
@@ -42,16 +47,18 @@ export async function listManagedAccounts() {
         userType: isUserType(profile.user_type) ? profile.user_type : "NORM",
         accountId: account?.id ?? null,
         eventReminders: account?.event_reminders !== false,
+        sections: accountSections((account as { sections?: unknown } | undefined)?.sections),
       } satisfies ManagedAccount;
     }),
   };
 }
 
-export async function updateManagedAccount(userId: string, role: AccountRole, userType: UserType, eventReminders: boolean) {
+export async function updateManagedAccount(userId: string, role: AccountRole, userType: UserType, eventReminders: boolean, sections: AccountSection[]) {
   const me = await requireAdmin();
   if (!me) return { error: "אין הרשאה" };
   if (!hasServiceEnv()) return { error: "השרת לא מוגדר. בדקו את משתני הסביבה." };
   if (userId === me.id && role !== "ADMIN") return { error: "אי אפשר להסיר את הרשאת המנהל מעצמך" };
+  const nextSections = ACCOUNT_SECTIONS.filter((id) => sections.includes(id));
 
   const admin = createAdminClient();
   const { error: roleError } = await admin.from("profiles").update({ role, user_type: userType }).eq("id", userId);
@@ -60,7 +67,7 @@ export async function updateManagedAccount(userId: string, role: AccountRole, us
   const { data: account, error: accountError } = await admin.from("accounts").select("id").eq("owner_id", userId).maybeSingle();
   if (accountError) return { error: "לא ניתן לעדכן את החשבון" };
   if (account) {
-    const { error } = await admin.from("accounts").update({ event_reminders: eventReminders }).eq("id", account.id);
+    const { error } = await admin.from("accounts").update({ event_reminders: eventReminders, sections: nextSections }).eq("id", account.id);
     if (error) return { error: "לא ניתן לעדכן את החשבון" };
   }
   return { ok: true as const };

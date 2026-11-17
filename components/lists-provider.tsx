@@ -14,6 +14,7 @@ import {
 } from "react";
 import { flushSync } from "react-dom";
 
+import type { AccountSection } from "@/lib/account-sections";
 import {
   changeIndent,
   insertChecklistRow,
@@ -42,6 +43,7 @@ import { isUnitId, parseQuantity, type UnitId } from "@/lib/units";
 type ListsContextValue = {
   accountId: string;
   username: string;
+  sections: AccountSection[];
   categories: Category[];
   stores: Store[];
   storesError: string | null;
@@ -102,6 +104,7 @@ type ListsContextValue = {
   renamePackingCategory: (id: string, name: string) => Promise<boolean>;
   deletePackingCategory: (id: string) => Promise<void>;
   movePackingCategory: (listId: string, activeId: string, overId: string) => Promise<void>;
+  movePackingItem: (categoryId: string, activeId: string, overId: string) => Promise<void>;
   sortPackingItems: (listId: string) => Promise<void>;
   addPackingItem: (categoryId: string, name: string) => Promise<string | null>;
   renamePackingItem: (id: string, name: string) => Promise<boolean>;
@@ -128,6 +131,7 @@ export function ListsProvider({ children }: { children: ReactNode }) {
   const [bootError, setBootError] = useState<string | null>(null);
   const accountId = data?.accountId ?? "";
   const username = data?.username ?? "";
+  const sections = data?.sections ?? [];
   const [categories, setCategories] = useState<Category[]>([]);
   const [stores, setStores] = useState<Store[]>([]);
   const [storesReady, setStoresReady] = useState(false);
@@ -925,6 +929,23 @@ export function ListsProvider({ children }: { children: ReactNode }) {
     [rememberPacking, runPacking],
   );
 
+  const movePackingItem = useCallback(
+    async (categoryId: string, activeId: string, overId: string) => {
+      const siblings = packingItemsRef.current.filter((row) => row.category_id === categoryId);
+      const nextSiblings = reorderRows(siblings, activeId, overId);
+      if (!nextSiblings) return;
+      const rank = new Map(nextSiblings.map((row) => [row.id, row.sort_order]));
+      rememberPacking({
+        items: packingItemsRef.current.map((row) => (rank.has(row.id) ? { ...row, sort_order: rank.get(row.id) ?? row.sort_order } : row)),
+      });
+      await runPacking("לא ניתן לשמור את הסדר", async () => {
+        const results = await Promise.all(nextSiblings.map((row) => supabaseRef.current.from("packing_items").update({ sort_order: row.sort_order }).eq("id", row.id)));
+        return results.some((result) => result.error);
+      });
+    },
+    [rememberPacking, runPacking],
+  );
+
   const sortPackingItems = useCallback(
     async (listId: string) => {
       const categoryIds = new Set(packingCategoriesRef.current.filter((row) => row.list_id === listId).map((row) => row.id));
@@ -1278,6 +1299,7 @@ export function ListsProvider({ children }: { children: ReactNode }) {
     return {
       accountId,
       username,
+      sections,
       categories: sortByOrder(categories),
       stores: sortStores(stores),
       storesError,
@@ -1840,6 +1862,7 @@ export function ListsProvider({ children }: { children: ReactNode }) {
       renamePackingCategory,
       deletePackingCategory,
       movePackingCategory,
+      movePackingItem,
       sortPackingItems,
       addPackingItem,
       renamePackingItem,
@@ -1875,8 +1898,10 @@ export function ListsProvider({ children }: { children: ReactNode }) {
     imageSrc,
     accountId,
     username,
+    sections,
     items,
     movePackingCategory,
+    movePackingItem,
     movePackingList,
     packingCategories,
     packingItems,

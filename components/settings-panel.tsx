@@ -30,6 +30,7 @@ import {
   readSingleOpenCategory,
   writeSingleOpenCategory,
 } from "@/lib/single-category";
+import { readPackingSingleOpen, writePackingSingleOpen } from "@/lib/packing-single-category";
 import { readShowStoreBadge, writeShowStoreBadge } from "@/lib/store-badge";
 import { createClient } from "@/lib/supabase/client";
 import { isProduction } from "@/lib/supabase/env";
@@ -197,6 +198,7 @@ export function SignedInSettings({ username }: { username: string }) {
   const [keepAwake, setKeepAwake] = useState(false);
   const [recipeAdvanced, setRecipeAdvanced] = useState(false);
   const [singleCategory, setSingleCategory] = useState(true);
+  const [packingSingle, setPackingSingle] = useState(true);
   const [showStoreBadge, setShowStoreBadge] = useState(true);
   const [accounts, setAccounts] = useState<SavedAccount[]>([]);
   const [userId, setUserId] = useState("");
@@ -211,6 +213,7 @@ export function SignedInSettings({ username }: { username: string }) {
     setKeepAwake(readKeepAwake());
     setRecipeAdvanced(readRecipeAdvanced());
     setSingleCategory(readSingleOpenCategory());
+    setPackingSingle(readPackingSingleOpen());
     setShowStoreBadge(readShowStoreBadge());
     const sync = () => setAccounts(readSavedAccounts());
     sync();
@@ -360,7 +363,7 @@ export function SignedInSettings({ username }: { username: string }) {
           onAction={() => void handleLogout()}
         />
         {adminUser ? (
-          <Link href="/admin" className="mt-4 block rounded-xl border border-neutral-200 bg-white px-4 py-3 text-sm font-medium">
+          <Link href="/admin" target="_blank" rel="noreferrer" className="mt-4 block rounded-xl border border-neutral-200 bg-white px-4 py-3 text-sm font-medium">
             ניהול חשבונות
           </Link>
         ) : null}
@@ -391,6 +394,19 @@ export function SignedInSettings({ username }: { username: string }) {
               className="size-5 accent-[var(--teal)]"
             />
             <span>קטגוריה אחת פתוחה ברשימת המוצרים</span>
+          </label>
+          <label className="mt-3 flex items-center gap-3 text-sm">
+            <input
+              type="checkbox"
+              checked={packingSingle}
+              onChange={(event) => {
+                const enabled = event.target.checked;
+                setPackingSingle(enabled);
+                writePackingSingleOpen(enabled);
+              }}
+              className="size-5 accent-[var(--teal)]"
+            />
+            <span>קטגוריה אחת פתוחה ברשימת האריזה</span>
           </label>
           <label className="mt-3 flex items-center gap-3 text-sm">
             <input

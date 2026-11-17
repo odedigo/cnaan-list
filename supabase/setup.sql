@@ -30,7 +30,9 @@ alter table public.profiles add constraint profiles_user_type_check check (user_
 create table if not exists public.accounts (
   id uuid primary key default gen_random_uuid(),
   owner_id uuid not null unique references public.profiles (id) on delete cascade,
-  event_reminders boolean not null default true
+  event_reminders boolean not null default true,
+  sections text[] not null default array['shopping', 'lists', 'recipes', 'packing', 'trees', 'events'],
+  constraint accounts_sections_check check (sections <@ array['shopping', 'lists', 'recipes', 'packing', 'trees', 'events']::text[])
 );
 
 create table if not exists public.stores (
@@ -317,6 +319,16 @@ create policy "read own account"
   using (owner_id = auth.uid());
 
 alter table public.accounts add column if not exists event_reminders boolean not null default true;
+
+alter table public.accounts
+  add column if not exists sections text[] not null
+  default array['shopping', 'lists', 'recipes', 'packing', 'trees', 'events'];
+
+alter table public.accounts drop constraint if exists accounts_sections_check;
+
+alter table public.accounts
+  add constraint accounts_sections_check
+  check (sections <@ array['shopping', 'lists', 'recipes', 'packing', 'trees', 'events']::text[]);
 
 drop policy if exists "update own event reminders" on public.accounts;
 create policy "update own event reminders"

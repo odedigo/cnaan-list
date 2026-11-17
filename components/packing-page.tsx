@@ -22,6 +22,7 @@ import { useLists } from "@/components/lists-provider";
 import { downloadPackingList } from "@/lib/export-inventory";
 import { pushAppHistory, replaceAppHistory } from "@/lib/history";
 import { sortByOrder } from "@/lib/order";
+import { packingSingleOpenEvent, readPackingSingleOpen } from "@/lib/packing-single-category";
 import type { PackingCategory, PackingItem, PackingList } from "@/lib/types";
 import { formatQuantity, stepQuantity, unitById } from "@/lib/units";
 
@@ -140,6 +141,7 @@ export function PackingPage({ active }: { active: boolean }) {
           onToggleItem={(item) => void lists.setPackingItemChecked(item.id, !item.checked)}
           onQuantity={(item, quantity) => void lists.setPackingItemQuantity(item.id, quantity)}
           onMoveCategory={(activeId, overId) => void lists.movePackingCategory(list.id, activeId, overId)}
+          onMoveItem={(categoryId, activeId, overId) => void lists.movePackingItem(categoryId, activeId, overId)}
           onMarkAll={() => void lists.setPackingListChecked(list.id, true)}
           onClearMarks={() => void lists.setPackingListChecked(list.id, false)}
           onSort={() => void lists.sortPackingItems(list.id)}
@@ -376,6 +378,7 @@ function PackingDetail({
   onToggleItem,
   onQuantity,
   onMoveCategory,
+  onMoveItem,
   onMarkAll,
   onClearMarks,
   onSort,
@@ -396,6 +399,7 @@ function PackingDetail({
   onToggleItem: (item: PackingItem) => void;
   onQuantity: (item: PackingItem, quantity: number) => void;
   onMoveCategory: (activeId: string, overId: string) => void;
+  onMoveItem: (categoryId: string, activeId: string, overId: string) => void;
   onMarkAll: () => void;
   onClearMarks: () => void;
   onSort: () => void;
@@ -407,7 +411,8 @@ function PackingDetail({
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }), useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 8 } }));
 
   useEffect(() => {
-    setCollapsed(readCollapsed(collapseKey));
+    const stored = readCollapsed(collapseKey);
+    setCollapsed(readPackingSingleOpen() ? oneOpenCollapsed(categories, stored) : stored);
     setCollapseReady(true);
   }, [collapseKey]);
 
@@ -416,12 +421,30 @@ function PackingDetail({
     localStorage.setItem(collapseKey, JSON.stringify(collapsed));
   }, [collapseKey, collapseReady, collapsed]);
 
-  function isOpen(id: string) {
-    return collapsed[id] === false;
+  useEffect(() => {
+    function onSingleOpen() {
+      if (!readPackingSingleOpen()) return;
+      setCollapsed((current) => oneOpenCollapsed(categories, current));
+    }
+    window.addEventListener(packingSingleOpenEvent, onSingleOpen);
+    return () => window.removeEventListener(packingSingleOpenEvent, onSingleOpen);
+  }, [categories]);
+
+  function isOpen(id: string, state: Record<string, boolean> = collapsed) {
+    return state[id] === false;
   }
 
   function toggleCategory(id: string) {
-    setCollapsed((current) => ({ ...current, [id]: isOpen(id) }));
+    setCollapsed((current) => {
+      const opening = !isOpen(id, current);
+      if (opening && readPackingSingleOpen()) {
+        const next: Record<string, boolean> = {};
+        for (const category of categories) next[category.id] = true;
+        next[id] = false;
+        return next;
+      }
+      return { ...current, [id]: isOpen(id, current) };
+    });
   }
 
   function onDragEnd(event: DragEndEvent) {
@@ -505,51 +528,18 @@ function PackingDetail({
                           />
                         </div>
                       ) : null}
-                      {open
-                        ? categoryItems.map((item) => (
-                            <div
-                              key={item.id}
-                              dir="rtl"
-                              className={`relative mb-1 ms-6 flex cursor-pointer items-center gap-1 rounded-lg py-2 pe-1 ps-3 shadow-sm ${item.checked ? "bg-neutral-200" : "bg-white"}`}
-                              onClick={() => onToggleItem(item)}
-                            >
-                              <span className="min-w-0 flex-1 truncate text-start">{item.name}</span>
-                              <Stepper quantity={item.quantity} onChange={(quantity) => onQuantity(item, quantity)} />
-                              <div className="relative">
-                                <button
-                                  type="button"
-                                  className="grid size-8 place-items-center text-neutral-400"
-                                  aria-label="פרטים"
-                                  aria-expanded={menu?.kind === "item" && menu.id === item.id}
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    onMenu(menu?.kind === "item" && menu.id === item.id ? null : { kind: "item", id: item.id });
-                                  }}
-                                >
-                                  <DotsIcon className="size-4" />
-                                </button>
-                                {menu?.kind === "item" && menu.id === item.id ? (
-                                  <div role="menu" className="absolute end-0 top-9 z-30 w-max min-w-36 rounded-xl bg-white py-1 text-start shadow-lg" onClick={(event) => event.stopPropagation()}>
-                                    <RowMenuItem
-                                      label="שינוי שם"
-                                      onClick={() => {
-                                        onMenu(null);
-                                        onRenameItem(item);
-                                      }}
-                                    />
-                                    <RowMenuItem
-                                      label="מחיקה"
-                                      onClick={() => {
-                                        onMenu(null);
-                                        onDeleteItem(item);
-                                      }}
-                                    />
-                                  </div>
-                                ) : null}
-                              </div>
-                            </div>
-                          ))
-                        : null}
+                      {open ? (
+                        <PackingItems
+                          items={categoryItems}
+                          menu={menu}
+                          onMenu={onMenu}
+                          onToggleItem={onToggleItem}
+                          onQuantity={onQuantity}
+                          onRenameItem={onRenameItem}
+                          onDeleteItem={onDeleteItem}
+                          onMove={(activeId, overId) => onMoveItem(category.id, activeId, overId)}
+                        />
+                      ) : null}
                     </div>
                   )}
                 </SortableRow>
@@ -559,6 +549,98 @@ function PackingDetail({
         </SortableContext>
       </DndContext>
     </>
+  );
+}
+
+function PackingItems({
+  items,
+  menu,
+  onMenu,
+  onToggleItem,
+  onQuantity,
+  onRenameItem,
+  onDeleteItem,
+  onMove,
+}: {
+  items: PackingItem[];
+  menu: MenuState;
+  onMenu: (menu: MenuState) => void;
+  onToggleItem: (item: PackingItem) => void;
+  onQuantity: (item: PackingItem, quantity: number) => void;
+  onRenameItem: (item: PackingItem) => void;
+  onDeleteItem: (item: PackingItem) => void;
+  onMove: (activeId: string, overId: string) => void;
+}) {
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }), useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 8 } }));
+
+  function onDragEnd(event: DragEndEvent) {
+    const overId = event.over ? String(event.over.id) : "";
+    const activeId = String(event.active.id);
+    if (!overId || overId === activeId) return;
+    onMove(activeId, overId);
+  }
+
+  if (items.length === 0) return null;
+  return (
+    <DndContext id={`packing-items-${items[0]?.category_id ?? "empty"}`} sensors={sensors} collisionDetection={closestCenter} onDragStart={() => onMenu(null)} onDragEnd={onDragEnd}>
+      <SortableContext items={items.map((item) => item.id)} strategy={verticalListSortingStrategy}>
+        {items.map((item) => (
+          <SortableRow key={item.id} id={item.id} raised={menu?.kind === "item" && menu.id === item.id}>
+            {(handle) => (
+              <div
+                dir="rtl"
+                className={`relative mb-1 ms-6 flex cursor-pointer items-center gap-1 rounded-lg py-2 pe-1 ps-3 shadow-sm ${item.checked ? "bg-neutral-200" : "bg-white"}`}
+                onClick={() => onToggleItem(item)}
+              >
+                <span className="min-w-0 flex-1 truncate text-start">{item.name}</span>
+                <Stepper quantity={item.quantity} onChange={(quantity) => onQuantity(item, quantity)} />
+                <div className="relative">
+                  <button
+                    type="button"
+                    className="grid size-8 place-items-center text-neutral-400"
+                    aria-label="פרטים"
+                    aria-expanded={menu?.kind === "item" && menu.id === item.id}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onMenu(menu?.kind === "item" && menu.id === item.id ? null : { kind: "item", id: item.id });
+                    }}
+                  >
+                    <DotsIcon className="size-4" />
+                  </button>
+                  {menu?.kind === "item" && menu.id === item.id ? (
+                    <div role="menu" className="absolute end-0 top-9 z-30 w-max min-w-36 rounded-xl bg-white py-1 text-start shadow-lg" onClick={(event) => event.stopPropagation()}>
+                      <RowMenuItem
+                        label="שינוי שם"
+                        onClick={() => {
+                          onMenu(null);
+                          onRenameItem(item);
+                        }}
+                      />
+                      <RowMenuItem
+                        label="מחיקה"
+                        onClick={() => {
+                          onMenu(null);
+                          onDeleteItem(item);
+                        }}
+                      />
+                    </div>
+                  ) : null}
+                </div>
+                <button
+                  type="button"
+                  className="grid size-8 cursor-grab touch-none place-items-center text-neutral-500 active:cursor-grabbing"
+                  aria-label="גרירה"
+                  {...handle}
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <GripIcon className="size-5" />
+                </button>
+              </div>
+            )}
+          </SortableRow>
+        ))}
+      </SortableContext>
+    </DndContext>
   );
 }
 
@@ -650,6 +732,13 @@ function ConfirmDialog({ title, body, confirmLabel = "מחיקה", onClose, onCo
       </div>
     </div>
   );
+}
+
+function oneOpenCollapsed(categories: { id: string }[], stored: Record<string, boolean>) {
+  const openId = categories.find((category) => stored[category.id] === false)?.id ?? null;
+  const next: Record<string, boolean> = {};
+  for (const category of categories) next[category.id] = category.id !== openId;
+  return next;
 }
 
 function readCollapsed(key: string) {

@@ -1,19 +1,24 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { accountSections } from "@/lib/account-sections";
 import { normalizeChecklist } from "@/lib/checklist";
 import { colorHex } from "@/lib/colors";
 import { normalizeEvent } from "@/lib/events";
 import { normalizePackingCategory, normalizePackingItem, normalizePackingList } from "@/lib/packing";
 import { normalizeStore, sortStores } from "@/lib/stores";
-import type { Category, GroceryLine, Item, ListsData } from "@/lib/types";
+import type { AccountEvent, Category, ChecklistRow, GroceryLine, Item, ListsData, PackingCategory, PackingItem, PackingList, Store } from "@/lib/types";
 import { isUnitId } from "@/lib/units";
 
 export async function loadLists(supabase: SupabaseClient, userId: string): Promise<ListsData | null> {
-  const [{ data: profile }, { data: account }] = await Promise.all([
+  const [{ data: profile }, accountResult] = await Promise.all([
     supabase.from("profiles").select("username").eq("id", userId).maybeSingle(),
-    supabase.from("accounts").select("id").eq("owner_id", userId).maybeSingle(),
+    supabase.from("accounts").select("id, sections").eq("owner_id", userId).maybeSingle(),
   ]);
-  if (!profile || !account) return null;
+  const accountQuery = accountResult.error?.code === "42703" || accountResult.error?.code === "PGRST204"
+    ? await supabase.from("accounts").select("id").eq("owner_id", userId).maybeSingle()
+    : accountResult;
+  const account = accountQuery.data;
+  if (!profile || !account || accountQuery.error) return null;
 
   const [{ data: categories }, { data: items }, { data: grocery }, checklistResult, storesResult, packingListsResult, packingCategoriesResult, packingItemsResult, eventsResult] = await Promise.all([
     supabase.from("categories").select("*").eq("account_id", account.id).order("sort_order"),
@@ -31,6 +36,7 @@ export async function loadLists(supabase: SupabaseClient, userId: string): Promi
   return {
     accountId: account.id,
     username: profile.username,
+    sections: accountSections((account as { sections?: unknown }).sections),
     categories: (categories ?? []).map(normalizeCategory),
     items: (items ?? []).map(normalizeItem),
     grocery: (grocery ?? []).map(normalizeGrocery),

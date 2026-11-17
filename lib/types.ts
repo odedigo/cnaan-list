@@ -1,3 +1,4 @@
+import type { AccountSection } from "@/lib/account-sections";
 import type { UnitId } from "@/lib/units";
 
 export type Store = {
@@ -109,4 +110,5 @@ export type ListsData = {
   packingReady: boolean;
   events: AccountEvent[];
   eventsReady: boolean;
+  sections: AccountSection[];
 };

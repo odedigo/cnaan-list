@@ -1,3 +1,5 @@
+import type { AccountSection } from "@/lib/account-sections";
+
 export type AccountRole = "USER" | "ADMIN";
 
 export type UserType = "NORM" | "PRO" | "PREMIUM";
@@ -10,6 +12,7 @@ export type ManagedAccount = {
   userType: UserType;
   accountId: string | null;
   eventReminders: boolean;
+  sections: AccountSection[];
 };
 
 export const userTypeOptions: { value: UserType; label: string }[] = [

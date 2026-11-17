@@ -243,3 +243,78 @@ function splitName(value: string) {
 function clean(value: string) {
   return value.replace(/\s+/g, " ").trim();
 }
+
+const GEDCOM_MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+
+export function gedcomText(tree: GedcomTree) {
+  const byXref = new Map(tree.people.map((person) => [person.xref, person]));
+  const lines = ["0 HEAD", "1 SOUR CnaanList", "1 GEDC", "2 VERS 5.5.1", "2 FORM LINEAGE-LINKED", "1 CHAR UTF-8"];
+  for (const person of tree.people) {
+    lines.push(`0 ${person.xref} INDI`);
+    lines.push(`1 NAME ${gedcomValue(person.given)} /${gedcomValue(person.surname)}/`);
+    if (person.sex === "m") lines.push("1 SEX M");
+    else if (person.sex === "f") lines.push("1 SEX F");
+    if (person.birthDate.trim() || person.birthPlace.trim()) {
+      lines.push("1 BIRT");
+      if (person.birthDate.trim()) lines.push(`2 DATE ${gedcomValue(gedcomDate(person.birthDate))}`);
+      if (person.birthPlace.trim()) lines.push(`2 PLAC ${gedcomValue(person.birthPlace)}`);
+    }
+    if (person.deceased || person.deathDate.trim() || person.deathPlace.trim()) {
+      lines.push("1 DEAT Y");
+      if (person.deathDate.trim()) lines.push(`2 DATE ${gedcomValue(gedcomDate(person.deathDate))}`);
+      if (person.deathPlace.trim()) lines.push(`2 PLAC ${gedcomValue(person.deathPlace)}`);
+    }
+    if (person.note.trim()) lines.push(...noteLines(person.note));
+  }
+  tree.unions.forEach((union, index) => {
+    const left = union.partnerA ? byXref.get(union.partnerA) : undefined;
+    const right = union.partnerB ? byXref.get(union.partnerB) : undefined;
+    let husband = union.partnerA;
+    let wife = union.partnerB;
+    if (left && right && left.sex !== "m" && right.sex === "m") {
+      husband = union.partnerB;
+      wife = union.partnerA;
+    } else if (left?.sex === "f" && !right) {
+      husband = null;
+      wife = union.partnerA;
+    }
+    lines.push(`0 @F${index + 1}@ FAM`);
+    if (husband) lines.push(`1 HUSB ${husband}`);
+    if (wife) lines.push(`1 WIFE ${wife}`);
+    if (union.status === "partner") lines.push("1 MARR N");
+    else if (union.status !== "separated") lines.push("1 MARR");
+    if (union.status === "divorced") lines.push("1 DIV Y");
+    if (union.status === "separated") lines.push("1 _SEPR Y");
+    if (union.status === "widowed") {
+      lines.push("1 EVEN");
+      lines.push("2 TYPE WIDOWED");
+    }
+    for (const child of union.children) lines.push(`1 CHIL ${child}`);
+  });
+  lines.push("0 TRLR");
+  return `${lines.join("\r\n")}\r\n`;
+}
+
+function gedcomDate(value: string) {
+  const iso = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const month = iso ? GEDCOM_MONTHS[Number(iso[2]) - 1] : "";
+  if (!iso || !month) return value.trim();
+  return `${Number(iso[3])} ${month} ${iso[1]}`;
+}
+
+function gedcomValue(value: string) {
+  return value.replace(/@/g, "@@").replace(/[\r\n]+/g, " ").trim();
+}
+
+function noteLines(note: string) {
+  const lines: string[] = [];
+  note.split("\n").forEach((part, index) => {
+    const pieces = part.match(/.{1,200}/g) ?? [""];
+    pieces.forEach((piece, pieceIndex) => {
+      if (index === 0 && pieceIndex === 0) lines.push(`1 NOTE ${gedcomValue(piece)}`);
+      else if (pieceIndex === 0) lines.push(`2 CONT ${gedcomValue(piece)}`);
+      else lines.push(`2 CONC ${piece.replace(/@/g, "@@")}`);
+    });
+  });
+  return lines;
+}

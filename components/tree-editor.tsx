@@ -35,7 +35,7 @@ export function TreeEditor({
   busy: boolean;
   onBack: () => void;
   onCreatePerson: () => Promise<string | null>;
-  onSavePerson: (personId: string, draft: PersonDraft) => Promise<void>;
+  onSavePerson: (personId: string, draft: PersonDraft) => Promise<boolean>;
   onAddSpouse: (personId: string, input: SpouseInput) => Promise<string | null>;
   onSetUnionStatus: (unionId: string, status: UnionStatus) => Promise<void>;
   onAddChild: (personId: string) => Promise<string | null>;
@@ -90,13 +90,6 @@ export function TreeEditor({
   }
   const panel = (
     <div dir="rtl" className="fixed inset-0 z-[80] flex flex-col bg-[var(--cream)] text-neutral-900" role="dialog" aria-modal="true" aria-label={name}>
-      <div className="flex h-12 shrink-0 items-center gap-1 border-b border-neutral-200 bg-[var(--header)] px-1">
-        <button type="button" className="grid size-10 place-items-center" aria-label="חזרה" onClick={onBack}>
-          <ChevronIcon className="size-6 rotate-90" />
-        </button>
-        <h1 className="min-w-0 flex-1 truncate text-center text-base font-semibold">{name}</h1>
-        <span className="w-10 text-center text-sm text-neutral-600">{graph ? graph.people.length : ""}</span>
-      </div>
       {error ? <p className="mx-3 mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p> : null}
       {portraitPhone ? (
         <div className="flex flex-1 flex-col items-center justify-center px-8 text-center">
@@ -126,8 +119,15 @@ export function TreeEditor({
             setSelectedId(id);
             setDetailsOpen(true);
           }}
+          onLoadImage={onLoadImage}
         />
-        {graph && graph.people.length > 0 ? (
+        </>
+      )}
+      <div className="absolute start-3 top-3 z-20 flex items-start gap-2">
+        <button type="button" className="grid size-10 shrink-0 place-items-center rounded-full bg-white shadow" aria-label="חזרה" onClick={onBack}>
+          <ChevronIcon className="size-6 rotate-90" />
+        </button>
+        {!portraitPhone && graph && graph.people.length > 0 ? (
           <PersonSearch
             open={searchOpen}
             query={query}
@@ -141,8 +141,7 @@ export function TreeEditor({
             onPick={jumpTo}
           />
         ) : null}
-        </>
-      )}
+      </div>
       {graph && selected && detailsOpen && !portraitPhone ? (
         <PersonDialog
           person={selected}
@@ -151,7 +150,10 @@ export function TreeEditor({
           hasParents={Boolean(graph?.children.some((link) => link.person_id === selected.id))}
           onLoadImage={onLoadImage}
           onClose={() => setDetailsOpen(false)}
-          onSave={(draft) => onSavePerson(selected.id, draft)}
+          onSave={async (draft) => {
+            const saved = await onSavePerson(selected.id, draft);
+            if (saved) setDetailsOpen(false);
+          }}
           onAddSpouse={(input) => onAddSpouse(selected.id, input)}
           onSetUnionStatus={onSetUnionStatus}
           onOpenPerson={(id) => {
@@ -205,6 +207,7 @@ function Chart({
   onSelect,
   onDismiss,
   onCreate,
+  onLoadImage,
 }: {
   graph: FamilyGraph | null;
   loading: boolean;
@@ -216,6 +219,7 @@ function Chart({
   onSelect: (id: string) => void;
   onDismiss: () => void;
   onCreate: () => void;
+  onLoadImage: (path: string) => Promise<Blob | null>;
 }) {
   const canvas = useRef<SVGSVGElement>(null);
   const placed = useRef(new Map<string, { x: number; y: number }>());
@@ -235,6 +239,7 @@ function Chart({
     [graph],
   );
   const byId = useMemo(() => new Map(graph?.people.map((person) => [person.id, person]) ?? []), [graph]);
+  const photos = usePersonPhotos(graph?.people, onLoadImage);
 
   useLayoutEffect(() => {
     const node = canvas.current;
@@ -361,6 +366,9 @@ function Chart({
               const person = byId.get(box.id);
               if (!person) return null;
               const active = person.id === (selectedId ?? focusId);
+              const photo = person.image_path ? photos[person.image_path] : "";
+              const photoX = box.x + 8;
+              const photoY = box.y + (CARD_H - 28) / 2;
               return (
                 <g
                   key={person.id}
@@ -391,8 +399,13 @@ function Chart({
                       <path d="M9 10.2h6V18a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1v-7.8Z" strokeLinejoin="round" />
                     </svg>
                   ) : null}
-                  <text x={box.x + CARD_W / 2} y={box.y + 30} textAnchor="middle" direction="rtl" fill="#171717" style={{ fontSize: 15, fontWeight: 600 }}>
-                    {shorten(personName(person), 18)}
+                  {photo ? (
+                    <foreignObject x={photoX} y={photoY} width={28} height={28} style={{ pointerEvents: "none" }}>
+                      <img src={photo} alt="" width={28} height={28} style={{ display: "block", width: 28, height: 28, borderRadius: 14, objectFit: "cover" }} />
+                    </foreignObject>
+                  ) : null}
+                  <text x={box.x + CARD_W / 2 + (photo ? 10 : 0)} y={box.y + 30} textAnchor="middle" direction="rtl" fill="#171717" style={{ fontSize: 15, fontWeight: 600 }}>
+                    {shorten(personName(person), photo ? 14 : 18)}
                   </text>
                   <text x={box.x + CARD_W / 2} y={box.y + 52} textAnchor="middle" direction="ltr" fill="#737373" style={{ fontSize: 12, unicodeBidi: "isolate" }}>
                     {shorten(years(person), 22)}
@@ -406,6 +419,40 @@ function Chart({
       ) : null}
     </div>
   );
+}
+
+function usePersonPhotos(people: FamilyPerson[] | undefined, load: (path: string) => Promise<Blob | null>) {
+  const [photos, setPhotos] = useState<Record<string, string>>({});
+  const paths = useMemo(() => [...new Set((people ?? []).flatMap((person) => (person.image_path ? [person.image_path] : [])))].sort(), [people]);
+  const key = paths.join("\n");
+  useEffect(() => {
+    if (!key) {
+      setPhotos({});
+      return;
+    }
+    let cancelled = false;
+    const created: string[] = [];
+    void Promise.all(
+      key.split("\n").map(async (path) => {
+        const blob = await load(path);
+        if (!blob) return [path, ""] as const;
+        const url = URL.createObjectURL(blob);
+        created.push(url);
+        return [path, url] as const;
+      }),
+    ).then((pairs) => {
+      if (cancelled) {
+        for (const url of created) URL.revokeObjectURL(url);
+        return;
+      }
+      setPhotos(Object.fromEntries(pairs.filter((pair) => pair[1])));
+    });
+    return () => {
+      cancelled = true;
+      for (const url of created) URL.revokeObjectURL(url);
+    };
+  }, [key, load]);
+  return photos;
 }
 
 function PersonSearch({
@@ -432,13 +479,13 @@ function PersonSearch({
   }, [open]);
   if (!open) {
     return (
-      <button type="button" className="absolute start-3 top-16 z-20 grid size-10 place-items-center rounded-full bg-white shadow" aria-label="חיפוש אדם" onClick={onOpen}>
+      <button type="button" className="grid size-10 place-items-center rounded-full bg-white shadow" aria-label="חיפוש אדם" onClick={onOpen}>
         <SearchIcon className="size-5 text-neutral-500" />
       </button>
     );
   }
   return (
-    <div className="absolute start-3 top-16 z-20 w-64">
+    <div className="w-64">
       <label className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 shadow">
         <button type="button" className="grid shrink-0 place-items-center" aria-label="סגירת חיפוש" onClick={onClose}>
           <SearchIcon className="size-5 text-neutral-500" />
@@ -510,10 +557,12 @@ function PersonDialog({
   const [draft, setDraft] = useState<PersonDraft>(draftOf(person));
   const [spouseName, setSpouseName] = useState("");
   const [spouseStatus, setSpouseStatus] = useState<UnionStatus>("married");
+  const [photoOpen, setPhotoOpen] = useState(false);
   useEffect(() => setDraft(draftOf(person)), [person]);
   useEffect(() => {
     setSpouseName("");
     setSpouseStatus("married");
+    setPhotoOpen(false);
   }, [person.id]);
   useEffect(() => {
     const path = person.image_path;
@@ -543,29 +592,37 @@ function PersonDialog({
   return (
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true" aria-label={personName(person)}>
       <form
-        className="w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-3 text-start"
-        style={{ maxHeight: "68vh", minHeight: 0 }}
+        className="overflow-y-auto rounded-2xl bg-white p-4 text-start text-base"
+        style={{ width: "min(920px, calc(100vw - 2rem))", maxHeight: "calc(100vh - 2rem)" }}
         onSubmit={(event) => {
           event.preventDefault();
           void onSave(draft);
         }}
       >
         <div className="flex items-center gap-3">
-          <span className="grid size-12 shrink-0 place-items-center overflow-hidden rounded-full bg-neutral-100 text-neutral-400">
-            {src ? <img src={src} alt="" className="size-full object-cover" /> : <span className="text-xs">אין תמונה</span>}
-          </span>
-          <p className="min-w-0 text-base font-semibold">{personName(person)}</p>
+          {src ? (
+            <button type="button" className="grid size-14 shrink-0 place-items-center overflow-hidden rounded-full bg-neutral-100" aria-label={`הגדלת התמונה של ${personName(person)}`} onClick={() => setPhotoOpen(true)}>
+              <img src={src} alt="" className="size-full object-cover" />
+            </button>
+          ) : (
+            <span className="grid size-14 shrink-0 place-items-center overflow-hidden rounded-full bg-neutral-100 text-sm text-neutral-400">אין תמונה</span>
+          )}
+          <p className="min-w-0 text-xl font-semibold">{personName(person)}</p>
         </div>
-        <div className="mt-3 flex flex-col gap-2">
+        <div className="mt-3 grid grid-cols-2 gap-3">
           <Field label="שם פרטי" value={draft.given_name} maxLength={80} onChange={(value) => setField("given_name", value)} />
           <Field label="שם משפחה" value={draft.surname} maxLength={80} onChange={(value) => setField("surname", value)} />
-          <label className="block text-sm">
+          <label className="block">
             <span className="text-neutral-600">מין</span>
-            <select className="mt-1 w-full rounded-xl border border-neutral-300 bg-white py-2 ps-3 outline-none" value={draft.sex} onChange={(event) => setField("sex", event.target.value as PersonDraft["sex"])}>
+            <select className="mt-1 w-full rounded-xl border border-neutral-300 bg-white py-2 ps-3 text-base outline-none" value={draft.sex} onChange={(event) => setField("sex", event.target.value as PersonDraft["sex"])}>
               <option value="m">זכר</option>
               <option value="f">נקבה</option>
               <option value="u">לא ידוע</option>
             </select>
+          </label>
+          <label className="flex items-end gap-2 pb-2">
+            <input type="checkbox" className="size-5" checked={draft.deceased} onChange={(event) => setField("deceased", event.target.checked)} />
+            <span>נפטר/ה</span>
           </label>
           <DateField label="תאריך לידה" value={draft.birth_date} onChange={(value) => setField("birth_date", value)} />
           <Field label="מקום לידה" value={draft.birth_place} maxLength={120} onChange={(value) => setField("birth_place", value)} />
@@ -575,26 +632,22 @@ function PersonDialog({
             onChange={(value) => setDraft((current) => ({ ...current, death_date: value, deceased: value.trim() ? true : current.deceased }))}
           />
           <Field label="מקום פטירה" value={draft.death_place} maxLength={120} onChange={(value) => setField("death_place", value)} />
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={draft.deceased} onChange={(event) => setField("deceased", event.target.checked)} />
-            <span>נפטר/ה</span>
-          </label>
-          <label className="block text-sm">
+          <label className="col-span-2 block">
             <span className="text-neutral-600">הערה</span>
-            <textarea value={draft.note} maxLength={1000} rows={2} onChange={(event) => setField("note", event.target.value)} className="mt-1 w-full rounded-xl border border-neutral-300 px-3 py-2 outline-none" aria-label="הערה" />
+            <textarea value={draft.note} maxLength={1000} rows={2} onChange={(event) => setField("note", event.target.value)} className="mt-1 w-full rounded-xl border border-neutral-300 px-3 py-2 text-base outline-none" aria-label="הערה" />
           </label>
         </div>
-        <div className="mt-4">
-          <p className="text-sm text-neutral-600">בן/בת זוג</p>
-          {spouses.length === 0 ? <p className="mt-1 text-sm text-neutral-500">אין</p> : null}
+        <div className="mt-3">
+          <p className="text-neutral-600">בן/בת זוג</p>
+          {spouses.length === 0 ? <p className="mt-1 text-neutral-500">אין</p> : null}
           <ul className="mt-2 flex flex-col gap-2">
             {spouses.map((link) => (
               <li key={link.unionId} className="flex items-center gap-2">
-                <button type="button" className="min-w-0 flex-1 truncate rounded-xl bg-neutral-100 px-3 py-2 text-start" onClick={() => onOpenPerson(link.person.id)}>
+                <button type="button" className="min-w-0 flex-1 truncate rounded-xl bg-neutral-100 px-3 py-2 text-start text-base" onClick={() => onOpenPerson(link.person.id)}>
                   {personName(link.person)}
                 </button>
                 <select
-                  className="w-36 rounded-xl border border-neutral-300 bg-white py-2 ps-3 outline-none"
+                  className="w-44 rounded-xl border border-neutral-300 bg-white py-2 ps-3 text-base outline-none"
                   aria-label={`סטטוס של ${personName(link.person)}`}
                   value={link.status}
                   disabled={busy}
@@ -616,36 +669,36 @@ function PersonDialog({
               onChange={(event) => setSpouseName(event.target.value)}
               placeholder="שם"
               aria-label="שם בן או בת הזוג"
-              className="min-w-0 flex-1 rounded-xl border border-neutral-300 px-3 py-2 outline-none"
+              className="min-w-0 flex-1 rounded-xl border border-neutral-300 px-3 py-2 text-base outline-none"
             />
-            <select className="w-36 rounded-xl border border-neutral-300 bg-white py-2 ps-3 outline-none" aria-label="סטטוס הזוגיות" value={spouseStatus} onChange={(event) => setSpouseStatus(event.target.value as UnionStatus)}>
+            <select className="w-44 rounded-xl border border-neutral-300 bg-white py-2 ps-3 text-base outline-none" aria-label="סטטוס הזוגיות" value={spouseStatus} onChange={(event) => setSpouseStatus(event.target.value as UnionStatus)}>
               {UNION_STATUSES.map((status) => (
                 <option key={status} value={status}>
                   {unionStatusLabel(status)}
                 </option>
               ))}
             </select>
+            <button
+              type="button"
+              className="shrink-0 rounded-xl bg-neutral-100 px-4 py-2 font-medium disabled:opacity-40"
+              disabled={busy}
+              onClick={() => {
+                const typed = spouseName.trim();
+                const match = typed ? graph.people.find((item) => item.id !== person.id && personName(item) === typed) : undefined;
+                const parts = splitName(typed);
+                void onAddSpouse({
+                  given_name: match ? match.given_name : parts.given,
+                  surname: match ? match.surname : parts.surname,
+                  status: spouseStatus,
+                  spouseId: match?.id ?? null,
+                }).then((id) => {
+                  if (id) setSpouseName("");
+                });
+              }}
+            >
+              הוספה לעץ
+            </button>
           </div>
-          <button
-            type="button"
-            className="mt-2 w-full rounded-xl bg-neutral-100 py-2.5 font-medium disabled:opacity-40"
-            disabled={busy}
-            onClick={() => {
-              const typed = spouseName.trim();
-              const match = typed ? graph.people.find((item) => item.id !== person.id && personName(item) === typed) : undefined;
-              const parts = splitName(typed);
-              void onAddSpouse({
-                given_name: match ? match.given_name : parts.given,
-                surname: match ? match.surname : parts.surname,
-                status: spouseStatus,
-                spouseId: match?.id ?? null,
-              }).then((id) => {
-                if (id) setSpouseName("");
-              });
-            }}
-          >
-            הוספה לעץ
-          </button>
         </div>
         <input
           ref={fileRef}
@@ -658,26 +711,37 @@ function PersonDialog({
             if (file) onImage(file);
           }}
         />
-        <button type="button" className="mt-4 w-full rounded-xl bg-neutral-100 py-2.5 font-medium disabled:opacity-40" disabled={busy} onClick={() => fileRef.current?.click()}>
-          {person.image_path ? "החלפת תמונה" : "הוספת תמונה"}
-        </button>
-        {person.image_path ? (
-          <button type="button" className="mt-2 w-full rounded-xl bg-neutral-100 py-2.5 font-medium text-red-700 disabled:opacity-40" disabled={busy} onClick={() => onImage(null)}>
-            הסרת תמונה
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button type="button" className="rounded-xl bg-neutral-100 px-4 py-2.5 font-medium disabled:opacity-40" disabled={busy} onClick={() => fileRef.current?.click()}>
+            {person.image_path ? "החלפת תמונה" : "הוספת תמונה"}
           </button>
-        ) : null}
-        <button type="submit" className="mt-2 w-full rounded-xl bg-[var(--teal)] py-2.5 font-medium text-white disabled:opacity-40" disabled={busy}>
-          שמירה
-        </button>
-        <ActionButton disabled={busy} onClick={() => void onAddChild()}>הוספת ילד</ActionButton>
-        <ActionButton disabled={busy || hasParents} onClick={() => void onAddParents()}>הוספת הורים</ActionButton>
-        <button type="button" className="mt-2 w-full rounded-xl bg-red-50 py-2.5 font-medium text-red-700 disabled:opacity-40" disabled={busy} onClick={onDelete}>
-          מחיקה
-        </button>
-        <button type="button" className="mt-2 w-full rounded-xl bg-neutral-100 py-2.5 font-medium text-neutral-700" onClick={onClose}>
-          סגירה
-        </button>
+          {person.image_path ? (
+            <button type="button" className="rounded-xl bg-neutral-100 px-4 py-2.5 font-medium text-red-700 disabled:opacity-40" disabled={busy} onClick={() => onImage(null)}>
+              הסרת תמונה
+            </button>
+          ) : null}
+          <button type="submit" className="rounded-xl bg-[var(--teal)] px-4 py-2.5 font-medium text-white disabled:opacity-40" disabled={busy}>
+            שמירה
+          </button>
+          <button type="button" className="rounded-xl bg-neutral-100 px-4 py-2.5 font-medium text-neutral-800 disabled:opacity-40" disabled={busy} onClick={() => void onAddChild()}>
+            הוספת ילד
+          </button>
+          <button type="button" className="rounded-xl bg-neutral-100 px-4 py-2.5 font-medium text-neutral-800 disabled:opacity-40" disabled={busy || hasParents} onClick={() => void onAddParents()}>
+            הוספת הורים
+          </button>
+          <button type="button" className="rounded-xl bg-red-50 px-4 py-2.5 font-medium text-red-700 disabled:opacity-40" disabled={busy} onClick={onDelete}>
+            מחיקה
+          </button>
+          <button type="button" className="rounded-xl bg-neutral-100 px-4 py-2.5 font-medium text-neutral-700" onClick={onClose}>
+            סגירה
+          </button>
+        </div>
       </form>
+      {photoOpen && src ? (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/70 p-6" role="dialog" aria-modal="true" aria-label={personName(person)} onClick={() => setPhotoOpen(false)}>
+          <img src={src} alt={personName(person)} className="max-h-[80vh] max-w-full rounded-lg object-contain" />
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -693,9 +757,9 @@ function matchingPeople(people: FamilyPerson[], query: string) {
 
 function Field({ label, value, maxLength, ltr = false, onChange }: { label: string; value: string; maxLength: number; ltr?: boolean; onChange: (value: string) => void }) {
   return (
-    <label className="block text-sm">
+    <label className="block text-base">
       <span className="text-neutral-600">{label}</span>
-      <input value={value} maxLength={maxLength} dir={ltr ? "ltr" : undefined} onChange={(event) => onChange(event.target.value)} className={`mt-1 w-full rounded-xl border border-neutral-300 px-3 py-2 outline-none ${ltr ? "text-end" : ""}`} aria-label={label} />
+      <input value={value} maxLength={maxLength} dir={ltr ? "ltr" : undefined} onChange={(event) => onChange(event.target.value)} className={`mt-1 w-full rounded-xl border border-neutral-300 px-3 py-2 text-base outline-none ${ltr ? "text-end" : ""}`} aria-label={label} />
     </label>
   );
 }
@@ -727,30 +791,22 @@ function calendarValue(value: string) {
 function DateField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
   const iso = calendarValue(value);
   return (
-    <label className="block text-sm">
+    <label className="block text-base">
       <span className="text-neutral-600">{label}</span>
       <input
         type="date"
         value={iso}
         dir="ltr"
         onChange={(event) => onChange(event.target.value)}
-        className="mt-1 w-full rounded-xl border border-neutral-300 px-3 py-2 text-end outline-none"
+        className="mt-1 w-full rounded-xl border border-neutral-300 px-3 py-2 text-end text-base outline-none"
         aria-label={label}
       />
       {value.trim() && !iso ? (
-        <span dir="ltr" className="mt-1 block text-end text-xs text-neutral-500">
+        <span dir="ltr" className="mt-1 block text-end text-sm text-neutral-500">
           {value}
         </span>
       ) : null}
     </label>
-  );
-}
-
-function ActionButton({ children, disabled, onClick }: { children: string; disabled: boolean; onClick: () => void }) {
-  return (
-    <button type="button" className="mt-2 w-full rounded-xl bg-neutral-100 py-2.5 font-medium text-neutral-800 disabled:opacity-40" disabled={disabled} onClick={onClick}>
-      {children}
-    </button>
   );
 }
 

@@ -16,6 +16,7 @@ import { PackingPage } from "@/components/packing-page";
 import { RecipesPage } from "@/components/recipes-page";
 import { TreesPage } from "@/components/trees-page";
 import { useBootError, useLists, useListsOptional } from "@/components/lists-provider";
+import { firstSectionPath, sectionForPath } from "@/lib/account-sections";
 import { pushAppHistory } from "@/lib/history";
 import { bindKeepAwake } from "@/lib/keep-awake";
 import { bindSavedSession } from "@/lib/saved-accounts";
@@ -77,6 +78,13 @@ export function AppShell({
   }, []);
 
   useEffect(() => {
+    if (!signedIn || !lists) return;
+    const section = sectionForPath(path);
+    if (!section || lists.sections.includes(section)) return;
+    go(firstSectionPath(lists.sections));
+  }, [go, lists, path, signedIn]);
+
+  useEffect(() => {
     if (!signedIn) return;
     let startX = 0;
     let startY = 0;
@@ -124,13 +132,13 @@ export function AppShell({
     <LoadingScreen path={path} version={version} message={bootError ?? undefined} />
   ) : (
     <>
-      <LazyList mode="grocery" active={path === "/grocery"} warm={warm} scrolls={scrolls} restoreRef={restoreRef} />
-      <LazyList mode="inventory" active={path === "/inventory"} warm={warm} scrolls={scrolls} restoreRef={restoreRef} />
-      <LazyChecklist active={path === "/lists"} warm={warm} scrolls={scrolls} restoreRef={restoreRef} />
-      <LazyRecipes active={path === "/recipes"} warm={warm} scrolls={scrolls} restoreRef={restoreRef} />
-      <LazyPacking active={path === "/packing"} warm={warm} scrolls={scrolls} restoreRef={restoreRef} />
-      <LazyDates active={path === "/dates"} warm={warm} scrolls={scrolls} restoreRef={restoreRef} />
-      <LazyTrees active={path === "/trees"} warm={warm} scrolls={scrolls} restoreRef={restoreRef} />
+      <LazyList mode="grocery" active={path === "/grocery"} warm={warm} scrolls={scrolls} restoreRef={restoreRef} shown={!lists || lists.sections.includes("shopping")} />
+      <LazyList mode="inventory" active={path === "/inventory"} warm={warm} scrolls={scrolls} restoreRef={restoreRef} shown={!lists || lists.sections.includes("shopping")} />
+      <LazyChecklist active={path === "/lists"} warm={warm} scrolls={scrolls} restoreRef={restoreRef} shown={!lists || lists.sections.includes("lists")} />
+      <LazyRecipes active={path === "/recipes"} warm={warm} scrolls={scrolls} restoreRef={restoreRef} shown={!lists || lists.sections.includes("recipes")} />
+      <LazyPacking active={path === "/packing"} warm={warm} scrolls={scrolls} restoreRef={restoreRef} shown={!lists || lists.sections.includes("packing")} />
+      <LazyDates active={path === "/dates"} warm={warm} scrolls={scrolls} restoreRef={restoreRef} shown={!lists || lists.sections.includes("events")} />
+      <LazyTrees active={path === "/trees"} warm={warm} scrolls={scrolls} restoreRef={restoreRef} shown={!lists || lists.sections.includes("trees")} />
       {path === "/settings" ? <SignedInSettingsView version={version} /> : null}
     </>
   );
@@ -154,17 +162,19 @@ function LazyChecklist({
   warm,
   scrolls,
   restoreRef,
+  shown,
 }: {
   active: boolean;
   warm: boolean;
   scrolls: RefObject<Record<string, number>>;
   restoreRef: RefObject<string | null>;
+  shown: boolean;
 }) {
-  const [mounted, setMounted] = useState(active);
+  const [mounted, setMounted] = useState(active && shown);
 
   useEffect(() => {
-    if (active || warm) setMounted(true);
-  }, [active, warm]);
+    if (shown && (active || warm)) setMounted(true);
+  }, [active, warm, shown]);
 
   useLayoutEffect(() => {
     if (!active || restoreRef.current !== "/lists") return;
@@ -172,7 +182,7 @@ function LazyChecklist({
     window.scrollTo(0, scrolls.current?.["/lists"] ?? 0);
   }, [active, restoreRef, scrolls]);
 
-  if (!mounted) return null;
+  if (!shown || !mounted) return null;
   return (
     <div hidden={!active}>
       <ChecklistPage active={active} />
@@ -185,17 +195,19 @@ function LazyRecipes({
   warm,
   scrolls,
   restoreRef,
+  shown,
 }: {
   active: boolean;
   warm: boolean;
   scrolls: RefObject<Record<string, number>>;
   restoreRef: RefObject<string | null>;
+  shown: boolean;
 }) {
-  const [mounted, setMounted] = useState(active);
+  const [mounted, setMounted] = useState(active && shown);
 
   useEffect(() => {
-    if (active || warm) setMounted(true);
-  }, [active, warm]);
+    if (shown && (active || warm)) setMounted(true);
+  }, [active, warm, shown]);
 
   useLayoutEffect(() => {
     if (!active || restoreRef.current !== "/recipes") return;
@@ -203,7 +215,7 @@ function LazyRecipes({
     window.scrollTo(0, scrolls.current?.["/recipes"] ?? 0);
   }, [active, restoreRef, scrolls]);
 
-  if (!mounted) return null;
+  if (!shown || !mounted) return null;
   return (
     <div hidden={!active}>
       <RecipesPage active={active} />
@@ -216,17 +228,19 @@ function LazyPacking({
   warm,
   scrolls,
   restoreRef,
+  shown,
 }: {
   active: boolean;
   warm: boolean;
   scrolls: RefObject<Record<string, number>>;
   restoreRef: RefObject<string | null>;
+  shown: boolean;
 }) {
-  const [mounted, setMounted] = useState(active);
+  const [mounted, setMounted] = useState(active && shown);
 
   useEffect(() => {
-    if (active || warm) setMounted(true);
-  }, [active, warm]);
+    if (shown && (active || warm)) setMounted(true);
+  }, [active, warm, shown]);
 
   useLayoutEffect(() => {
     if (!active || restoreRef.current !== "/packing") return;
@@ -234,7 +248,7 @@ function LazyPacking({
     window.scrollTo(0, scrolls.current?.["/packing"] ?? 0);
   }, [active, restoreRef, scrolls]);
 
-  if (!mounted) return null;
+  if (!shown || !mounted) return null;
   return (
     <div hidden={!active}>
       <PackingPage active={active} />
@@ -247,17 +261,19 @@ function LazyDates({
   warm,
   scrolls,
   restoreRef,
+  shown,
 }: {
   active: boolean;
   warm: boolean;
   scrolls: RefObject<Record<string, number>>;
   restoreRef: RefObject<string | null>;
+  shown: boolean;
 }) {
-  const [mounted, setMounted] = useState(active);
+  const [mounted, setMounted] = useState(active && shown);
 
   useEffect(() => {
-    if (active || warm) setMounted(true);
-  }, [active, warm]);
+    if (shown && (active || warm)) setMounted(true);
+  }, [active, warm, shown]);
 
   useLayoutEffect(() => {
     if (!active || restoreRef.current !== "/dates") return;
@@ -265,7 +281,7 @@ function LazyDates({
     window.scrollTo(0, scrolls.current?.["/dates"] ?? 0);
   }, [active, restoreRef, scrolls]);
 
-  if (!mounted) return null;
+  if (!shown || !mounted) return null;
   return (
     <div hidden={!active}>
       <DatesPage active={active} />
@@ -278,17 +294,19 @@ function LazyTrees({
   warm,
   scrolls,
   restoreRef,
+  shown,
 }: {
   active: boolean;
   warm: boolean;
   scrolls: RefObject<Record<string, number>>;
   restoreRef: RefObject<string | null>;
+  shown: boolean;
 }) {
-  const [mounted, setMounted] = useState(active);
+  const [mounted, setMounted] = useState(active && shown);
 
   useEffect(() => {
-    if (active || warm) setMounted(true);
-  }, [active, warm]);
+    if (shown && (active || warm)) setMounted(true);
+  }, [active, warm, shown]);
 
   useLayoutEffect(() => {
     if (!active || restoreRef.current !== "/trees") return;
@@ -296,7 +314,7 @@ function LazyTrees({
     window.scrollTo(0, scrolls.current?.["/trees"] ?? 0);
   }, [active, restoreRef, scrolls]);
 
-  if (!mounted) return null;
+  if (!shown || !mounted) return null;
   return (
     <div hidden={!active}>
       <TreesPage active={active} />
@@ -345,18 +363,20 @@ function LazyList({
   warm,
   scrolls,
   restoreRef,
+  shown,
 }: {
   mode: "grocery" | "inventory";
   active: boolean;
   warm: boolean;
   scrolls: RefObject<Record<string, number>>;
   restoreRef: RefObject<string | null>;
+  shown: boolean;
 }) {
-  const [mounted, setMounted] = useState(active);
+  const [mounted, setMounted] = useState(active && shown);
 
   useEffect(() => {
-    if (active || warm) setMounted(true);
-  }, [active, warm]);
+    if (shown && (active || warm)) setMounted(true);
+  }, [active, warm, shown]);
 
   useLayoutEffect(() => {
     if (!active || restoreRef.current !== mode) return;
@@ -364,7 +384,7 @@ function LazyList({
     window.scrollTo(0, scrolls.current?.[mode] ?? 0);
   }, [active, mode, restoreRef, scrolls]);
 
-  if (!mounted) return null;
+  if (!shown || !mounted) return null;
   return (
     <div hidden={!active}>
       <ListPage mode={mode} />

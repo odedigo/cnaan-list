@@ -8,6 +8,7 @@ import Link from "next/link";
 import { resetManagedPassword, saveManagedAccount } from "@/app/actions/admin";
 import type { AccountRole, ManagedAccount } from "@/lib/account-role";
 import { userTypeOptions } from "@/lib/account-role";
+import { accountSectionOptions, type AccountSection } from "@/lib/account-sections";
 
 const roles: { value: AccountRole; label: string }[] = [
   { value: "USER", label: "משתמש" },
@@ -18,7 +19,7 @@ export function AdminAccounts({ selfId, accounts }: { selfId: string; accounts: 
   return (
     <main className="admin-screen">
       <p className="admin-phone">עמוד זה זמין רק במחשב</p>
-      <div className="admin-desk mx-auto box-border min-h-dvh w-full px-8 py-8" style={{ maxWidth: "1100px" }}>
+      <div className="admin-desk mx-auto box-border min-h-dvh w-full px-8 py-8" style={{ maxWidth: "1280px" }}>
         <div className="flex items-center justify-between gap-4">
           <h1 className="text-2xl font-semibold">ניהול חשבונות</h1>
           <Link href="/grocery" className="text-sm text-[var(--teal)]">
@@ -34,13 +35,14 @@ export function AdminAccounts({ selfId, accounts }: { selfId: string; accounts: 
                 <th className="px-4 py-3 font-medium">תפקיד</th>
                 <th className="px-4 py-3 font-medium">סוג</th>
                 <th className="px-4 py-3 font-medium">תזכורות</th>
+                <th className="px-4 py-3 font-medium">מדורים</th>
                 <th className="px-4 py-3 font-medium">פעולות</th>
               </tr>
             </thead>
             <tbody>
               {accounts.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-neutral-500">
+                  <td colSpan={7} className="px-4 py-8 text-center text-neutral-500">
                     אין חשבונות
                   </td>
                 </tr>
@@ -59,6 +61,7 @@ function AccountRow({ account, self }: { account: ManagedAccount; self: boolean 
   const [role, setRole] = useState(account.role);
   const [userType, setUserType] = useState(account.userType);
   const [eventReminders, setEventReminders] = useState(account.eventReminders);
+  const [sections, setSections] = useState<AccountSection[]>(account.sections);
   const [pending, setPending] = useState<"save" | "reset" | null>(null);
   const [message, setMessage] = useState("");
   const [ok, setOk] = useState(false);
@@ -67,7 +70,7 @@ function AccountRow({ account, self }: { account: ManagedAccount; self: boolean 
     setPending("save");
     setMessage("");
     try {
-      const result = await saveManagedAccount(account.userId, role, userType, eventReminders);
+      const result = await saveManagedAccount(account.userId, role, userType, eventReminders, sections);
       setOk(!result.error);
       setMessage(result.error ?? "נשמר");
     } catch {
@@ -143,6 +146,25 @@ function AccountRow({ account, self }: { account: ManagedAccount; self: boolean 
           />
           <span>{eventReminders ? "פעילות" : "כבויות"}</span>
         </label>
+      </td>
+      <td className="px-4 py-3">
+        <div className="flex flex-col gap-1">
+          {accountSectionOptions.map((item) => (
+            <label key={item.id} className="inline-flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={sections.includes(item.id)}
+                disabled={pending !== null || !account.accountId}
+                onChange={(event) => {
+                  const checked = event.target.checked;
+                  setSections((current) => (checked ? [...current, item.id] : current.filter((id) => id !== item.id)));
+                }}
+                className="size-4 accent-[var(--teal)]"
+              />
+              <span>{item.label}</span>
+            </label>
+          ))}
+        </div>
       </td>
       <td className="px-4 py-3">
         <div className="flex flex-wrap items-center gap-2">

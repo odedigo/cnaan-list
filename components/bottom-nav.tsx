@@ -24,6 +24,7 @@ import {
   UploadIcon,
 } from "@/components/icons";
 import { useListsOptional } from "@/components/lists-provider";
+import type { AccountSection } from "@/lib/account-sections";
 
 const tabs = [
   { href: "/inventory", label: "רשימת מוצרים", icon: ProductsIcon },
@@ -37,6 +38,15 @@ export function BottomNav({ signedIn }: { signedIn: boolean }) {
   const appPath = useAppPath();
   const pathname = appPath?.path || nextPath;
   const lists = useListsOptional();
+  const sections = lists?.sections;
+  const allowed = (section: AccountSection) => !sections || sections.includes(section);
+  const visibleTabs = tabs.filter((tab) =>
+    tab.href === "/lists" ? allowed("lists") : tab.href === "/recipes" ? allowed("recipes") : allowed("shopping"),
+  );
+  const showEvents = allowed("events");
+  const showPacking = allowed("packing");
+  const showTrees = allowed("trees");
+  const showMore = showEvents || showPacking || showTrees;
   const transfer = useDataTransfer();
   const groceryCount = lists?.grocery.length ?? 0;
   const [launcherOpen, setLauncherOpen] = useState(false);
@@ -92,7 +102,7 @@ export function BottomNav({ signedIn }: { signedIn: boolean }) {
       className="fixed bottom-0 left-1/2 z-50 flex w-full max-w-[480px] -translate-x-1/2 border-t border-neutral-200 bg-white pb-[env(safe-area-inset-bottom)]"
       aria-label="ניווט ראשי"
     >
-      {tabs.map((tab) => {
+      {visibleTabs.map((tab) => {
         const active =
           pathname === tab.href || pathname.startsWith(`${tab.href}/`);
         const href = signedIn ? tab.href : "/settings";
@@ -156,6 +166,7 @@ export function BottomNav({ signedIn }: { signedIn: boolean }) {
           </Link>
         );
       })}
+      {showMore ? (
       <div
         ref={launcherRef}
         className={`relative flex min-w-0 flex-1 flex-col items-center ${packingActive || datesActive || treesActive || launcherOpen ? "text-black" : "text-neutral-400"}`}
@@ -169,6 +180,7 @@ export function BottomNav({ signedIn }: { signedIn: boolean }) {
               type="button"
               className="flex w-16 flex-col items-center gap-1 rounded-lg px-1 py-2 text-neutral-800"
               aria-current={datesActive ? "page" : undefined}
+              hidden={!showEvents}
               onClick={() => {
                 setLauncherOpen(false);
                 if (!signedIn) {
@@ -185,6 +197,7 @@ export function BottomNav({ signedIn }: { signedIn: boolean }) {
               type="button"
               className="flex w-16 flex-col items-center gap-1 rounded-lg px-1 py-2 text-neutral-800"
               aria-current={packingActive ? "page" : undefined}
+              hidden={!showPacking}
               onClick={() => {
                 setLauncherOpen(false);
                 if (!signedIn) {
@@ -201,6 +214,7 @@ export function BottomNav({ signedIn }: { signedIn: boolean }) {
               type="button"
               className="flex w-16 flex-col items-center gap-1 rounded-lg px-1 py-2 text-neutral-800"
               aria-current={treesActive ? "page" : undefined}
+              hidden={!showTrees}
               onClick={() => {
                 setLauncherOpen(false);
                 if (!signedIn) {
@@ -232,6 +246,7 @@ export function BottomNav({ signedIn }: { signedIn: boolean }) {
           <span dir="rtl">עוד...</span>
         </button>
       </div>
+      ) : null}
       <div
         ref={actionsRef}
         className={`relative flex w-11 shrink-0 flex-col items-center ${settingsActive || actionsOpen ? "text-black" : "text-neutral-400"}`}

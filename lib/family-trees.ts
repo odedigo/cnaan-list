@@ -2,7 +2,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { parseGedcom, type GedcomSex } from "@/lib/gedcom";
+import { gedcomText, parseGedcom, type GedcomSex, type GedcomTree } from "@/lib/gedcom";
 import { shrinkImage } from "@/lib/images";
 
 export type FamilySex = GedcomSex;
@@ -101,6 +101,12 @@ export function unionStatusLabel(status: UnionStatus) {
 export function treeNameFromFile(fileName: string) {
   const base = fileName.replace(/\.ged$/i, "").replace(/[_]+/g, " ").trim();
   return clip(base || "עץ משפחה", 80);
+}
+
+export async function exportFamilyGedcom(supabase: SupabaseClient, tree: FamilyTree) {
+  const graph = await loadFamilyGraph(supabase, tree.id);
+  const base = tree.name.replace(/[\\/:*?"<>|]/g, " ").replace(/\s+/g, " ").trim() || "עץ משפחה";
+  return { name: `${base}.ged`, text: gedcomText(gedcomFromGraph(graph)) };
 }
 
 export async function loadFamilyTrees(supabase: SupabaseClient, accountId: string) {
@@ -482,6 +488,42 @@ function missingColumn(error: { code?: string } | null) {
 
 function clip(value: string, max: number) {
   return value.trim().slice(0, max);
+}
+
+function gedcomFromGraph(graph: FamilyGraph): GedcomTree {
+  const xref = new Map<string, string>();
+  graph.people.forEach((person, index) => xref.set(person.id, `@I${index + 1}@`));
+  const childrenByUnion = new Map<string, FamilyChild[]>();
+  for (const child of graph.children) {
+    const list = childrenByUnion.get(child.union_id) ?? [];
+    list.push(child);
+    childrenByUnion.set(child.union_id, list);
+  }
+  return {
+    people: graph.people.map((person) => ({
+      xref: xref.get(person.id) ?? "",
+      given: person.given_name,
+      surname: person.surname,
+      sex: person.sex,
+      birthDate: person.birth_date,
+      birthPlace: person.birth_place,
+      deathDate: person.death_date,
+      deathPlace: person.death_place,
+      deceased: person.deceased || Boolean(person.death_date.trim()),
+      note: person.note,
+    })),
+    unions: graph.unions.flatMap((union) => {
+      const partnerA = xref.get(union.partner_a);
+      if (!partnerA) return [];
+      const children = (childrenByUnion.get(union.id) ?? [])
+        .sort((left, right) => left.sort_order - right.sort_order)
+        .flatMap((child) => {
+          const id = xref.get(child.person_id);
+          return id ? [id] : [];
+        });
+      return [{ partnerA, partnerB: union.partner_b ? xref.get(union.partner_b) ?? null : null, children, status: union.status }];
+    }),
+  };
 }
 
 function normalizeTree(row: FamilyTree): FamilyTree {
