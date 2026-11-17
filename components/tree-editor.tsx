@@ -253,6 +253,20 @@ function Chart({
     return () => observer.disconnect();
   }, [layout.boxes, selectedId]);
 
+  useEffect(() => {
+    const node = canvas.current;
+    if (!node || !window.matchMedia("(hover: hover) and (pointer: fine)").matches) return;
+    const onWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      if (event.deltaY === 0) return;
+      const point = localPoint(node, event.clientX, event.clientY);
+      const pixels = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaMode === 2 ? event.deltaY * node.clientHeight : event.deltaY;
+      setView((current) => zoomAt(current, Math.exp(-pixels * 0.0015), point.x, point.y, point.x, point.y));
+    };
+    node.addEventListener("wheel", onWheel, { passive: false });
+    return () => node.removeEventListener("wheel", onWheel);
+  }, [layout.boxes.length]);
+
   useLayoutEffect(() => {
     const node = canvas.current;
     const box = layout.boxes.find((item) => item.id === jumpId);
