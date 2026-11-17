@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AppHeader } from "@/components/app-header";
-import { CloseIcon, DotsIcon, DownloadIcon, PenIcon } from "@/components/icons";
+import { CloseIcon, CopyIcon, DotsIcon, DownloadIcon, PenIcon } from "@/components/icons";
 import { useLists } from "@/components/lists-provider";
 import { TreeEditor } from "@/components/tree-editor";
 import {
@@ -16,6 +16,7 @@ import {
   createFamilyTree,
   deleteFamilyPerson,
   deleteFamilyTree,
+  duplicateFamilyTree,
   exportFamilyGedcom,
   importGedcomFile,
   loadFamilyGraph,
@@ -47,6 +48,7 @@ export function TreesPage({ active }: { active: boolean }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [importing, setImporting] = useState<number | null>(null);
+  const [duplicating, setDuplicating] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const indexScroll = useRef(0);
   const tree = trees.find((row) => row.id === treeId) ?? null;
@@ -188,6 +190,7 @@ export function TreesPage({ active }: { active: boolean }) {
         }}
       />
       {importing !== null ? <p className="px-4 py-3 text-center text-neutral-500">{`מייבא… ${Math.round(importing * 100)}%`}</p> : null}
+      {duplicating ? <p className="px-4 py-3 text-center text-neutral-500">משכפל…</p> : null}
       {!ready ? <p className="px-4 py-8 text-center text-neutral-500">טוען…</p> : null}
       {ready && trees.length === 0 && importing === null ? <p className="px-4 py-8 text-center text-neutral-500">אין עצי משפחה</p> : null}
       <div className="px-3 pb-4 pt-3">
@@ -228,6 +231,22 @@ export function TreesPage({ active }: { active: boolean }) {
                   >
                     <PenIcon className="size-5" />
                     שינוי שם העץ
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="flex w-full items-center gap-2 px-3 py-2.5 text-start text-sm"
+                    onClick={() => {
+                      setMenuId(null);
+                      setDuplicating(true);
+                      void run(async () => {
+                        const created = await duplicateFamilyTree(supabase, row);
+                        setTrees((current) => [...current, created].sort((a, b) => a.sort_order - b.sort_order));
+                      }).finally(() => setDuplicating(false));
+                    }}
+                  >
+                    <CopyIcon className="size-5" />
+                    שכפול העץ
                   </button>
                   <button
                     type="button"

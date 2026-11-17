@@ -158,6 +158,104 @@ export async function deleteFamilyTree(supabase: SupabaseClient, treeId: string)
   raise(error, "לא ניתן למחוק את העץ");
 }
 
+const COPY_SUFFIX = "- עותק";
+
+export async function duplicateFamilyTree(supabase: SupabaseClient, source: FamilyTree) {
+  const graph = await loadFamilyGraph(supabase, source.id);
+  const copy = await createFamilyTree(supabase, source.account_id, duplicateTreeName(source.name));
+  const uploaded: string[] = [];
+  try {
+    const ids = new Map(graph.people.map((person) => [person.id, crypto.randomUUID()]));
+    const images = await copyPersonImages(supabase, graph.people, ids, source.account_id, uploaded);
+    await insertChunks(
+      supabase,
+      "family_people",
+      graph.people.map((person) => ({
+        id: ids.get(person.id),
+        account_id: source.account_id,
+        tree_id: copy.id,
+        given_name: person.given_name,
+        surname: person.surname,
+        sex: person.sex,
+        birth_date: person.birth_date,
+        birth_place: person.birth_place,
+        death_date: person.death_date,
+        death_place: person.death_place,
+        note: person.note,
+        deceased: person.deceased,
+        image_path: images.get(person.id) ?? null,
+      })),
+    );
+    const unionIds = new Map<string, string>();
+    const unions = graph.unions.flatMap((union) => {
+      const partnerA = ids.get(union.partner_a);
+      if (!partnerA) return [];
+      const partnerB = union.partner_b ? ids.get(union.partner_b) ?? null : null;
+      if (partnerB && partnerA === partnerB) return [];
+      const id = crypto.randomUUID();
+      unionIds.set(union.id, id);
+      return [{ id, account_id: source.account_id, tree_id: copy.id, partner_a: partnerA, partner_b: partnerB, status: union.status }];
+    });
+    await insertChunks(supabase, "family_unions", unions);
+    await insertChunks(
+      supabase,
+      "family_children",
+      graph.children.flatMap((child) => {
+        const unionId = unionIds.get(child.union_id);
+        const personId = ids.get(child.person_id);
+        if (!unionId || !personId) return [];
+        return [{ union_id: unionId, person_id: personId, account_id: source.account_id, sort_order: child.sort_order }];
+      }),
+    );
+    return copy;
+  } catch (error) {
+    if (uploaded.length > 0) await supabase.storage.from("item-images").remove(uploaded);
+    await supabase.from("family_trees").delete().eq("id", copy.id);
+    throw error;
+  }
+}
+
+function duplicateTreeName(name: string) {
+  const room = 80 - COPY_SUFFIX.length;
+  return `${name.trim().slice(0, Math.max(0, room))}${COPY_SUFFIX}`;
+}
+
+async function copyPersonImages(
+  supabase: SupabaseClient,
+  people: FamilyPerson[],
+  ids: Map<string, string>,
+  accountId: string,
+  uploaded: string[],
+) {
+  const pending = people.filter((person) => person.image_path);
+  const images = new Map<string, string>();
+  let cursor = 0;
+  async function worker() {
+    for (;;) {
+      const index = cursor;
+      cursor += 1;
+      const person = pending[index];
+      const sourcePath = person?.image_path;
+      const personId = person ? ids.get(person.id) : undefined;
+      if (!person || !sourcePath || !personId) return;
+      const path = `${accountId}/family/${personId}/${crypto.randomUUID()}.${imageExtension(sourcePath)}`;
+      const { error } = await supabase.storage.from("item-images").copy(sourcePath, path);
+      if (error) continue;
+      uploaded.push(path);
+      images.set(person.id, path);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(4, Math.max(1, pending.length)) }, () => worker()));
+  return images;
+}
+
+function imageExtension(path: string) {
+  const match = path.toLowerCase().match(/\.([a-z0-9]+)$/);
+  if (match?.[1] === "jpg" || match?.[1] === "png" || match?.[1] === "webp") return match[1];
+  if (match?.[1] === "jpeg") return "jpg";
+  return "webp";
+}
+
 export async function importGedcomFile(
   supabase: SupabaseClient,
   accountId: string,
