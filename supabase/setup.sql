@@ -205,6 +205,8 @@ create table if not exists public.family_people (
   tree_id uuid not null references public.family_trees (id) on delete cascade,
   given_name text not null default '',
   surname text not null default '',
+  hebrew_given text not null default '',
+  hebrew_surname text not null default '',
   sex text not null default 'u',
   birth_date text not null default '',
   birth_place text not null default '',
@@ -216,6 +218,8 @@ create table if not exists public.family_people (
   constraint family_people_sex_check check (sex in ('m', 'f', 'u')),
   constraint family_people_given_length check (char_length(given_name) <= 80),
   constraint family_people_surname_length check (char_length(surname) <= 80),
+  constraint family_people_hebrew_given_length check (char_length(hebrew_given) <= 80),
+  constraint family_people_hebrew_surname_length check (char_length(hebrew_surname) <= 80),
   constraint family_people_birth_date_length check (char_length(birth_date) <= 80),
   constraint family_people_birth_place_length check (char_length(birth_place) <= 120),
   constraint family_people_death_date_length check (char_length(death_date) <= 80),
@@ -245,6 +249,14 @@ create table if not exists public.family_children (
 
 alter table public.family_people add column if not exists image_path text;
 alter table public.family_people add column if not exists deceased boolean not null default false;
+alter table public.family_people add column if not exists hebrew_given text not null default '';
+alter table public.family_people add column if not exists hebrew_surname text not null default '';
+alter table public.family_people drop constraint if exists family_people_hebrew_given_length;
+alter table public.family_people
+  add constraint family_people_hebrew_given_length check (char_length(hebrew_given) <= 80);
+alter table public.family_people drop constraint if exists family_people_hebrew_surname_length;
+alter table public.family_people
+  add constraint family_people_hebrew_surname_length check (char_length(hebrew_surname) <= 80);
 alter table public.family_people drop constraint if exists family_people_image_path_length;
 alter table public.family_people
   add constraint family_people_image_path_length

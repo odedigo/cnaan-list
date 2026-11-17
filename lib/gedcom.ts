@@ -6,6 +6,8 @@ export type GedcomPerson = {
   xref: string;
   given: string;
   surname: string;
+  hebrewGiven: string;
+  hebrewSurname: string;
   sex: GedcomSex;
   birthDate: string;
   birthPlace: string;
@@ -144,6 +146,8 @@ function readPerson(xref: string, body: GedcomLine[]): GedcomPerson {
     xref,
     given: "",
     surname: "",
+    hebrewGiven: "",
+    hebrewSurname: "",
     sex: "u",
     birthDate: "",
     birthPlace: "",
@@ -153,15 +157,26 @@ function readPerson(xref: string, body: GedcomLine[]): GedcomPerson {
     note: "",
   };
   let section: "" | "birth" | "death" | "note" = "";
-  let named = false;
+  let name: { role: "primary" | "extra"; parts: NameParts } | null = null;
+  let tran: { parts: NameParts; lang: string; hebrew: boolean } | null = null;
+  let hebrew: NameParts | null = null;
+  const keepTran = () => {
+    if (!tran) return;
+    if (tran.hebrew || (!tran.lang.trim() && !hebrew)) hebrew = tran.parts;
+    tran = null;
+  };
   for (const line of body) {
     if (line.level === 1) {
+      keepTran();
       section = "";
-      if (line.tag === "NAME" && !named) {
-        const name = splitName(line.value);
-        person.given = name.given;
-        person.surname = name.surname;
-        named = true;
+      name = null;
+      if (line.tag === "NAME") {
+        const parts = splitName(line.value);
+        if (!person.given && !person.surname) {
+          person.given = parts.given;
+          person.surname = parts.surname;
+          name = { role: "primary", parts: { given: person.given, surname: person.surname } };
+        } else name = { role: "extra", parts };
       } else if (line.tag === "SEX") {
         const sex = line.value.trim().toUpperCase();
         person.sex = sex.startsWith("M") ? "m" : sex.startsWith("F") ? "f" : "u";
@@ -176,8 +191,22 @@ function readPerson(xref: string, body: GedcomLine[]): GedcomPerson {
       }
       continue;
     }
-    if (line.level === 2 && line.tag === "GIVN" && line.value) person.given = clean(line.value);
-    else if (line.level === 2 && line.tag === "SURN" && line.value) person.surname = clean(line.value);
+    if (line.level === 2 && name && line.tag === "GIVN" && line.value) {
+      name.parts.given = clean(line.value);
+      if (name.role === "primary") person.given = name.parts.given;
+    } else if (line.level === 2 && name && line.tag === "SURN" && line.value) {
+      name.parts.surname = clean(line.value);
+      if (name.role === "primary") person.surname = name.parts.surname;
+    } else if (line.level === 2 && name?.role === "extra" && line.tag === "TYPE" && hebrewNameType(line.value)) hebrew = name.parts;
+    else if (line.level === 2 && name?.role === "primary" && (line.tag === "_HEB" || line.tag === "_HEBN" || line.tag === "_HEBREW") && line.value) hebrew = splitName(line.value);
+    else if (line.level === 2 && name?.role === "primary" && line.tag === "TRAN") {
+      keepTran();
+      tran = { parts: splitName(line.value), lang: "", hebrew: false };
+    } else if (line.level === 3 && tran && line.tag === "LANG") {
+      tran.lang = line.value;
+      tran.hebrew = hebrewLanguage(line.value);
+    } else if (line.level === 3 && tran && line.tag === "GIVN" && line.value) tran.parts.given = clean(line.value);
+    else if (line.level === 3 && tran && line.tag === "SURN" && line.value) tran.parts.surname = clean(line.value);
     else if (line.level === 2 && section === "birth" && line.tag === "DATE") person.birthDate = clean(line.value);
     else if (line.level === 2 && section === "birth" && line.tag === "PLAC") person.birthPlace = clean(line.value);
     else if (line.level === 2 && section === "death" && line.tag === "DATE") person.deathDate = clean(line.value);
@@ -185,6 +214,9 @@ function readPerson(xref: string, body: GedcomLine[]): GedcomPerson {
     else if (line.level >= 2 && section === "note" && line.tag === "CONC") person.note += line.value;
     else if (line.level >= 2 && section === "note" && line.tag === "CONT") person.note += `\n${line.value}`;
   }
+  keepTran();
+  person.hebrewGiven = hebrew?.given ?? "";
+  person.hebrewSurname = hebrew?.surname ?? "";
   person.note = person.note.trim();
   return person;
 }
@@ -224,6 +256,8 @@ function emptyPerson(xref: string): GedcomPerson {
     xref,
     given: "",
     surname: "",
+    hebrewGiven: "",
+    hebrewSurname: "",
     sex: "u",
     birthDate: "",
     birthPlace: "",
@@ -234,10 +268,22 @@ function emptyPerson(xref: string): GedcomPerson {
   };
 }
 
-function splitName(value: string) {
+type NameParts = { given: string; surname: string };
+
+function splitName(value: string): NameParts {
   const match = value.match(/^(.*?)\/([^/]*)\/(.*)$/);
   if (!match) return { given: clean(value), surname: "" };
   return { given: clean(`${match[1]} ${match[3]}`), surname: clean(match[2]) };
+}
+
+function hebrewLanguage(value: string) {
+  const label = value.trim().toLowerCase();
+  return label === "he" || label === "heb" || label === "iw" || label === "hebrew" || label === "עברית";
+}
+
+function hebrewNameType(value: string) {
+  const label = value.trim().toLowerCase();
+  return label === "he" || label === "iw" || label.includes("hebrew") || label.includes("עברית");
 }
 
 function clean(value: string) {
@@ -252,6 +298,12 @@ export function gedcomText(tree: GedcomTree) {
   for (const person of tree.people) {
     lines.push(`0 ${person.xref} INDI`);
     lines.push(`1 NAME ${gedcomValue(person.given)} /${gedcomValue(person.surname)}/`);
+    if (person.hebrewGiven.trim() || person.hebrewSurname.trim()) {
+      lines.push(`2 TRAN ${gedcomValue(person.hebrewGiven)} /${gedcomValue(person.hebrewSurname)}/`);
+      lines.push("3 LANG he");
+      if (person.hebrewGiven.trim()) lines.push(`3 GIVN ${gedcomValue(person.hebrewGiven)}`);
+      if (person.hebrewSurname.trim()) lines.push(`3 SURN ${gedcomValue(person.hebrewSurname)}`);
+    }
     if (person.sex === "m") lines.push("1 SEX M");
     else if (person.sex === "f") lines.push("1 SEX F");
     if (person.birthDate.trim() || person.birthPlace.trim()) {

@@ -371,13 +371,18 @@ function Chart({
               const photo = person.image_path ? photos[person.image_path] : "";
               const photoX = box.x + 8;
               const photoY = box.y + (CARD_H - 28) / 2;
+              const title = nodeTitle(person);
+              const lived = years(person);
+              const nameX = box.x + CARD_W / 2 + (photo ? 10 : 0);
+              const nameLimit = photo ? 14 : 18;
+              const sexLabel = person.sex === "m" ? "זכר" : person.sex === "f" ? "נקבה" : "";
               return (
                 <g
                   key={person.id}
                   data-person={person.id}
                   role="button"
                   tabIndex={0}
-                  aria-label={person.deceased ? `${personName(person)}, נפטר` : personName(person)}
+                  aria-label={[title.label, sexLabel, person.deceased ? "נפטר" : ""].filter(Boolean).join(", ")}
                   aria-pressed={detailsOpen && active}
                   onKeyDown={(event) => {
                     if (event.key !== "Enter" && event.key !== " ") return;
@@ -395,6 +400,7 @@ function Chart({
                     stroke={active ? "#128f86" : "#e5e5e5"}
                     strokeWidth={active ? 2 : 1}
                   />
+                  {person.sex === "m" || person.sex === "f" ? <GenderMark sex={person.sex} x={box.x + 5} y={box.y + 4} /> : null}
                   {person.deceased ? (
                     <svg x={box.x + CARD_W - 22} y={box.y + 6} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#737373" strokeWidth="1.8" aria-hidden="true">
                       <path d="M12 10.2c1.3-1.7 1.3-3.4 0-5.2-1.3 1.8-1.3 3.5 0 5.2Z" strokeLinejoin="round" />
@@ -406,11 +412,16 @@ function Chart({
                       <img src={photo} alt="" width={28} height={28} style={{ display: "block", width: 28, height: 28, borderRadius: 14, objectFit: "cover" }} />
                     </foreignObject>
                   ) : null}
-                  <text x={box.x + CARD_W / 2 + (photo ? 10 : 0)} y={box.y + 30} textAnchor="middle" direction="rtl" fill="#171717" style={{ fontSize: 15, fontWeight: 600 }}>
-                    {shorten(personName(person), photo ? 14 : 18)}
+                  <text x={nameX} y={box.y + (title.sub ? (lived ? 20 : 28) : 30)} textAnchor="middle" direction="rtl" fill="#171717" style={{ fontSize: 15, fontWeight: 700 }}>
+                    {shorten(title.main, nameLimit)}
                   </text>
-                  <text x={box.x + CARD_W / 2} y={box.y + 52} textAnchor="middle" direction="ltr" fill="#737373" style={{ fontSize: 12, unicodeBidi: "isolate" }}>
-                    {shorten(years(person), 22)}
+                  {title.sub ? (
+                    <text x={nameX} y={box.y + (lived ? 36 : 48)} textAnchor="middle" direction="ltr" fill="#404040" style={{ fontSize: 11, fontWeight: 400, unicodeBidi: "isolate" }}>
+                      {shorten(title.sub, photo ? 18 : 24)}
+                    </text>
+                  ) : null}
+                  <text x={box.x + CARD_W / 2} y={box.y + (title.sub && lived ? 54 : 52)} textAnchor="middle" direction="ltr" fill="#737373" style={{ fontSize: 12, unicodeBidi: "isolate" }}>
+                    {shorten(lived, 22)}
                   </text>
                 </g>
               );
@@ -633,6 +644,8 @@ function PersonDialog({
             <div className="grid gap-4">
               <Field label="שם פרטי" value={draft.given_name} maxLength={80} onChange={(value) => setField("given_name", value)} />
               <Field label="שם משפחה" value={draft.surname} maxLength={80} onChange={(value) => setField("surname", value)} />
+              <Field label="שם פרטי בעברית" value={draft.hebrew_given} maxLength={80} onChange={(value) => setField("hebrew_given", value)} />
+              <Field label="שם משפחה בעברית" value={draft.hebrew_surname} maxLength={80} onChange={(value) => setField("hebrew_surname", value)} />
               <label className="block">
                 <span className="text-neutral-600">מין</span>
                 <select className="mt-1 w-full rounded-xl border border-neutral-300 bg-white py-3 ps-3 outline-none" style={{ fontSize: "1.25rem" }} value={draft.sex} onChange={(event) => setField("sex", event.target.value as PersonDraft["sex"])}>
@@ -796,7 +809,7 @@ function matchingPeople(people: FamilyPerson[], query: string) {
   const needle = query.trim().toLocaleLowerCase("he");
   if (!needle) return [];
   return people
-    .filter((person) => personName(person).toLocaleLowerCase("he").includes(needle))
+    .filter((person) => `${personName(person)} ${person.hebrew_given} ${person.hebrew_surname}`.toLocaleLowerCase("he").includes(needle))
     .sort((a, b) => personName(a).localeCompare(personName(b), "he"))
     .slice(0, 20);
 }
@@ -861,6 +874,8 @@ function draftOf(person: FamilyPerson): PersonDraft {
   return {
     given_name: person.given_name,
     surname: person.surname,
+    hebrew_given: person.hebrew_given,
+    hebrew_surname: person.hebrew_surname,
     sex: person.sex,
     birth_date: person.birth_date,
     birth_place: person.birth_place,
@@ -985,6 +1000,35 @@ function splitName(value: string) {
   const parts = value.split(/\s+/).filter(Boolean);
   if (parts.length < 2) return { given: value.trim(), surname: "" };
   return { given: parts.slice(0, -1).join(" "), surname: parts[parts.length - 1] ?? "" };
+}
+
+function GenderMark({ sex, x, y }: { sex: "m" | "f"; x: number; y: number }) {
+  const color = sex === "m" ? "#2563eb" : "#db2777";
+  return (
+    <svg x={x} y={y} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
+      {sex === "m" ? (
+        <>
+          <circle cx="10" cy="14.5" r="5" />
+          <path d="M13.5 11 20 4.5" />
+          <path d="M14.8 4.5H20V9.7" />
+        </>
+      ) : (
+        <>
+          <circle cx="12" cy="8.5" r="5" />
+          <path d="M12 13.5V21" />
+          <path d="M8.2 17.2h7.6" />
+        </>
+      )}
+    </svg>
+  );
+}
+
+function nodeTitle(person: FamilyPerson) {
+  const english = `${person.given_name} ${person.surname}`.replace(/\s+/g, " ").trim();
+  const hebrew = `${person.hebrew_given ?? ""} ${person.hebrew_surname ?? ""}`.replace(/\s+/g, " ").trim();
+  if (hebrew && english) return { main: hebrew, sub: english, label: `${hebrew} (${english})` };
+  const main = hebrew || personName(person);
+  return { main, sub: "", label: main };
 }
 
 function years(person: FamilyPerson) {

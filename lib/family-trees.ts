@@ -20,6 +20,8 @@ export type FamilyPerson = {
   tree_id: string;
   given_name: string;
   surname: string;
+  hebrew_given: string;
+  hebrew_surname: string;
   sex: FamilySex;
   birth_date: string;
   birth_place: string;
@@ -66,6 +68,8 @@ export type FamilyGraph = {
 export type PersonDraft = {
   given_name: string;
   surname: string;
+  hebrew_given: string;
+  hebrew_surname: string;
   sex: FamilySex;
   birth_date: string;
   birth_place: string;
@@ -77,7 +81,8 @@ export type PersonDraft = {
 
 const UNION_COLUMNS = "id, account_id, tree_id, partner_a, partner_b, status";
 const UNION_COLUMNS_WITHOUT_STATUS = "id, account_id, tree_id, partner_a, partner_b";
-const PERSON_COLUMNS = "id, account_id, tree_id, given_name, surname, sex, birth_date, birth_place, death_date, death_place, note, deceased, image_path";
+const PERSON_COLUMNS = "id, account_id, tree_id, given_name, surname, hebrew_given, hebrew_surname, sex, birth_date, birth_place, death_date, death_place, note, deceased, image_path";
+const PERSON_COLUMNS_WITHOUT_HEBREW = "id, account_id, tree_id, given_name, surname, sex, birth_date, birth_place, death_date, death_place, note, deceased, image_path";
 const PERSON_COLUMNS_WITHOUT_DECEASED = "id, account_id, tree_id, given_name, surname, sex, birth_date, birth_place, death_date, death_place, note, image_path";
 const PERSON_COLUMNS_WITHOUT_IMAGE = "id, account_id, tree_id, given_name, surname, sex, birth_date, birth_place, death_date, death_place, note";
 const SAVE_FAILED = "לא ניתן לשמור את עץ המשפחה";
@@ -176,6 +181,8 @@ export async function duplicateFamilyTree(supabase: SupabaseClient, source: Fami
         tree_id: copy.id,
         given_name: person.given_name,
         surname: person.surname,
+        hebrew_given: person.hebrew_given,
+        hebrew_surname: person.hebrew_surname,
         sex: person.sex,
         birth_date: person.birth_date,
         birth_place: person.birth_place,
@@ -277,6 +284,8 @@ export async function importGedcomFile(
         tree_id: tree.id,
         given_name: clip(person.given, 80),
         surname: clip(person.surname, 80),
+        hebrew_given: clip(person.hebrewGiven, 80),
+        hebrew_surname: clip(person.hebrewSurname, 80),
         sex: person.sex,
         birth_date: clip(person.birthDate, 80),
         birth_place: clip(person.birthPlace, 120),
@@ -341,6 +350,8 @@ export async function saveFamilyPerson(supabase: SupabaseClient, personId: strin
   const row = {
     given_name: clip(draft.given_name, 80),
     surname: clip(draft.surname, 80),
+    hebrew_given: clip(draft.hebrew_given, 80),
+    hebrew_surname: clip(draft.hebrew_surname, 80),
     sex,
     birth_date: clip(draft.birth_date, 80),
     birth_place: clip(draft.birth_place, 120),
@@ -351,8 +362,12 @@ export async function saveFamilyPerson(supabase: SupabaseClient, personId: strin
   };
   let result = await supabase.from("family_people").update(row).eq("id", personId);
   if (missingColumn(result.error)) {
-    const { deceased: _deceased, ...rest } = row;
-    result = await supabase.from("family_people").update(rest).eq("id", personId);
+    const { hebrew_given: _hebrewGiven, hebrew_surname: _hebrewSurname, ...withoutHebrew } = row;
+    result = await supabase.from("family_people").update(withoutHebrew).eq("id", personId);
+    if (missingColumn(result.error)) {
+      const { deceased: _deceased, ...rest } = withoutHebrew;
+      result = await supabase.from("family_people").update(rest).eq("id", personId);
+    }
   }
   raise(result.error, SAVE_FAILED);
   return row;
@@ -408,6 +423,8 @@ export async function addFamilySpouse(supabase: SupabaseClient, accountId: strin
     const saved = await saveFamilyPerson(supabase, spouse.id, {
       given_name: input.given_name,
       surname: input.surname,
+      hebrew_given: "",
+      hebrew_surname: "",
       sex: "u",
       birth_date: "",
       birth_place: "",
@@ -545,6 +562,8 @@ function draftFromPerson(person: FamilyPerson): PersonDraft {
   return {
     given_name: person.given_name,
     surname: person.surname,
+    hebrew_given: person.hebrew_given,
+    hebrew_surname: person.hebrew_surname,
     sex: person.sex,
     birth_date: person.birth_date,
     birth_place: person.birth_place,
@@ -602,6 +621,8 @@ function gedcomFromGraph(graph: FamilyGraph): GedcomTree {
       xref: xref.get(person.id) ?? "",
       given: person.given_name,
       surname: person.surname,
+      hebrewGiven: person.hebrew_given,
+      hebrewSurname: person.hebrew_surname,
       sex: person.sex,
       birthDate: person.birth_date,
       birthPlace: person.birth_place,
@@ -636,6 +657,8 @@ function normalizePerson(row: FamilyPerson): FamilyPerson {
     tree_id: row.tree_id,
     given_name: row.given_name ?? "",
     surname: row.surname ?? "",
+    hebrew_given: row.hebrew_given ?? "",
+    hebrew_surname: row.hebrew_surname ?? "",
     sex,
     birth_date: row.birth_date ?? "",
     birth_place: row.birth_place ?? "",
@@ -648,7 +671,7 @@ function normalizePerson(row: FamilyPerson): FamilyPerson {
 }
 
 async function loadPeople(supabase: SupabaseClient, treeId: string) {
-  const selects = [PERSON_COLUMNS, PERSON_COLUMNS_WITHOUT_DECEASED, PERSON_COLUMNS_WITHOUT_IMAGE];
+  const selects = [PERSON_COLUMNS, PERSON_COLUMNS_WITHOUT_HEBREW, PERSON_COLUMNS_WITHOUT_DECEASED, PERSON_COLUMNS_WITHOUT_IMAGE];
   let failure: { message: string; code?: string } | null = null;
   for (const columns of selects) {
     const result = await supabase.from("family_people").select(columns).eq("tree_id", treeId);
