@@ -1213,7 +1213,7 @@ function ConnectionSummary({ personId, graph, onOpenPerson }: { personId: string
       <ConnectionGroup title="בן/בת זוג נוכחי" people={spouses} onOpenPerson={onOpenPerson} />
       <section>
         <h3 className="font-medium text-neutral-600">ילדים</h3>
-        <ChildList personId={personId} graph={graph} onOpenPerson={onOpenPerson} />
+        <ChildList personId={personId} graph={graph} onOpenPerson={onOpenPerson} bothNames />
       </section>
     </div>
   );
@@ -1239,21 +1239,21 @@ function childrenOf(personId: string, graph: FamilyGraph) {
   return children;
 }
 
-function ChildList({ personId, graph, onOpenPerson }: { personId: string; graph: FamilyGraph; onOpenPerson: (id: string) => void }) {
+function ChildList({ personId, graph, onOpenPerson, bothNames = false }: { personId: string; graph: FamilyGraph; onOpenPerson: (id: string) => void; bothNames?: boolean }) {
   const children = childrenOf(personId, graph);
   if (children.length === 0) return <p className="text-neutral-500">אין</p>;
   return (
     <ul className="flex flex-col gap-2">
       {children.map(({ child, other }) => (
         <li key={child.id} className="rounded-xl bg-neutral-100 px-3 py-2">
-          <button type="button" className="block w-full truncate text-start font-medium" onClick={() => onOpenPerson(child.id)}>
-            {personName(child)}
+          <button type="button" className="block w-full truncate text-start" onClick={() => onOpenPerson(child.id)}>
+            {bothNames ? <PersonNames person={child} /> : <span className="font-medium">{personName(child)}</span>}
           </button>
           <p className="mt-1 text-neutral-600">
             ההורה השני:{" "}
             {other ? (
-              <button type="button" className="font-medium text-neutral-900" onClick={() => onOpenPerson(other.id)}>
-                {personName(other)}
+              <button type="button" className="text-neutral-900" onClick={() => onOpenPerson(other.id)}>
+                {bothNames ? <PersonNames person={other} /> : <span className="font-medium">{personName(other)}</span>}
               </button>
             ) : (
               "לא ידוע"
@@ -1274,7 +1274,7 @@ function ConnectionGroup({ title, people, onOpenPerson }: { title: string; peopl
         {people.map((person) => (
           <li key={person.id}>
             <button type="button" className="w-full truncate rounded-xl bg-neutral-100 px-3 py-2 text-start" onClick={() => onOpenPerson(person.id)}>
-              {personName(person)}
+              <PersonNames person={person} />
             </button>
           </li>
         ))}
@@ -1308,6 +1308,12 @@ function GenderMark({ sex, x, y }: { sex: "m" | "f"; x: number; y: number }) {
       )}
     </svg>
   );
+}
+
+function PersonNames({ person }: { person: FamilyPerson }) {
+  const title = nodeTitle(person);
+  const text = title.sub ? `${title.main} - ${title.sub}` : title.main;
+  return <span className="font-medium">{text}</span>;
 }
 
 function nodeTitle(person: FamilyPerson) {
