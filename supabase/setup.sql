@@ -31,8 +31,8 @@ create table if not exists public.accounts (
   id uuid primary key default gen_random_uuid(),
   owner_id uuid not null unique references public.profiles (id) on delete cascade,
   event_reminders boolean not null default true,
-  sections text[] not null default array['shopping', 'lists', 'recipes', 'packing', 'trees', 'events'],
-  constraint accounts_sections_check check (sections <@ array['shopping', 'lists', 'recipes', 'packing', 'trees', 'events']::text[])
+  sections text[] not null default array['shopping', 'lists', 'recipes', 'packing', 'trees', 'events', 'calendar'],
+  constraint accounts_sections_check check (sections <@ array['shopping', 'lists', 'recipes', 'packing', 'trees', 'events', 'calendar']::text[])
 );
 
 create table if not exists public.stores (
@@ -337,13 +337,20 @@ alter table public.accounts add column if not exists event_reminders boolean not
 
 alter table public.accounts
   add column if not exists sections text[] not null
-  default array['shopping', 'lists', 'recipes', 'packing', 'trees', 'events'];
+  default array['shopping', 'lists', 'recipes', 'packing', 'trees', 'events', 'calendar'];
 
 alter table public.accounts drop constraint if exists accounts_sections_check;
 
+update public.accounts
+set sections = sections || array['calendar']::text[]
+where not (sections @> array['calendar']::text[]);
+
+alter table public.accounts
+  alter column sections set default array['shopping', 'lists', 'recipes', 'packing', 'trees', 'events', 'calendar'];
+
 alter table public.accounts
   add constraint accounts_sections_check
-  check (sections <@ array['shopping', 'lists', 'recipes', 'packing', 'trees', 'events']::text[]);
+  check (sections <@ array['shopping', 'lists', 'recipes', 'packing', 'trees', 'events', 'calendar']::text[]);
 
 drop policy if exists "update own event reminders" on public.accounts;
 create policy "update own event reminders"

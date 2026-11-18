@@ -3,6 +3,7 @@ import { Rubik } from "next/font/google";
 
 import { AppFrame } from "@/components/app-frame";
 import { FitDialogs } from "@/components/fit-dialogs";
+import { LandscapeLock } from "@/components/landscape-lock";
 import { ShareWorker } from "@/components/share-worker";
 
 import "./globals.css";
@@ -37,6 +38,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <ShareWorker />
         <FitDialogs />
         <AppFrame>{children}</AppFrame>
+        <LandscapeLock />
       </body>
     </html>
   );

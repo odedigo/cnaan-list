@@ -9,6 +9,7 @@ import { AppPathContext } from "@/components/app-path";
 import { AppHeader } from "@/components/app-header";
 import { BottomNav } from "@/components/bottom-nav";
 import { DataTransfer } from "@/components/data-transfer";
+import { CalendarPage } from "@/components/calendar-page";
 import { ChecklistPage } from "@/components/checklist-page";
 import { DatesPage } from "@/components/dates-page";
 import { ListPage } from "@/components/list-page";
@@ -58,7 +59,7 @@ export function AppShell({
   useEffect(() => {
     const onPop = () => {
       const next = window.location.pathname;
-      if (next === "/grocery" || next === "/inventory" || next === "/lists" || next === "/recipes" || next === "/packing" || next === "/dates" || next === "/trees") restoreRef.current = next;
+      if (next === "/grocery" || next === "/inventory" || next === "/lists" || next === "/recipes" || next === "/packing" || next === "/dates" || next === "/trees" || next === "/calendar") restoreRef.current = next;
       pathRef.current = next;
       setPath(next);
     };
@@ -71,7 +72,7 @@ export function AppShell({
     if (current === href) return;
     scrolls.current[current] = window.scrollY;
     pathRef.current = href;
-    if (href === "/grocery" || href === "/inventory" || href === "/lists" || href === "/recipes" || href === "/packing" || href === "/dates" || href === "/trees") restoreRef.current = href;
+    if (href === "/grocery" || href === "/inventory" || href === "/lists" || href === "/recipes" || href === "/packing" || href === "/dates" || href === "/trees" || href === "/calendar") restoreRef.current = href;
     if (window.location.pathname !== href) pushAppHistory(href);
     setPath(href);
     if (href === "/settings") window.scrollTo(0, 0);
@@ -139,6 +140,7 @@ export function AppShell({
       <LazyPacking active={path === "/packing"} warm={warm} scrolls={scrolls} restoreRef={restoreRef} shown={!lists || lists.sections.includes("packing")} />
       <LazyDates active={path === "/dates"} warm={warm} scrolls={scrolls} restoreRef={restoreRef} shown={!lists || lists.sections.includes("events")} />
       <LazyTrees active={path === "/trees"} warm={warm} scrolls={scrolls} restoreRef={restoreRef} shown={!lists || lists.sections.includes("trees")} />
+      <LazyCalendar active={path === "/calendar"} warm={warm} scrolls={scrolls} restoreRef={restoreRef} shown={!lists || lists.sections.includes("calendar")} />
       {path === "/settings" ? <SignedInSettingsView version={version} /> : null}
     </>
   );
@@ -322,6 +324,39 @@ function LazyTrees({
   );
 }
 
+function LazyCalendar({
+  active,
+  warm,
+  scrolls,
+  restoreRef,
+  shown,
+}: {
+  active: boolean;
+  warm: boolean;
+  scrolls: RefObject<Record<string, number>>;
+  restoreRef: RefObject<string | null>;
+  shown: boolean;
+}) {
+  const [mounted, setMounted] = useState(active && shown);
+
+  useEffect(() => {
+    if (shown && (active || warm)) setMounted(true);
+  }, [active, warm, shown]);
+
+  useLayoutEffect(() => {
+    if (!active || restoreRef.current !== "/calendar") return;
+    restoreRef.current = null;
+    window.scrollTo(0, scrolls.current?.["/calendar"] ?? 0);
+  }, [active, restoreRef, scrolls]);
+
+  if (!shown || !mounted) return null;
+  return (
+    <div hidden={!active}>
+      <CalendarPage />
+    </div>
+  );
+}
+
 function LoadingScreen({ path, version, message }: { path: string; version: string; message?: string }) {
   const title =
     path === "/inventory"
@@ -336,9 +371,11 @@ function LoadingScreen({ path, version, message }: { path: string; version: stri
             ? "ארועים"
             : path === "/trees"
               ? "עצי משפחה"
-          : path === "/settings"
-            ? "הגדרות"
-            : "עגלת קניות";
+              : path === "/calendar"
+                ? "לוח שנה"
+                : path === "/settings"
+                  ? "הגדרות"
+                  : "עגלת קניות";
   return (
     <>
       <AppHeader title={title} actionsEnabled={false} showCredit={path === "/settings"} creditVersion={version} />

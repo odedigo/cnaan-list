@@ -76,6 +76,12 @@ export function TreeEditor({
 
   useEffect(() => setReady(true), []);
   useEffect(() => {
+    document.documentElement.dataset.allowLandscape = "1";
+    return () => {
+      delete document.documentElement.dataset.allowLandscape;
+    };
+  }, []);
+  useEffect(() => {
     const previous = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {

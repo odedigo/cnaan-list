@@ -18,4 +18,5 @@ function writeAppHistory(mode: "push" | "replace", url: string, patch?: Record<s
     : current;
   const method = mode === "push" ? History.prototype.pushState : History.prototype.replaceState;
   method.call(window.history, state, "", url);
+  window.dispatchEvent(new Event("cnaan-navigate"));
 }

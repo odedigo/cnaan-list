@@ -1,4 +1,4 @@
-export const ACCOUNT_SECTIONS = ["shopping", "lists", "recipes", "packing", "trees", "events"] as const;
+export const ACCOUNT_SECTIONS = ["shopping", "lists", "recipes", "packing", "trees", "events", "calendar"] as const;
 
 export type AccountSection = (typeof ACCOUNT_SECTIONS)[number];
 
@@ -9,6 +9,7 @@ export const accountSectionOptions: { id: AccountSection; label: string }[] = [
   { id: "packing", label: "אריזות" },
   { id: "trees", label: "יוחסין" },
   { id: "events", label: "ארועים" },
+  { id: "calendar", label: "לוח שנה" },
 ];
 
 export function accountSections(value: unknown): AccountSection[] {
@@ -23,6 +24,7 @@ export function sectionForPath(path: string): AccountSection | null {
   if (path === "/packing" || path.startsWith("/packing/")) return "packing";
   if (path === "/trees" || path.startsWith("/trees/")) return "trees";
   if (path === "/dates" || path.startsWith("/dates/")) return "events";
+  if (path === "/calendar" || path.startsWith("/calendar/")) return "calendar";
   return null;
 }
 
@@ -33,5 +35,6 @@ export function firstSectionPath(sections: readonly AccountSection[]) {
   if (sections.includes("packing")) return "/packing";
   if (sections.includes("events")) return "/dates";
   if (sections.includes("trees")) return "/trees";
+  if (sections.includes("calendar")) return "/calendar";
   return "/settings";
 }

@@ -155,6 +155,17 @@ export function CalendarIcon(props: IconProps) {
   );
 }
 
+export function HebrewCalendarIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true" {...props}>
+      <rect x="3.5" y="5" width="17" height="15.5" rx="2" />
+      <path d="M3.5 10h17" />
+      <path d="M8 3.5v3M16 3.5v3" strokeLinecap="round" />
+      <path d="M8 13.5h.01M12 13.5h.01M16 13.5h.01M8 17h.01M12 17h.01" strokeLinecap="round" strokeWidth="2.4" />
+    </svg>
+  );
+}
+
 export function CommentIcon(props: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true" {...props}>

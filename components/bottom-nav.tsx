@@ -12,6 +12,7 @@ import {
   AppsIcon,
   CalendarIcon,
   DotsIcon,
+  HebrewCalendarIcon,
   DownloadIcon,
   GroceryIcon,
   ListsIcon,
@@ -46,7 +47,8 @@ export function BottomNav({ signedIn }: { signedIn: boolean }) {
   const showEvents = allowed("events");
   const showPacking = allowed("packing");
   const showTrees = allowed("trees");
-  const showMore = showEvents || showPacking || showTrees;
+  const showCalendar = allowed("calendar");
+  const showMore = showEvents || showPacking || showTrees || showCalendar;
   const transfer = useDataTransfer();
   const groceryCount = lists?.grocery.length ?? 0;
   const [launcherOpen, setLauncherOpen] = useState(false);
@@ -60,6 +62,7 @@ export function BottomNav({ signedIn }: { signedIn: boolean }) {
     pathname === "/packing" || pathname.startsWith("/packing/");
   const datesActive = pathname === "/dates" || pathname.startsWith("/dates/");
   const treesActive = pathname === "/trees" || pathname.startsWith("/trees/");
+  const calendarActive = pathname === "/calendar" || pathname.startsWith("/calendar/");
   useEffect(() => {
     if (!launcherOpen && !actionsOpen) return;
     function onPointer(event: PointerEvent) {
@@ -169,7 +172,7 @@ export function BottomNav({ signedIn }: { signedIn: boolean }) {
       {showMore ? (
       <div
         ref={launcherRef}
-        className={`relative flex min-w-0 flex-1 flex-col items-center ${packingActive || datesActive || treesActive || launcherOpen ? "text-black" : "text-neutral-400"}`}
+        className={`relative flex min-w-0 flex-1 flex-col items-center ${packingActive || datesActive || treesActive || calendarActive || launcherOpen ? "text-black" : "text-neutral-400"}`}
       >
         {launcherOpen ? (
           <div
@@ -227,13 +230,30 @@ export function BottomNav({ signedIn }: { signedIn: boolean }) {
               <TreeIcon className="size-7" />
               <span className="text-xs">יוחסין</span>
             </button>
+            <button
+              type="button"
+              className="flex w-16 flex-col items-center gap-1 rounded-lg px-1 py-2 text-neutral-800"
+              aria-current={calendarActive ? "page" : undefined}
+              hidden={!showCalendar}
+              onClick={() => {
+                setLauncherOpen(false);
+                if (!signedIn) {
+                  appPath?.go("/settings");
+                  return;
+                }
+                appPath?.go("/calendar");
+              }}
+            >
+              <HebrewCalendarIcon className="size-7" />
+              <span className="text-xs">לוח שנה</span>
+            </button>
           </div>
         ) : null}
         <button
           type="button"
           className="flex w-full flex-col items-center gap-1 px-0.5 py-2 text-center"
           style={{ fontSize: "10px", lineHeight: "12.5px" }}
-          aria-current={packingActive || datesActive || treesActive ? "page" : undefined}
+          aria-current={packingActive || datesActive || treesActive || calendarActive ? "page" : undefined}
           aria-expanded={launcherOpen}
           aria-haspopup="menu"
           aria-label="עוד"
