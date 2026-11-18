@@ -4,16 +4,19 @@ import type { FamilyChild, FamilyPerson, FamilyUnion } from "@/lib/family-trees"
 
 export const CARD_W = 156;
 export const CARD_H = 72;
+export const LINKED_EXTRA = 22;
 
 const GAP_X = 28;
 const ROW = CARD_H + 88;
 
-export type TreeBox = { id: string; x: number; y: number };
+export type TreeBox = { id: string; x: number; y: number; height: number };
 export type TreeLine = { x1: number; y1: number; x2: number; y2: number };
 
-type Span = { left: number; right: number; boxes: TreeBox[] };
+type Placed = { id: string; x: number; y: number };
+type Span = { left: number; right: number; boxes: Placed[] };
 
-export function layoutTree(people: FamilyPerson[], unions: FamilyUnion[], children: FamilyChild[]) {
+export function layoutTree(people: FamilyPerson[], unions: FamilyUnion[], children: FamilyChild[], linked?: ReadonlySet<string>) {
+  const cardHeight = (id: string) => (linked?.has(id) ? CARD_H + LINKED_EXTRA : CARD_H);
   const known = new Set(people.map((person) => person.id));
   const childIds = new Set<string>();
   const kidsByUnion = new Map<string, FamilyChild[]>();
@@ -37,7 +40,7 @@ export function layoutTree(people: FamilyPerson[], unions: FamilyUnion[], childr
   }
 
   const visited = new Set<string>();
-  const boxes: TreeBox[] = [];
+  const boxes: Placed[] = [];
   let cursor = 0;
 
   function place(span: Span) {
@@ -143,25 +146,25 @@ export function layoutTree(people: FamilyPerson[], unions: FamilyUnion[], childr
     if (first && second) {
       if (Math.abs(first.y - second.y) < 2) {
         const [leftBox, rightBox] = first.x < second.x ? [first, second] : [second, first];
-        const y = leftBox.y + CARD_H / 2;
+        const y = leftBox.y + cardHeight(leftBox.id) / 2;
         lines.push({ x1: leftBox.x + CARD_W, y1: y, x2: rightBox.x, y2: y });
       } else {
-        lines.push({ x1: first.x + CARD_W / 2, y1: first.y + CARD_H / 2, x2: second.x + CARD_W / 2, y2: second.y + CARD_H / 2 });
+        lines.push({ x1: first.x + CARD_W / 2, y1: first.y + cardHeight(first.id) / 2, x2: second.x + CARD_W / 2, y2: second.y + cardHeight(second.id) / 2 });
       }
     }
-    const parents = [first, second].filter((box): box is TreeBox => Boolean(box));
+    const parents = [first, second].filter((box): box is Placed => Boolean(box));
     for (const link of kidsByUnion.get(union.id) ?? []) {
       const child = placed.get(link.person_id);
       if (!child) continue;
-      const above = parents.filter((box) => box.y + CARD_H <= child.y + 1);
+      const above = parents.filter((box) => box.y + cardHeight(box.id) <= child.y + 1);
       if (above.length === 0) continue;
       const sourceX = above.reduce((sum, box) => sum + box.x + CARD_W / 2, 0) / above.length;
-      const parentBottom = Math.max(...above.map((box) => box.y)) + CARD_H;
+      const parentBottom = Math.max(...above.map((box) => box.y + cardHeight(box.id)));
       lines.push({ x1: sourceX, y1: parentBottom, x2: child.x + CARD_W / 2, y2: child.y });
     }
   }
 
-  return { boxes: uniqueBoxes(boxes), lines };
+  return { boxes: uniqueBoxes(boxes).map((box) => ({ ...box, height: cardHeight(box.id) })), lines };
 }
 
 export function rootPersonId(people: FamilyPerson[], children: FamilyChild[]) {
@@ -170,9 +173,9 @@ export function rootPersonId(people: FamilyPerson[], children: FamilyChild[]) {
   return people.find((person) => !childIds.has(person.id))?.id ?? people[0].id;
 }
 
-function uniqueBoxes(boxes: TreeBox[]) {
+function uniqueBoxes(boxes: Placed[]) {
   const seen = new Set<string>();
-  const next: TreeBox[] = [];
+  const next: Placed[] = [];
   for (const box of boxes) {
     if (seen.has(box.id)) continue;
     seen.add(box.id);

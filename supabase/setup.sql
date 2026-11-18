@@ -215,6 +215,7 @@ create table if not exists public.family_people (
   note text not null default '',
   deceased boolean not null default false,
   image_path text,
+  link_id uuid,
   constraint family_people_sex_check check (sex in ('m', 'f', 'u')),
   constraint family_people_given_length check (char_length(given_name) <= 80),
   constraint family_people_surname_length check (char_length(surname) <= 80),
@@ -251,6 +252,7 @@ alter table public.family_people add column if not exists image_path text;
 alter table public.family_people add column if not exists deceased boolean not null default false;
 alter table public.family_people add column if not exists hebrew_given text not null default '';
 alter table public.family_people add column if not exists hebrew_surname text not null default '';
+alter table public.family_people add column if not exists link_id uuid;
 alter table public.family_people drop constraint if exists family_people_hebrew_given_length;
 alter table public.family_people
   add constraint family_people_hebrew_given_length check (char_length(hebrew_given) <= 80);
@@ -297,6 +299,7 @@ create index if not exists recipe_labels_category_idx
   on public.recipe_labels (category_id);
 create index if not exists family_trees_account_sort_idx on public.family_trees (account_id, sort_order);
 create index if not exists family_people_tree_idx on public.family_people (tree_id);
+create index if not exists family_people_link_idx on public.family_people (account_id, link_id) where link_id is not null;
 create index if not exists family_unions_tree_idx on public.family_unions (tree_id);
 create index if not exists family_children_person_idx on public.family_children (person_id);
 

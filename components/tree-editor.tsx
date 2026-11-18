@@ -5,9 +5,9 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
 
-import { ChevronIcon, FolderIcon, PlusIcon, SearchIcon, TrashIcon } from "@/components/icons";
+import { ChevronIcon, FolderIcon, HomeIcon, LinkIcon, PlusIcon, SearchIcon, TrashIcon } from "@/components/icons";
 import { CARD_H, CARD_W, layoutTree, rootPersonId } from "@/lib/family-layout";
-import { personName, UNION_STATUSES, unionStatusLabel, type FamilyGraph, type FamilyPerson, type PersonDraft, type SpouseInput, type UnionStatus } from "@/lib/family-trees";
+import { personLabel, personName, UNION_STATUSES, unionStatusLabel, type FamilyGraph, type FamilyLink, type FamilyPerson, type FamilyPersonBrief, type FamilyTree, type PersonDraft, type SpouseInput, type UnionStatus } from "@/lib/family-trees";
 
 type View = { x: number; y: number; scale: number };
 
@@ -19,6 +19,8 @@ export function TreeEditor({
   error,
   busy,
   onBack,
+  showHome,
+  onHome,
   onCreatePerson,
   onSavePerson,
   onAddSpouse,
@@ -28,12 +30,22 @@ export function TreeEditor({
   onDeletePerson,
   onLoadImage,
   onPersonImage,
+  links,
+  trees,
+  focusPersonId,
+  focusToken,
+  onOpenLink,
+  onLinkPerson,
+  onUnlinkPerson,
+  onLoadTreePeople,
 }: {
   name: string;
   graph: FamilyGraph | null;
   error: string;
   busy: boolean;
   onBack: () => void;
+  showHome: boolean;
+  onHome: () => void;
   onCreatePerson: () => Promise<string | null>;
   onSavePerson: (personId: string, draft: PersonDraft) => Promise<boolean>;
   onAddSpouse: (personId: string, input: SpouseInput) => Promise<string | null>;
@@ -43,6 +55,14 @@ export function TreeEditor({
   onDeletePerson: (personId: string) => Promise<void>;
   onLoadImage: (path: string) => Promise<Blob | null>;
   onPersonImage: (personId: string, file: File | null) => Promise<void>;
+  links: Record<string, FamilyLink[]>;
+  trees: FamilyTree[];
+  focusPersonId: string | null;
+  focusToken: number;
+  onOpenLink: (treeId: string, personId: string) => void;
+  onLinkPerson: (personId: string, otherId: string) => Promise<void>;
+  onUnlinkPerson: (personId: string) => Promise<void>;
+  onLoadTreePeople: (treeId: string) => Promise<FamilyPersonBrief[]>;
 }) {
   const [ready, setReady] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -51,6 +71,8 @@ export function TreeEditor({
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [jump, setJump] = useState<{ id: string; token: number } | null>(null);
+  const [linkMenu, setLinkMenu] = useState<{ x: number; y: number; links: FamilyLink[] } | null>(null);
+  const appliedFocus = useRef(0);
 
   useEffect(() => setReady(true), []);
   useEffect(() => {
@@ -60,6 +82,15 @@ export function TreeEditor({
       document.body.style.overflow = previous;
     };
   }, []);
+  useEffect(() => {
+    if (!focusPersonId || !focusToken || appliedFocus.current === focusToken) return;
+    if (!graph?.people.some((person) => person.id === focusPersonId)) return;
+    appliedFocus.current = focusToken;
+    setSelectedId(focusPersonId);
+    setDetailsOpen(false);
+    setLinkMenu(null);
+    setJump({ id: focusPersonId, token: focusToken });
+  }, [focusPersonId, focusToken, graph]);
   useEffect(() => {
     if (!graph || !selectedId) return;
     if (graph.people.some((person) => person.id === selectedId)) return;
@@ -83,6 +114,7 @@ export function TreeEditor({
     <div dir="rtl" className="fixed inset-0 z-[80] flex flex-col bg-[var(--cream)] text-neutral-900" role="dialog" aria-modal="true" aria-label={name}>
       {error ? <p className="mx-3 mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p> : null}
       <Chart
+        name={name}
         graph={graph}
         loading={!graph && !error}
         selectedId={selected?.id ?? null}
@@ -104,11 +136,26 @@ export function TreeEditor({
           setDetailsOpen(true);
         }}
         onLoadImage={onLoadImage}
+        links={links}
+        onOpenLinks={(personId, x, y) => {
+          const list = links[personId] ?? [];
+          if (list.length === 0) return;
+          if (list.length === 1) {
+            onOpenLink(list[0].treeId, list[0].personId);
+            return;
+          }
+          setLinkMenu({ x, y, links: list });
+        }}
       />
       <div className="absolute start-3 top-3 z-20 flex items-start gap-2">
         <button type="button" className="grid size-10 shrink-0 place-items-center rounded-full bg-white shadow" aria-label="חזרה" onClick={onBack}>
           <ChevronIcon className="size-6 rotate-90" />
         </button>
+        {showHome ? (
+          <button type="button" className="grid size-10 shrink-0 place-items-center rounded-full bg-white shadow" aria-label="רשימת העצים" onClick={onHome}>
+            <HomeIcon className="size-6" />
+          </button>
+        ) : null}
         {graph && graph.people.length > 0 ? (
           <PersonSearch
             open={searchOpen}
@@ -147,6 +194,12 @@ export function TreeEditor({
           onAddParents={() => onAddParents(selected.id)}
           onDelete={() => setConfirming(true)}
           onImage={(file) => onPersonImage(selected.id, file)}
+          links={links[selected.id] ?? []}
+          otherTrees={trees.filter((row) => row.id !== selected.tree_id)}
+          onOpenLink={onOpenLink}
+          onLinkPerson={(otherId) => onLinkPerson(selected.id, otherId)}
+          onUnlink={() => onUnlinkPerson(selected.id)}
+          onLoadTreePeople={onLoadTreePeople}
         />
       ) : null}
       {confirming && selected ? (
@@ -172,6 +225,28 @@ export function TreeEditor({
           </div>
         </div>
       ) : null}
+      {linkMenu ? (
+        <>
+          <button type="button" className="fixed inset-0 z-[94] cursor-default" aria-label="סגירת קישורים" onClick={() => setLinkMenu(null)} />
+          <div dir="rtl" role="menu" className="fixed z-[95] max-h-64 w-64 overflow-y-auto rounded-xl bg-white py-1 text-start shadow-lg" style={{ top: linkMenu.y, left: Math.max(8, Math.min(linkMenu.x, window.innerWidth - 272)) }}>
+            {linkMenu.links.map((link) => (
+              <button
+                key={link.personId}
+                type="button"
+                role="menuitem"
+                className="block w-full px-3 py-2 text-start"
+                onClick={() => {
+                  setLinkMenu(null);
+                  onOpenLink(link.treeId, link.personId);
+                }}
+              >
+                <span className="block truncate font-medium">{link.treeName}</span>
+                <span className="block truncate text-sm text-neutral-500">{link.label}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      ) : null}
     </div>
   );
 
@@ -179,6 +254,7 @@ export function TreeEditor({
 }
 
 function Chart({
+  name,
   graph,
   loading,
   selectedId,
@@ -190,7 +266,10 @@ function Chart({
   onDismiss,
   onCreate,
   onLoadImage,
+  links,
+  onOpenLinks,
 }: {
+  name: string;
   graph: FamilyGraph | null;
   loading: boolean;
   selectedId: string | null;
@@ -202,6 +281,8 @@ function Chart({
   onDismiss: () => void;
   onCreate: () => void;
   onLoadImage: (path: string) => Promise<Blob | null>;
+  links: Record<string, FamilyLink[]>;
+  onOpenLinks: (personId: string, x: number, y: number) => void;
 }) {
   const canvas = useRef<SVGSVGElement>(null);
   const placed = useRef(new Map<string, { x: number; y: number }>());
@@ -209,6 +290,7 @@ function Chart({
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const drag = useRef({ x: 0, y: 0, moved: false });
   const press = useRef<string | null>(null);
+  const linkPress = useRef<{ id: string; x: number; y: number } | null>(null);
   const pinch = useRef({ dist: 0, x: 0, y: 0 });
   const [view, setView] = useState<View>({ x: 24, y: 24, scale: 1 });
   const focusId = graph
@@ -216,9 +298,10 @@ function Chart({
       ? selectedId
       : rootPersonId(graph.people, graph.children)
     : null;
+  const linkedIds = useMemo(() => new Set(Object.keys(links).filter((id) => (links[id]?.length ?? 0) > 0)), [links]);
   const layout = useMemo(
-    () => (graph && graph.people.length > 0 ? layoutTree(graph.people, graph.unions, graph.children) : { boxes: [], lines: [] }),
-    [graph],
+    () => (graph && graph.people.length > 0 ? layoutTree(graph.people, graph.unions, graph.children, linkedIds) : { boxes: [], lines: [] }),
+    [graph, linkedIds],
   );
   const byId = useMemo(() => new Map(graph?.people.map((person) => [person.id, person]) ?? []), [graph]);
   const photos = usePersonPhotos(graph?.people, onLoadImage);
@@ -277,7 +360,7 @@ function Chart({
     setView({
       scale: 1,
       x: rect.width / 2 - (box.x + CARD_W / 2),
-      y: rect.height / 2 - (box.y + CARD_H / 2),
+      y: rect.height / 2 - (box.y + box.height / 2),
     });
   }, [jumpId, jumpToken, layout.boxes]);
 
@@ -294,7 +377,9 @@ function Chart({
     const point = localPoint(event.currentTarget, event.clientX, event.clientY);
     pointers.current.set(event.pointerId, point);
     drag.current = { x: point.x, y: point.y, moved: pointers.current.size > 1 };
-    press.current = event.target instanceof Element ? event.target.closest("[data-person]")?.getAttribute("data-person") ?? null : null;
+    const linkId = event.target instanceof Element ? event.target.closest("[data-link]")?.getAttribute("data-link") : null;
+    linkPress.current = linkId ? { id: linkId, x: event.clientX, y: event.clientY } : null;
+    press.current = linkId || !(event.target instanceof Element) ? null : event.target.closest("[data-person]")?.getAttribute("data-person") ?? null;
     if (pointers.current.size >= 2) pinch.current = pinchOf([...pointers.current.values()]);
   }
 
@@ -322,8 +407,14 @@ function Chart({
     pointers.current.delete(event.pointerId);
     if (pointers.current.size < 2) pinch.current = { dist: 0, x: 0, y: 0 };
     const id = press.current;
+    const link = linkPress.current;
     press.current = null;
+    linkPress.current = null;
     if (pointers.current.size > 0 || drag.current.moved) return;
+    if (link) {
+      onOpenLinks(link.id, link.x, link.y);
+      return;
+    }
     if (!id) {
       onDismiss();
       return;
@@ -333,6 +424,12 @@ function Chart({
 
   return (
     <div className="relative min-h-0 flex-1">
+      <p
+        className="pointer-events-none absolute inset-x-0 top-2 z-0 flex h-10 items-center justify-center truncate text-lg"
+        style={{ color: "#a3a3a3", paddingInline: "11rem" }}
+      >
+        {name}
+      </p>
       {loading ? <p className="px-6 pt-16 text-center text-neutral-500">טוען…</p> : null}
       {graph && graph.people.length === 0 ? (
         <div className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center">
@@ -354,7 +451,7 @@ function Chart({
         </div>
         <svg
           ref={canvas}
-          className="h-full w-full touch-none"
+          className="relative z-[1] h-full w-full touch-none"
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
@@ -369,8 +466,10 @@ function Chart({
               if (!person) return null;
               const active = person.id === (selectedId ?? focusId);
               const photo = person.image_path ? photos[person.image_path] : "";
+              const cardH = box.height || CARD_H;
+              const linked = (links[person.id]?.length ?? 0) > 0;
               const photoX = box.x + 8;
-              const photoY = box.y + (CARD_H - 28) / 2;
+              const photoY = box.y + (cardH - 28) / 2;
               const title = nodeTitle(person);
               const lived = years(person);
               const nameX = box.x + CARD_W / 2 + (photo ? 10 : 0);
@@ -394,12 +493,29 @@ function Chart({
                     x={box.x}
                     y={box.y}
                     width={CARD_W}
-                    height={CARD_H}
+                    height={cardH}
                     rx={12}
                     fill={active ? "#d7efe9" : "#fff"}
-                    stroke={active ? "#128f86" : "#e5e5e5"}
-                    strokeWidth={active ? 2 : 1}
+                    stroke={linked ? "#c45c12" : active ? "#128f86" : "#e5e5e5"}
+                    strokeWidth={linked || active ? 2.5 : 1}
                   />
+                  {linked ? (
+                    <foreignObject x={box.x + 4} y={box.y + cardH - 24} width={22} height={22}>
+                      <button
+                        type="button"
+                        data-link={person.id}
+                        className="grid size-5 place-items-center rounded-full bg-white text-[#c45c12] shadow"
+                        aria-label="קישורים לעצים אחרים"
+                        onPointerDown={(event) => event.stopPropagation()}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onOpenLinks(person.id, event.clientX, event.clientY);
+                        }}
+                      >
+                        <LinkIcon className="size-3.5" />
+                      </button>
+                    </foreignObject>
+                  ) : null}
                   {person.sex === "m" || person.sex === "f" ? <GenderMark sex={person.sex} x={box.x + 5} y={box.y + 4} /> : null}
                   {person.deceased ? (
                     <svg x={box.x + CARD_W - 22} y={box.y + 6} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#737373" strokeWidth="1.8" aria-hidden="true">
@@ -549,11 +665,23 @@ function PersonDialog({
   onAddParents,
   onDelete,
   onImage,
+  links,
+  otherTrees,
+  onOpenLink,
+  onLinkPerson,
+  onUnlink,
+  onLoadTreePeople,
 }: {
   person: FamilyPerson;
   graph: FamilyGraph;
   busy: boolean;
   hasParents: boolean;
+  links: FamilyLink[];
+  otherTrees: FamilyTree[];
+  onOpenLink: (treeId: string, personId: string) => void;
+  onLinkPerson: (otherId: string) => Promise<void>;
+  onUnlink: () => Promise<void>;
+  onLoadTreePeople: (treeId: string) => Promise<FamilyPersonBrief[]>;
   onLoadImage: (path: string) => Promise<Blob | null>;
   onClose: () => void;
   onSave: (draft: PersonDraft) => Promise<void>;
@@ -609,7 +737,7 @@ function PersonDialog({
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/40 p-2" role="dialog" aria-modal="true" aria-label={personName(person)}>
       <form
         className="flex flex-col overflow-hidden rounded-2xl bg-white p-4 text-start"
-        style={{ width: "min(1040px, calc(100vw - 1rem))", height: "min(720px, calc(100dvh - 1rem))", fontSize: "1.25rem", zoom: compact ? 0.86 : 1 }}
+        style={{ width: "min(1040px, calc(100vw - 1rem))", height: "min(720px, calc(100dvh - 1rem))", fontSize: "1rem", zoom: compact ? 0.86 : 1 }}
         onSubmit={(event) => {
           event.preventDefault();
           void onSave(draft);
@@ -617,13 +745,13 @@ function PersonDialog({
       >
         <div className="flex items-center gap-3">
           {src ? (
-            <button type="button" className="grid size-16 shrink-0 place-items-center overflow-hidden rounded-full bg-neutral-100" aria-label={`הגדלת התמונה של ${personName(person)}`} onClick={() => setPhotoOpen(true)}>
+            <button type="button" className="grid size-12 shrink-0 place-items-center overflow-hidden rounded-full bg-neutral-100" aria-label={`הגדלת התמונה של ${personName(person)}`} onClick={() => setPhotoOpen(true)}>
               <img src={src} alt="" className="size-full object-cover" />
             </button>
           ) : (
-            <span className="grid size-16 shrink-0 place-items-center overflow-hidden rounded-full bg-neutral-100 text-neutral-400" style={{ fontSize: "1rem" }}>אין תמונה</span>
+            <span className="grid size-12 shrink-0 place-items-center overflow-hidden rounded-full bg-neutral-100 text-neutral-400" style={{ fontSize: "0.75rem" }}>אין תמונה</span>
           )}
-          <p className="min-w-0 font-semibold" style={{ fontSize: "1.5rem" }}>{personName(person)}</p>
+          <p className="min-w-0 font-semibold" style={{ fontSize: "1.15rem" }}>{personName(person)}</p>
         </div>
         <div role="tablist" aria-label="פרטי האדם" className="mt-3 flex shrink-0 flex-wrap gap-1 border-b border-neutral-200">
           {personTabs.map((item) => (
@@ -632,7 +760,7 @@ function PersonDialog({
               type="button"
               role="tab"
               aria-selected={tab === item.id}
-              className="px-3 py-2 font-medium"
+              className="px-2 py-1.5 font-medium"
               style={{ borderBottom: tab === item.id ? "3px solid var(--teal)" : "3px solid transparent", color: tab === item.id ? "#171717" : "#737373" }}
               onClick={() => setTab(item.id)}
             >
@@ -649,14 +777,14 @@ function PersonDialog({
               <Field label="שם משפחה בעברית" value={draft.hebrew_surname} maxLength={80} onChange={(value) => setField("hebrew_surname", value)} />
               <label className="block">
                 <span className="text-neutral-600">מין</span>
-                <select className="mt-1 w-full rounded-xl border border-neutral-300 bg-white py-3 ps-3 outline-none" style={{ fontSize: "1.25rem" }} value={draft.sex} onChange={(event) => setField("sex", event.target.value as PersonDraft["sex"])}>
+                <select className="mt-1 w-full rounded-xl border border-neutral-300 bg-white py-2 ps-3 outline-none" style={{ fontSize: "1rem" }} value={draft.sex} onChange={(event) => setField("sex", event.target.value as PersonDraft["sex"])}>
                   <option value="m">זכר</option>
                   <option value="f">נקבה</option>
                   <option value="u">לא ידוע</option>
                 </select>
               </label>
               <label className="flex items-center gap-3">
-                <input type="checkbox" className="size-6" checked={draft.deceased} onChange={(event) => setField("deceased", event.target.checked)} />
+                <input type="checkbox" className="size-5" checked={draft.deceased} onChange={(event) => setField("deceased", event.target.checked)} />
                 <span>נפטר/ה</span>
               </label>
             </div>
@@ -673,22 +801,22 @@ function PersonDialog({
               <div className="absolute bottom-3 start-3 flex gap-2">
                 <button
                   type="button"
-                  className="grid size-11 place-items-center rounded-full bg-white text-neutral-800 shadow disabled:opacity-40"
+                  className="grid size-9 place-items-center rounded-full bg-white text-neutral-800 shadow disabled:opacity-40"
                   aria-label={src ? "החלפת תמונה" : "הוספת תמונה"}
                   disabled={busy}
                   onClick={() => fileRef.current?.click()}
                 >
-                  {src ? <FolderIcon className="size-6" /> : <PlusIcon className="size-6" />}
+                  {src ? <FolderIcon className="size-5" /> : <PlusIcon className="size-5" />}
                 </button>
                 {src ? (
                   <button
                     type="button"
-                    className="grid size-11 place-items-center rounded-full bg-white text-red-700 shadow disabled:opacity-40"
+                    className="grid size-9 place-items-center rounded-full bg-white text-red-700 shadow disabled:opacity-40"
                     aria-label="הסרת תמונה"
                     disabled={busy}
                     onClick={() => onImage(null)}
                   >
-                    <TrashIcon className="size-6" />
+                    <TrashIcon className="size-5" />
                   </button>
                 ) : null}
               </div>
@@ -713,12 +841,12 @@ function PersonDialog({
               <ul className="mt-3 flex flex-col gap-3">
                 {spouses.map((link) => (
                   <li key={link.unionId} className="flex flex-col gap-2">
-                    <button type="button" className="min-w-0 truncate rounded-xl bg-neutral-100 px-3 py-3 text-start" onClick={() => onOpenPerson(link.person.id)}>
+                    <button type="button" className="min-w-0 truncate rounded-xl bg-neutral-100 px-3 py-2 text-start" onClick={() => onOpenPerson(link.person.id)}>
                       {personName(link.person)}
                     </button>
                     <select
-                      className="w-full rounded-xl border border-neutral-300 bg-white py-3 ps-3 outline-none"
-                      style={{ fontSize: "1.25rem" }}
+                      className="w-full rounded-xl border border-neutral-300 bg-white py-2 ps-3 outline-none"
+                      style={{ fontSize: "1rem" }}
                       aria-label={`סטטוס של ${personName(link.person)}`}
                       value={link.status}
                       disabled={busy}
@@ -740,10 +868,10 @@ function PersonDialog({
                   onChange={(event) => setSpouseName(event.target.value)}
                   placeholder="שם"
                   aria-label="שם בן או בת הזוג"
-                  className="w-full rounded-xl border border-neutral-300 px-3 py-3 outline-none"
-                  style={{ fontSize: "1.25rem" }}
+                  className="w-full rounded-xl border border-neutral-300 px-3 py-2 outline-none"
+                  style={{ fontSize: "1rem" }}
                 />
-                <select className="w-full rounded-xl border border-neutral-300 bg-white py-3 ps-3 outline-none" style={{ fontSize: "1.25rem" }} aria-label="סטטוס הזוגיות" value={spouseStatus} onChange={(event) => setSpouseStatus(event.target.value as UnionStatus)}>
+                <select className="w-full rounded-xl border border-neutral-300 bg-white py-2 ps-3 outline-none" style={{ fontSize: "1rem" }} aria-label="סטטוס הזוגיות" value={spouseStatus} onChange={(event) => setSpouseStatus(event.target.value as UnionStatus)}>
                   {UNION_STATUSES.map((status) => (
                     <option key={status} value={status}>
                       {unionStatusLabel(status)}
@@ -752,7 +880,7 @@ function PersonDialog({
                 </select>
                 <button
                   type="button"
-                  className="rounded-xl bg-neutral-100 px-4 py-3 font-medium disabled:opacity-40"
+                  className="rounded-xl bg-neutral-100 px-3 py-2 font-medium disabled:opacity-40"
                   disabled={busy}
                   onClick={() => {
                     const typed = spouseName.trim();
@@ -776,16 +904,27 @@ function PersonDialog({
           {tab === "children" ? (
             <div>
               <ChildList personId={person.id} graph={graph} onOpenPerson={onOpenPerson} />
-              <button type="button" className="mt-4 rounded-xl bg-neutral-100 px-4 py-3 font-medium text-neutral-800 disabled:opacity-40" disabled={busy} onClick={() => void onAddChild()}>
+              <button type="button" className="mt-4 rounded-xl bg-neutral-100 px-3 py-2 font-medium text-neutral-800 disabled:opacity-40" disabled={busy} onClick={() => void onAddChild()}>
                 הוספת ילד
               </button>
             </div>
+          ) : null}
+          {tab === "links" ? (
+            <PersonLinks
+              links={links}
+              otherTrees={otherTrees}
+              busy={busy}
+              onOpenLink={onOpenLink}
+              onLinkPerson={onLinkPerson}
+              onUnlink={onUnlink}
+              onLoadTreePeople={onLoadTreePeople}
+            />
           ) : null}
           {tab === "connections" ? <ConnectionSummary personId={person.id} graph={graph} onOpenPerson={onOpenPerson} /> : null}
           {tab === "note" ? (
             <label className="block">
               <span className="text-neutral-600">הערה</span>
-              <textarea value={draft.note} maxLength={1000} rows={8} onChange={(event) => setField("note", event.target.value)} className="mt-1 w-full rounded-xl border border-neutral-300 px-3 py-3 outline-none" style={{ fontSize: "1.25rem" }} aria-label="הערה" />
+              <textarea value={draft.note} maxLength={1000} rows={8} onChange={(event) => setField("note", event.target.value)} className="mt-1 w-full rounded-xl border border-neutral-300 px-3 py-2 outline-none" style={{ fontSize: "1rem" }} aria-label="הערה" />
             </label>
           ) : null}
         </div>
@@ -800,18 +939,18 @@ function PersonDialog({
             if (file) onImage(file);
           }}
         />
-        <button type="button" className="mt-3 shrink-0 self-start rounded-xl bg-neutral-100 px-4 py-3 font-medium text-neutral-800 disabled:opacity-40" disabled={busy || hasParents} onClick={() => void onAddParents()}>
+        <button type="button" className="mt-3 shrink-0 self-start rounded-xl bg-neutral-100 px-3 py-2 font-medium text-neutral-800 disabled:opacity-40" disabled={busy || hasParents} onClick={() => void onAddParents()}>
           הוספת הורים
         </button>
         <div className="mt-3 flex shrink-0 items-center gap-2">
-          <button type="submit" className="rounded-xl bg-[var(--teal)] px-4 py-3 font-medium text-white disabled:opacity-40" disabled={busy}>
+          <button type="submit" className="rounded-xl bg-[var(--teal)] px-3 py-2 font-medium text-white disabled:opacity-40" disabled={busy}>
             שמירה
           </button>
-          <button type="button" className="rounded-xl bg-neutral-100 px-4 py-3 font-medium text-neutral-700" onClick={onClose}>
+          <button type="button" className="rounded-xl bg-neutral-100 px-3 py-2 font-medium text-neutral-700" onClick={onClose}>
             ביטול
           </button>
-          <button type="button" className="ms-auto grid size-11 shrink-0 place-items-center rounded-full bg-red-50 text-red-700 disabled:opacity-40" aria-label="מחיקה" disabled={busy} onClick={onDelete}>
-            <TrashIcon className="size-6" />
+          <button type="button" className="ms-auto grid size-9 shrink-0 place-items-center rounded-full bg-red-50 text-red-700 disabled:opacity-40" aria-label="מחיקה" disabled={busy} onClick={onDelete}>
+            <TrashIcon className="size-5" />
           </button>
         </div>
       </form>
@@ -824,7 +963,7 @@ function PersonDialog({
   );
 }
 
-type PersonTab = "details" | "photo" | "dates" | "family" | "children" | "connections" | "note";
+type PersonTab = "details" | "photo" | "dates" | "family" | "children" | "links" | "connections" | "note";
 
 const personTabs: { id: PersonTab; label: string }[] = [
   { id: "details", label: "פרטים" },
@@ -832,9 +971,102 @@ const personTabs: { id: PersonTab; label: string }[] = [
   { id: "dates", label: "תאריכים" },
   { id: "family", label: "בני זוג" },
   { id: "children", label: "ילדים" },
+  { id: "links", label: "קישורים" },
   { id: "connections", label: "קשרים" },
   { id: "note", label: "הערה" },
 ];
+
+function PersonLinks({
+  links,
+  otherTrees,
+  busy,
+  onOpenLink,
+  onLinkPerson,
+  onUnlink,
+  onLoadTreePeople,
+}: {
+  links: FamilyLink[];
+  otherTrees: FamilyTree[];
+  busy: boolean;
+  onOpenLink: (treeId: string, personId: string) => void;
+  onLinkPerson: (otherId: string) => Promise<void>;
+  onUnlink: () => Promise<void>;
+  onLoadTreePeople: (treeId: string) => Promise<FamilyPersonBrief[]>;
+}) {
+  const [treeId, setTreeId] = useState("");
+  const [people, setPeople] = useState<FamilyPersonBrief[]>([]);
+  const [query, setQuery] = useState("");
+  const linked = new Set(links.map((link) => link.personId));
+  useEffect(() => {
+    if (!treeId) {
+      setPeople([]);
+      return;
+    }
+    let cancel = false;
+    onLoadTreePeople(treeId)
+      .then((rows) => {
+        if (!cancel) setPeople(rows);
+      })
+      .catch(() => {
+        if (!cancel) setPeople([]);
+      });
+    return () => {
+      cancel = true;
+    };
+  }, [onLoadTreePeople, treeId]);
+  const needle = query.trim().toLocaleLowerCase("he");
+  const matches = needle
+    ? people.filter((person) => !linked.has(person.id) && personLabel(person).toLocaleLowerCase("he").includes(needle)).slice(0, 20)
+    : [];
+  return (
+    <div className="grid gap-4">
+      {links.length === 0 ? <p className="text-neutral-500">אין קישורים לעצים אחרים</p> : null}
+      {links.length > 0 ? (
+        <ul className="flex flex-col gap-2">
+          {links.map((link) => (
+            <li key={link.personId} className="rounded-xl bg-neutral-100 px-3 py-2">
+              <button type="button" className="block w-full truncate text-start font-medium" onClick={() => onOpenLink(link.treeId, link.personId)}>
+                {link.label}
+              </button>
+              <p className="mt-1 truncate text-neutral-600">{link.treeName}</p>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {links.length > 0 ? (
+        <button type="button" className="justify-self-start rounded-xl bg-neutral-100 px-3 py-2 font-medium text-red-700 disabled:opacity-40" disabled={busy} onClick={() => void onUnlink()}>
+          ניתוק
+        </button>
+      ) : null}
+      <label className="block">
+        <span className="text-neutral-600">עץ אחר</span>
+        <select className="mt-1 w-full rounded-xl border border-neutral-300 bg-white py-2 ps-3 outline-none" style={{ fontSize: "1rem" }} value={treeId} onChange={(event) => { setTreeId(event.target.value); setQuery(""); }}>
+          <option value="">בחירת עץ</option>
+          {otherTrees.map((tree) => (
+            <option key={tree.id} value={tree.id}>{tree.name}</option>
+          ))}
+        </select>
+      </label>
+      {treeId ? (
+        <label className="block">
+          <span className="text-neutral-600">חיפוש אדם</span>
+          <input value={query} onChange={(event) => setQuery(event.target.value)} className="mt-1 w-full rounded-xl border border-neutral-300 px-3 py-2 outline-none" style={{ fontSize: "1rem" }} aria-label="חיפוש אדם בעץ אחר" />
+        </label>
+      ) : null}
+      {matches.length > 0 ? (
+        <ul className="flex flex-col gap-2">
+          {matches.map((person) => (
+            <li key={person.id}>
+              <button type="button" className="w-full truncate rounded-xl bg-neutral-100 px-3 py-2 text-start disabled:opacity-40" disabled={busy} onClick={() => void onLinkPerson(person.id).then(() => setQuery(""))}>
+                {personLabel(person)}
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
 
 function useCompactDialog() {
   const [compact, setCompact] = useState(false);
@@ -861,7 +1093,7 @@ function Field({ label, value, maxLength, ltr = false, onChange }: { label: stri
   return (
     <label className="block">
       <span className="text-neutral-600">{label}</span>
-      <input value={value} maxLength={maxLength} dir={ltr ? "ltr" : undefined} onChange={(event) => onChange(event.target.value)} className={`mt-1 w-full rounded-xl border border-neutral-300 px-3 py-3 outline-none ${ltr ? "text-end" : ""}`} style={{ fontSize: "1.25rem" }} aria-label={label} />
+      <input value={value} maxLength={maxLength} dir={ltr ? "ltr" : undefined} onChange={(event) => onChange(event.target.value)} className={`mt-1 w-full rounded-xl border border-neutral-300 px-3 py-2 outline-none ${ltr ? "text-end" : ""}`} style={{ fontSize: "1rem" }} aria-label={label} />
     </label>
   );
 }
@@ -900,8 +1132,8 @@ function DateField({ label, value, onChange }: { label: string; value: string; o
         value={iso}
         dir="ltr"
         onChange={(event) => onChange(event.target.value)}
-        className="mt-1 w-full rounded-xl border border-neutral-300 px-3 py-3 text-end outline-none"
-        style={{ fontSize: "1.25rem" }}
+        className="mt-1 w-full rounded-xl border border-neutral-300 px-3 py-2 text-end outline-none"
+        style={{ fontSize: "1rem" }}
         aria-label={label}
       />
       {value.trim() && !iso ? (
@@ -1013,7 +1245,7 @@ function ChildList({ personId, graph, onOpenPerson }: { personId: string; graph:
   return (
     <ul className="flex flex-col gap-2">
       {children.map(({ child, other }) => (
-        <li key={child.id} className="rounded-xl bg-neutral-100 px-3 py-3">
+        <li key={child.id} className="rounded-xl bg-neutral-100 px-3 py-2">
           <button type="button" className="block w-full truncate text-start font-medium" onClick={() => onOpenPerson(child.id)}>
             {personName(child)}
           </button>
@@ -1041,7 +1273,7 @@ function ConnectionGroup({ title, people, onOpenPerson }: { title: string; peopl
       <ul className="mt-2 flex flex-col gap-2">
         {people.map((person) => (
           <li key={person.id}>
-            <button type="button" className="w-full truncate rounded-xl bg-neutral-100 px-3 py-3 text-start" onClick={() => onOpenPerson(person.id)}>
+            <button type="button" className="w-full truncate rounded-xl bg-neutral-100 px-3 py-2 text-start" onClick={() => onOpenPerson(person.id)}>
               {personName(person)}
             </button>
           </li>

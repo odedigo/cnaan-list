@@ -30,6 +30,7 @@ export type FamilyPerson = {
   note: string;
   deceased: boolean;
   image_path: string | null;
+  link_id: string | null;
 };
 
 export const UNION_STATUSES = ["married", "divorced", "widowed", "separated", "partner"] as const;
@@ -82,6 +83,7 @@ export type PersonDraft = {
 const UNION_COLUMNS = "id, account_id, tree_id, partner_a, partner_b, status";
 const UNION_COLUMNS_WITHOUT_STATUS = "id, account_id, tree_id, partner_a, partner_b";
 const PERSON_COLUMNS = "id, account_id, tree_id, given_name, surname, hebrew_given, hebrew_surname, sex, birth_date, birth_place, death_date, death_place, note, deceased, image_path";
+const PERSON_COLUMNS_WITH_LINK = `${PERSON_COLUMNS}, link_id`;
 const PERSON_COLUMNS_WITHOUT_HEBREW = "id, account_id, tree_id, given_name, surname, sex, birth_date, birth_place, death_date, death_place, note, deceased, image_path";
 const PERSON_COLUMNS_WITHOUT_DECEASED = "id, account_id, tree_id, given_name, surname, sex, birth_date, birth_place, death_date, death_place, note, image_path";
 const PERSON_COLUMNS_WITHOUT_IMAGE = "id, account_id, tree_id, given_name, surname, sex, birth_date, birth_place, death_date, death_place, note";
@@ -89,11 +91,28 @@ const SAVE_FAILED = "לא ניתן לשמור את עץ המשפחה";
 const LOAD_FAILED = "לא ניתן לטעון את עצי המשפחה";
 const MISSING_TABLE = "טבלאות עצי המשפחה אינן קיימות עדיין. יש להריץ את קובץ הסכמה.";
 const HAS_PARENTS = "כבר יש הורים לאדם הזה";
+const SAME_TREE = "אי אפשר לקשר שני אנשים באותו עץ";
 
 export function personName(person: Pick<FamilyPerson, "given_name" | "surname">) {
   const name = `${person.given_name} ${person.surname}`.replace(/\s+/g, " ").trim();
   return name || "ללא שם";
 }
+
+export function personLabel(person: Pick<FamilyPerson, "given_name" | "surname" | "hebrew_given" | "hebrew_surname">) {
+  const english = `${person.given_name} ${person.surname}`.replace(/\s+/g, " ").trim();
+  const hebrew = `${person.hebrew_given ?? ""} ${person.hebrew_surname ?? ""}`.replace(/\s+/g, " ").trim();
+  if (hebrew && english) return `${hebrew} (${english})`;
+  return hebrew || english || "ללא שם";
+}
+
+export type FamilyLink = {
+  personId: string;
+  treeId: string;
+  treeName: string;
+  label: string;
+};
+
+export type FamilyPersonBrief = Pick<FamilyPerson, "id" | "given_name" | "surname" | "hebrew_given" | "hebrew_surname">;
 
 export function unionStatusLabel(status: UnionStatus) {
   if (status === "divorced") return "גירושים";
@@ -158,6 +177,97 @@ export async function renameFamilyTree(supabase: SupabaseClient, treeId: string,
   return trimmed;
 }
 
+export async function loadFamilyLinks(supabase: SupabaseClient, accountId: string, people: FamilyPerson[]) {
+  const linkIds = [...new Set(people.flatMap((person) => (person.link_id ? [person.link_id] : [])))];
+  const links: Record<string, FamilyLink[]> = {};
+  if (linkIds.length === 0) return links;
+  const rows: { id: string; tree_id: string; link_id: string; given_name: string; surname: string; hebrew_given?: string; hebrew_surname?: string }[] = [];
+  for (let index = 0; index < linkIds.length; index += 100) {
+    const result = await supabase
+      .from("family_people")
+      .select("id, tree_id, link_id, given_name, surname, hebrew_given, hebrew_surname")
+      .eq("account_id", accountId)
+      .in("link_id", linkIds.slice(index, index + 100));
+    if (missingColumn(result.error)) return links;
+    raise(result.error, LOAD_FAILED);
+    rows.push(...((result.data ?? []) as typeof rows));
+  }
+  const treeIds = [...new Set(rows.map((row) => row.tree_id))];
+  const { data: trees, error } = await supabase.from("family_trees").select("id, name").eq("account_id", accountId).in("id", treeIds);
+  raise(error, LOAD_FAILED);
+  const treeName = new Map(((trees ?? []) as { id: string; name: string }[]).map((tree) => [tree.id, tree.name]));
+  const byLink = new Map<string, typeof rows>();
+  for (const row of rows) {
+    const list = byLink.get(row.link_id) ?? [];
+    list.push(row);
+    byLink.set(row.link_id, list);
+  }
+  for (const person of people) {
+    if (!person.link_id) continue;
+    const others = (byLink.get(person.link_id) ?? []).filter((row) => row.id !== person.id);
+    if (others.length === 0) continue;
+    links[person.id] = others.map((row) => ({
+      personId: row.id,
+      treeId: row.tree_id,
+      treeName: treeName.get(row.tree_id) ?? "עץ",
+      label: personLabel({ ...row, hebrew_given: row.hebrew_given ?? "", hebrew_surname: row.hebrew_surname ?? "" }),
+    }));
+  }
+  return links;
+}
+
+export async function loadFamilyPeopleBrief(supabase: SupabaseClient, treeId: string): Promise<FamilyPersonBrief[]> {
+  const withHebrew = await supabase.from("family_people").select("id, given_name, surname, hebrew_given, hebrew_surname").eq("tree_id", treeId);
+  const result = missingColumn(withHebrew.error) ? await supabase.from("family_people").select("id, given_name, surname").eq("tree_id", treeId) : withHebrew;
+  raise(result.error, LOAD_FAILED);
+  return ((result.data ?? []) as FamilyPersonBrief[]).map((row) => ({
+    id: row.id,
+    given_name: row.given_name ?? "",
+    surname: row.surname ?? "",
+    hebrew_given: row.hebrew_given ?? "",
+    hebrew_surname: row.hebrew_surname ?? "",
+  }));
+}
+
+export async function linkFamilyPeople(supabase: SupabaseClient, accountId: string, personId: string, otherId: string) {
+  if (personId === otherId) throw new Error(SAVE_FAILED);
+  const { data, error } = await supabase.from("family_people").select("id, account_id, tree_id, link_id").in("id", [personId, otherId]);
+  raise(error, SAVE_FAILED);
+  const rows = (data ?? []) as { id: string; account_id: string; tree_id: string; link_id: string | null }[];
+  const left = rows.find((row) => row.id === personId);
+  const right = rows.find((row) => row.id === otherId);
+  if (!left || !right || left.account_id !== accountId || right.account_id !== accountId) throw new Error(SAVE_FAILED);
+  if (left.tree_id === right.tree_id) throw new Error(SAME_TREE);
+  if (left.link_id && left.link_id === right.link_id) return left.link_id;
+  const membersOf = async (linkId: string) => {
+    const result = await supabase.from("family_people").select("id, tree_id").eq("account_id", accountId).eq("link_id", linkId);
+    raise(result.error, SAVE_FAILED);
+    return (result.data ?? []) as { id: string; tree_id: string }[];
+  };
+  if (left.link_id && right.link_id) {
+    const [leftMembers, rightMembers] = await Promise.all([membersOf(left.link_id), membersOf(right.link_id)]);
+    const trees = new Set(leftMembers.map((member) => member.tree_id));
+    if (rightMembers.some((member) => trees.has(member.tree_id))) throw new Error(SAME_TREE);
+    const { error: updateError } = await supabase.from("family_people").update({ link_id: left.link_id }).eq("account_id", accountId).eq("link_id", right.link_id);
+    raise(updateError, SAVE_FAILED);
+    return left.link_id;
+  }
+  const linkId = left.link_id || right.link_id || crypto.randomUUID();
+  const joining = linkId === left.link_id ? right : left;
+  if (left.link_id || right.link_id) {
+    const members = await membersOf(linkId);
+    if (members.some((member) => member.tree_id === joining.tree_id)) throw new Error(SAME_TREE);
+  }
+  const { error: updateError } = await supabase.from("family_people").update({ link_id: linkId }).eq("account_id", accountId).in("id", [personId, otherId]);
+  raise(updateError, SAVE_FAILED);
+  return linkId;
+}
+
+export async function unlinkFamilyPerson(supabase: SupabaseClient, accountId: string, personId: string) {
+  const { error } = await supabase.from("family_people").update({ link_id: null }).eq("id", personId).eq("account_id", accountId);
+  raise(error, SAVE_FAILED);
+}
+
 export async function deleteFamilyTree(supabase: SupabaseClient, treeId: string) {
   const { error } = await supabase.from("family_trees").delete().eq("id", treeId);
   raise(error, "לא ניתן למחוק את העץ");
@@ -191,6 +301,7 @@ export async function duplicateFamilyTree(supabase: SupabaseClient, source: Fami
         note: person.note,
         deceased: person.deceased,
         image_path: images.get(person.id) ?? null,
+        link_id: person.link_id,
       })),
     );
     const unionIds = new Map<string, string>();
@@ -667,11 +778,12 @@ function normalizePerson(row: FamilyPerson): FamilyPerson {
     note: row.note ?? "",
     deceased: Boolean(row.deceased) || Boolean(row.death_date),
     image_path: row.image_path || null,
+    link_id: row.link_id || null,
   };
 }
 
 async function loadPeople(supabase: SupabaseClient, treeId: string) {
-  const selects = [PERSON_COLUMNS, PERSON_COLUMNS_WITHOUT_HEBREW, PERSON_COLUMNS_WITHOUT_DECEASED, PERSON_COLUMNS_WITHOUT_IMAGE];
+  const selects = [PERSON_COLUMNS_WITH_LINK, PERSON_COLUMNS, PERSON_COLUMNS_WITHOUT_HEBREW, PERSON_COLUMNS_WITHOUT_DECEASED, PERSON_COLUMNS_WITHOUT_IMAGE];
   let failure: { message: string; code?: string } | null = null;
   for (const columns of selects) {
     const result = await supabase.from("family_people").select(columns).eq("tree_id", treeId);

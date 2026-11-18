@@ -19,13 +19,18 @@ import {
   duplicateFamilyTree,
   exportFamilyGedcom,
   importGedcomFile,
+  linkFamilyPeople,
   loadFamilyGraph,
+  loadFamilyLinks,
+  loadFamilyPeopleBrief,
   loadFamilyTrees,
   renameFamilyTree,
   saveFamilyPerson,
   setFamilyPersonImage,
   setFamilyUnionStatus,
+  unlinkFamilyPerson,
   type FamilyGraph,
+  type FamilyLink,
   type FamilyTree,
 } from "@/lib/family-trees";
 import { pushAppHistory, replaceAppHistory } from "@/lib/history";
@@ -49,6 +54,9 @@ export function TreesPage({ active }: { active: boolean }) {
   const [busy, setBusy] = useState(false);
   const [importing, setImporting] = useState<number | null>(null);
   const [duplicating, setDuplicating] = useState(false);
+  const [links, setLinks] = useState<Record<string, FamilyLink[]>>({});
+  const [focus, setFocus] = useState<{ personId: string; token: number } | null>(null);
+  const [treeDepth, setTreeDepth] = useState(0);
   const fileRef = useRef<HTMLInputElement>(null);
   const indexScroll = useRef(0);
   const tree = trees.find((row) => row.id === treeId) ?? null;
@@ -80,7 +88,9 @@ export function TreesPage({ active }: { active: boolean }) {
   useEffect(() => {
     const onPop = () => {
       if (window.location.pathname !== "/trees") return;
-      setTreeId(readTreeHistory(window.history.state)?.treeId ?? null);
+      const entry = readTreeHistory(window.history.state);
+      setTreeId(entry?.treeId ?? null);
+      setTreeDepth(entry?.depth ?? 0);
       setMenuId(null);
       if (!readTreeHistory(window.history.state)?.treeId) window.scrollTo(0, indexScroll.current);
     };
@@ -108,6 +118,24 @@ export function TreesPage({ active }: { active: boolean }) {
   }, [supabase, treeId]);
 
   useEffect(() => {
+    if (!accountId || !graph) {
+      setLinks({});
+      return;
+    }
+    let cancel = false;
+    loadFamilyLinks(supabase, accountId, graph.people)
+      .then((next) => {
+        if (!cancel) setLinks(next);
+      })
+      .catch(() => {
+        if (!cancel) setLinks({});
+      });
+    return () => {
+      cancel = true;
+    };
+  }, [accountId, graph, supabase]);
+
+  useEffect(() => {
     if (!active) setMenuId(null);
   }, [active]);
 
@@ -119,11 +147,25 @@ export function TreesPage({ active }: { active: boolean }) {
   function openTree(id: string) {
     setError("");
     setMenuId(null);
+    setFocus(null);
+    setTreeDepth(0);
     indexScroll.current = window.scrollY;
     replaceAppHistory("/trees", { cnaanTree: { treeId: null } });
-    pushAppHistory("/trees", { cnaanTree: { treeId: id } });
+    pushAppHistory("/trees", { cnaanTree: { treeId: id, depth: 0 } });
     setTreeId(id);
   }
+
+  function openLinked(nextTreeId: string, personId: string) {
+    setError("");
+    setFocus({ personId, token: Date.now() });
+    if (nextTreeId === treeId) return;
+    const depth = (readTreeHistory(window.history.state)?.depth ?? 0) + 1;
+    pushAppHistory("/trees", { cnaanTree: { treeId: nextTreeId, depth } });
+    setTreeDepth(depth);
+    setTreeId(nextTreeId);
+  }
+
+  const loadTreePeople = useCallback((id: string) => loadFamilyPeopleBrief(supabase, id), [supabase]);
 
   function back() {
     if (readTreeHistory(window.history.state)?.treeId) {
@@ -131,6 +173,16 @@ export function TreesPage({ active }: { active: boolean }) {
       return;
     }
     setTreeId(null);
+  }
+
+  function home() {
+    const depth = readTreeHistory(window.history.state)?.depth ?? treeDepth;
+    if (depth > 0) {
+      window.history.go(-(depth + 1));
+      return;
+    }
+    setTreeId(null);
+    setTreeDepth(0);
   }
 
   async function run<T>(action: () => Promise<T>) {
@@ -326,6 +378,8 @@ export function TreesPage({ active }: { active: boolean }) {
           error={error}
           busy={busy || importing !== null}
           onBack={back}
+          showHome={treeDepth > 0}
+          onHome={home}
           onCreatePerson={async () => {
             const person = await run(() => addFamilyPerson(supabase, accountId, tree.id));
             if (!person) return null;
@@ -398,6 +452,25 @@ export function TreesPage({ active }: { active: boolean }) {
             return result.parents[0]?.id ?? null;
           }}
           onLoadImage={loadPersonImage}
+          links={links}
+          trees={trees}
+          focusPersonId={focus?.personId ?? null}
+          focusToken={focus?.token ?? 0}
+          onOpenLink={openLinked}
+          onLoadTreePeople={loadTreePeople}
+          onLinkPerson={async (personId, otherId) => {
+            const linkId = await run(() => linkFamilyPeople(supabase, accountId, personId, otherId));
+            if (!linkId) return;
+            setGraph((current) => (current ? { ...current, people: current.people.map((person) => (person.id === personId ? { ...person, link_id: linkId } : person)) } : current));
+          }}
+          onUnlinkPerson={async (personId) => {
+            const removed = await run(async () => {
+              await unlinkFamilyPerson(supabase, accountId, personId);
+              return true;
+            });
+            if (!removed) return;
+            setGraph((current) => (current ? { ...current, people: current.people.map((person) => (person.id === personId ? { ...person, link_id: null } : person)) } : current));
+          }}
           onPersonImage={async (personId, file) => {
             const person = graph?.people.find((row) => row.id === personId);
             if (!person) return;
@@ -476,9 +549,12 @@ function ConfirmDialog({ body, onClose, onConfirm }: { body: string; onClose: ()
 
 function readTreeHistory(state: unknown) {
   if (!state || typeof state !== "object" || !("cnaanTree" in state)) return null;
-  const entry = (state as { cnaanTree?: { treeId?: unknown } }).cnaanTree;
+  const entry = (state as { cnaanTree?: { treeId?: unknown; depth?: unknown } }).cnaanTree;
   if (!entry || typeof entry !== "object") return null;
-  return { treeId: typeof entry.treeId === "string" ? entry.treeId : null };
+  return {
+    treeId: typeof entry.treeId === "string" ? entry.treeId : null,
+    depth: typeof entry.depth === "number" && entry.depth > 0 ? entry.depth : 0,
+  };
 }
 
 function message(reason: unknown) {
