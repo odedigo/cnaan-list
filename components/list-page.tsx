@@ -70,6 +70,7 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
   const [keptNeedle, setKeptNeedle] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchResultsRef = useRef<HTMLUListElement>(null);
+  const resultsRef = useRef<HTMLDivElement>(null);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [collapseReady, setCollapseReady] = useState(mode !== "inventory");
   const collapseKey =
@@ -210,16 +211,19 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
     if (mode !== "grocery" || !searchOpen || !groceryNeedle) return;
     const list = searchResultsRef.current;
     const header = screenRef.current?.querySelector("header");
-    if (!list || !header) return;
+    if (!list || !(header instanceof HTMLElement)) return;
     const place = () => {
+      if (header.getBoundingClientRect().width < 10) return;
       const rect = header.getBoundingClientRect();
-      const top = rect.bottom + 8;
-      const nav = document.querySelector('nav[aria-label="ניווט ראשי"]');
-      const navTop = nav?.getBoundingClientRect().top ?? window.innerHeight;
+      const origin = fixedOrigin();
+      const top = rect.bottom + 8 - origin;
+      const bottom = visibleClientBottom() - origin;
       list.style.top = `${top}px`;
       list.style.left = `${rect.left + 16}px`;
       list.style.width = `${Math.max(0, rect.width - 32)}px`;
-      list.style.maxHeight = `${Math.max(120, navTop - top - 8)}px`;
+      list.style.maxHeight = `${Math.max(120, bottom - top - 8)}px`;
+      list.style.overflowY = "auto";
+      list.style.touchAction = "pan-y";
     };
     list.scrollTop = 0;
     place();
@@ -227,12 +231,60 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
     const viewport = window.visualViewport;
     viewport?.addEventListener("resize", place);
     viewport?.addEventListener("scroll", place);
+    searchInputRef.current?.addEventListener("focus", place);
     return () => {
       window.removeEventListener("resize", place);
       viewport?.removeEventListener("resize", place);
       viewport?.removeEventListener("scroll", place);
+      searchInputRef.current?.removeEventListener("focus", place);
     };
   }, [mode, searchOpen, groceryNeedle]);
+
+  useLayoutEffect(() => {
+    if (mode !== "inventory" || !searchOpen || !needle) return;
+    const box = resultsRef.current;
+    const header = screenRef.current?.querySelector("header");
+    if (!box || !(header instanceof HTMLElement)) return;
+    let placing = false;
+    const place = () => {
+      if (placing) return;
+      placing = true;
+      try {
+        if (header.getBoundingClientRect().width < 10) return;
+        if (keyboardOverlap() < 150) {
+          clearResultsScroll(box);
+          return;
+        }
+        const target = header.getBoundingClientRect().bottom;
+        let boxTop = box.getBoundingClientRect().top;
+        if (Math.abs(boxTop - target) > 24) {
+          const before = window.scrollY;
+          window.scrollBy(0, boxTop - target);
+          if (window.scrollY !== before) boxTop = box.getBoundingClientRect().top;
+        }
+        const bottom = visibleClientBottom();
+        box.style.maxHeight = `${Math.max(120, bottom - boxTop - 8)}px`;
+        box.style.overflowY = "auto";
+        box.style.overscrollBehavior = "contain";
+        box.style.touchAction = "pan-y";
+      } finally {
+        placing = false;
+      }
+    };
+    place();
+    window.addEventListener("resize", place);
+    const viewport = window.visualViewport;
+    viewport?.addEventListener("resize", place);
+    viewport?.addEventListener("scroll", place);
+    searchInputRef.current?.addEventListener("focus", place);
+    return () => {
+      clearResultsScroll(box);
+      window.removeEventListener("resize", place);
+      viewport?.removeEventListener("resize", place);
+      viewport?.removeEventListener("scroll", place);
+      searchInputRef.current?.removeEventListener("focus", place);
+    };
+  }, [mode, searchOpen, needle]);
 
   const groceryByItem = useMemo(
     () => new Map(lists.grocery.map((line) => [line.item_id, line])),
@@ -388,14 +440,6 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
               );
               return matchesName || matchesItem;
             });
-            if (readSingleOpenCategory()) {
-              const openId = matches[0]?.id;
-              if (!openId) return current;
-              const next: Record<string, boolean> = {};
-              for (const category of lists.categories)
-                next[category.id] = category.id !== openId;
-              return next;
-            }
             const next = { ...current };
             for (const category of matches) next[category.id] = false;
             return next;
@@ -458,7 +502,12 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
         <ul
           ref={searchResultsRef}
           className="overflow-y-auto rounded-xl border border-neutral-200 bg-white shadow-sm"
-          style={{ position: "fixed", zIndex: 10, overscrollBehavior: "contain" }}
+          style={{
+            position: "fixed",
+            zIndex: 10,
+            overscrollBehavior: "contain",
+            touchAction: "pan-y",
+          }}
         >
           {searchResults.length === 0 ? (
             <li className="px-3 py-3 text-sm text-neutral-500">
@@ -504,7 +553,7 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
           items={visibleCategories.map((category) => category.id)}
           strategy={verticalListSortingStrategy}
         >
-          <div className="px-3 pt-2 pb-4">
+          <div ref={resultsRef} className="px-3 pt-2 pb-4">
             {visibleCategories.length === 0 ? (
               <p className="px-4 pt-16 text-center text-neutral-500">
                 {mode === "inventory"
@@ -852,6 +901,44 @@ function ListScreen({ mode }: { mode: "inventory" | "grocery" }) {
       ) : null}
     </div>
   );
+}
+
+function keyboardOverlap() {
+  const viewport = window.visualViewport;
+  if (!viewport) return 0;
+  return Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop);
+}
+
+function fixedOrigin() {
+  const viewport = window.visualViewport;
+  if (!viewport || viewport.offsetTop <= 1) return 0;
+  const probe = document.createElement("div");
+  probe.style.cssText = "position:fixed;top:0;width:0;height:0;pointer-events:none";
+  document.body.appendChild(probe);
+  const origin = probe.getBoundingClientRect().top;
+  probe.remove();
+  return origin;
+}
+
+function visibleClientBottom() {
+  const viewport = window.visualViewport;
+  if (!viewport) return window.innerHeight;
+  let visualBottom = viewport.height;
+  if (viewport.offsetTop > 1) {
+    const origin = fixedOrigin();
+    if (origin >= -1) visualBottom = viewport.offsetTop + viewport.height;
+  }
+  const nav = document.querySelector('nav[aria-label="ניווט ראשי"]');
+  const navTop = nav?.getBoundingClientRect().top;
+  if (navTop == null) return visualBottom;
+  return Math.min(navTop, visualBottom);
+}
+
+function clearResultsScroll(box: HTMLElement) {
+  box.style.maxHeight = "";
+  box.style.overflowY = "";
+  box.style.overscrollBehavior = "";
+  box.style.touchAction = "";
 }
 
 function readCollapsed(key: string) {

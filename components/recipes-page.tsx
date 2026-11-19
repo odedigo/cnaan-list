@@ -326,14 +326,36 @@ export function RecipesPage({ active }: { active: boolean }) {
     browseFolder(null);
   }
 
-  function retreatHistory() {
+  function showRecipePlace(folder: string | null) {
     historySeq.current += 1;
-    const entry = recipeHistoryFrom(window.history.state);
-    if (entry && (entry.folderId || entry.recipeId)) {
-      window.history.back();
-      return true;
+    pendingScroll.current = 0;
+    if (window.location.pathname !== "/recipes") return;
+    writeRecipeHistory("replace", {
+      folderId: folder,
+      recipeId: null,
+      scrollY: 0,
+    });
+  }
+
+  function closeOpenRecipe() {
+    const recipe = openRef.current;
+    const fromSearch = searchOpen && query.trim().length > 0;
+    if (fromSearch) {
+      setSearchOverOpen(true);
+      setOpen(null);
+      showRecipePlace(folderIdRef.current);
+      return;
     }
-    return false;
+    const categoryId = folderIdRef.current ?? recipe?.leafCategoryId ?? null;
+    setOpen(null);
+    if (categoryId !== folderIdRef.current) setFolderId(categoryId);
+    showRecipePlace(categoryId);
+  }
+
+  function climbCategory(parentId: string | null) {
+    setOpen(null);
+    setFolderId(parentId);
+    showRecipePlace(parentId);
   }
 
   useEffect(() => {
@@ -1651,7 +1673,7 @@ export function RecipesPage({ active }: { active: boolean }) {
       setSearchThumbs((current) => dropBlob(current, id));
       if (open?.id === id) {
         setImageEdit(null);
-        if (!retreatHistory()) setOpen(null);
+        closeOpenRecipe();
       }
       setRecipeMenuId(null);
       setRecipeDeleteId(null);
@@ -1861,9 +1883,7 @@ export function RecipesPage({ active }: { active: boolean }) {
             <button
               type="button"
               className="flex w-full items-center gap-2 px-4 py-3 text-start"
-              onClick={() => {
-                if (!retreatHistory()) setFolderId(folder.parent_id);
-              }}
+              onClick={() => climbCategory(folder.parent_id)}
             >
               <BackMark />
               <span className="min-w-0" style={{ fontWeight: 700 }}>
@@ -1920,9 +1940,7 @@ export function RecipesPage({ active }: { active: boolean }) {
           busy={busy}
           onTab={(next) => setTab(next)}
           onSlide={setSlide}
-          onBack={() => {
-            if (!retreatHistory()) setOpen(null);
-          }}
+          onBack={closeOpenRecipe}
           onRate={(value) => void rate(value)}
           favorite={
             favoritesCategory != null &&
