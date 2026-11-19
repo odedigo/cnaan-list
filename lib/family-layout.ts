@@ -167,6 +167,37 @@ export function layoutTree(people: FamilyPerson[], unions: FamilyUnion[], childr
   return { boxes: uniqueBoxes(boxes).map((box) => ({ ...box, height: cardHeight(box.id) })), lines };
 }
 
+/** Spouses who married in. A spouse who is also a child, or a parent of the family line, stays in the family. */
+export function spousesOutsideFamily(unions: FamilyUnion[], children: FamilyChild[]) {
+  const kidsByUnion = new Map<string, number>();
+  const family = new Set<string>();
+  for (const link of children) {
+    family.add(link.person_id);
+    kidsByUnion.set(link.union_id, (kidsByUnion.get(link.union_id) ?? 0) + 1);
+  }
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const union of unions) {
+      if ((kidsByUnion.get(union.id) ?? 0) === 0) continue;
+      const parents = [union.partner_a, union.partner_b].filter((id): id is string => Boolean(id));
+      if (parents.some((id) => family.has(id))) continue;
+      for (const id of parents) {
+        if (family.has(id)) continue;
+        family.add(id);
+        changed = true;
+      }
+    }
+  }
+  const outside = new Set<string>();
+  for (const union of unions) {
+    for (const id of [union.partner_a, union.partner_b]) {
+      if (id && !family.has(id)) outside.add(id);
+    }
+  }
+  return outside;
+}
+
 export function rootPersonId(people: FamilyPerson[], children: FamilyChild[]) {
   if (people.length === 0) return null;
   const childIds = new Set(children.map((link) => link.person_id));

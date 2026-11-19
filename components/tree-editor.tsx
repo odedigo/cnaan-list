@@ -6,7 +6,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEven
 import { createPortal } from "react-dom";
 
 import { ChevronIcon, FolderIcon, HomeIcon, LinkIcon, PlusIcon, SearchIcon, TrashIcon } from "@/components/icons";
-import { CARD_H, CARD_W, layoutTree, rootPersonId } from "@/lib/family-layout";
+import { CARD_H, CARD_W, layoutTree, rootPersonId, spousesOutsideFamily } from "@/lib/family-layout";
 import { personLabel, personName, UNION_STATUSES, unionStatusLabel, type FamilyGraph, type FamilyLink, type FamilyPerson, type FamilyPersonBrief, type FamilyTree, type PersonDraft, type SpouseInput, type UnionStatus } from "@/lib/family-trees";
 
 type View = { x: number; y: number; scale: number };
@@ -310,6 +310,7 @@ function Chart({
     [graph, linkedIds],
   );
   const byId = useMemo(() => new Map(graph?.people.map((person) => [person.id, person]) ?? []), [graph]);
+  const outsideFamily = useMemo(() => (graph ? spousesOutsideFamily(graph.unions, graph.children) : new Set<string>()), [graph]);
   const photos = usePersonPhotos(graph?.people, onLoadImage);
 
   useLayoutEffect(() => {
@@ -481,6 +482,7 @@ function Chart({
               const nameX = box.x + CARD_W / 2 + (photo ? 10 : 0);
               const nameLimit = photo ? 14 : 18;
               const sexLabel = person.sex === "m" ? "זכר" : person.sex === "f" ? "נקבה" : "";
+              const outside = outsideFamily.has(person.id);
               return (
                 <g
                   key={person.id}
@@ -501,8 +503,8 @@ function Chart({
                     width={CARD_W}
                     height={cardH}
                     rx={12}
-                    fill={active ? "#d7efe9" : "#fff"}
-                    stroke={linked ? "#c45c12" : active ? "#128f86" : "#e5e5e5"}
+                    fill={active ? "#d7efe9" : outside ? "#f4f4f4" : "#fff"}
+                    stroke={linked ? "#c45c12" : active ? "#128f86" : outside ? "#d4d4d4" : "#e5e5e5"}
                     strokeWidth={linked || active ? 2.5 : 1}
                   />
                   {linked ? (
