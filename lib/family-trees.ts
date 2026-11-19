@@ -117,7 +117,7 @@ export type FamilyPersonBrief = Pick<FamilyPerson, "id" | "given_name" | "surnam
 export function unionStatusLabel(status: UnionStatus) {
   if (status === "divorced") return "גירושים";
   if (status === "widowed") return "אלמנות";
-  if (status === "separated") return "פירוד";
+  if (status === "separated") return "פרודים";
   if (status === "partner") return "ידועים בציבור";
   return "נישואים";
 }

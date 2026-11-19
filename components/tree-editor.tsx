@@ -2,16 +2,24 @@
 
 /** Full-screen family chart. It stays available in portrait and in landscape. */
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
-import { ChevronIcon, FolderIcon, HomeIcon, LinkIcon, PlusIcon, SearchIcon, TrashIcon } from "@/components/icons";
-import { CARD_H, CARD_W, layoutTree, rootPersonId, spousesOutsideFamily } from "@/lib/family-layout";
+import { ChevronIcon, FolderIcon, HomeIcon, LegendIcon, LinkIcon, PlusIcon, SearchIcon, TrashIcon } from "@/components/icons";
+import { CARD_H, CARD_W, layoutTree, rootPersonId, spousesOutsideFamily, type TreeLine } from "@/lib/family-layout";
 import { personLabel, personName, UNION_STATUSES, unionStatusLabel, type FamilyGraph, type FamilyLink, type FamilyPerson, type FamilyPersonBrief, type FamilyTree, type PersonDraft, type SpouseInput, type UnionStatus } from "@/lib/family-trees";
 
 type View = { x: number; y: number; scale: number };
 
 const MAX_SCALE = 2.6;
+
+const SPOUSE_LINE_COLORS: Record<UnionStatus, string> = {
+  married: "#128f86",
+  divorced: "#dc2626",
+  separated: "#d97706",
+  widowed: "#737373",
+  partner: "#7c3aed",
+};
 
 export function TreeEditor({
   name,
@@ -70,6 +78,7 @@ export function TreeEditor({
   const [confirming, setConfirming] = useState(false);
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
+  const [legendOpen, setLegendOpen] = useState(false);
   const [jump, setJump] = useState<{ id: string; token: number } | null>(null);
   const [linkMenu, setLinkMenu] = useState<{ x: number; y: number; links: FamilyLink[] } | null>(null);
   const appliedFocus = useRef(0);
@@ -163,6 +172,11 @@ export function TreeEditor({
           </button>
         ) : null}
         {graph && graph.people.length > 0 ? (
+          <button type="button" className="grid size-10 shrink-0 place-items-center rounded-full bg-white shadow" aria-label="מקרא" onClick={() => setLegendOpen(true)}>
+            <LegendIcon className="size-5 text-neutral-500" />
+          </button>
+        ) : null}
+        {graph && graph.people.length > 0 ? (
           <PersonSearch
             open={searchOpen}
             query={query}
@@ -208,6 +222,7 @@ export function TreeEditor({
           onLoadTreePeople={onLoadTreePeople}
         />
       ) : null}
+      {legendOpen ? <ColorLegend onClose={() => setLegendOpen(false)} /> : null}
       {confirming && selected ? (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true" aria-label="מחיקת אדם">
           <div className="w-full max-w-xs rounded-2xl bg-white p-4 text-start">
@@ -466,7 +481,7 @@ function Chart({
         >
           <g transform={`translate(${view.x} ${view.y}) scale(${view.scale})`}>
             {layout.lines.map((line, index) => (
-              <path key={index} d={linePath(line)} fill="none" stroke="#128f86" strokeWidth={2} />
+              <path key={index} d={linePath(line)} fill="none" stroke={spouseLineColor(line)} strokeWidth={2} />
             ))}
             {layout.boxes.map((box) => {
               const person = byId.get(box.id);
@@ -1333,10 +1348,56 @@ function nodeTitle(person: FamilyPerson) {
 }
 
 function years(person: FamilyPerson) {
-  if (person.birth_date && person.death_date) return `${person.birth_date} – ${person.death_date}`;
-  if (person.birth_date && person.deceased) return `${person.birth_date} –`;
-  if (person.death_date) return person.death_date;
-  return person.birth_date;
+  const birth = yearOf(person.birth_date);
+  const death = yearOf(person.death_date);
+  const dead = person.deceased || Boolean(death);
+  if (dead) {
+    if (birth && death) {
+      const age = ageBetween(person.birth_date, person.death_date);
+      return age === null ? `${birth} – ${death}` : `${birth} – ${death} (${age})`;
+    }
+    if (birth) return `${birth} –`;
+    return death;
+  }
+  const age = ageOf(person.birth_date);
+  if (birth && age !== null) return `${birth} (${age})`;
+  return birth;
+}
+
+function ageBetween(birthValue: string, deathValue: string) {
+  const birth = calendarValue(birthValue);
+  const death = calendarValue(deathValue);
+  if (birth && death) {
+    const [birthYear, birthMonth, birthDay] = birth.split("-").map(Number);
+    const [deathYear, deathMonth, deathDay] = death.split("-").map(Number);
+    let age = deathYear - birthYear;
+    if (deathMonth < birthMonth || (deathMonth === birthMonth && deathDay < birthDay)) age -= 1;
+    return age >= 0 && age < 130 ? age : null;
+  }
+  const birthYear = Number(yearOf(birthValue));
+  const deathYear = Number(yearOf(deathValue));
+  if (!birthYear || !deathYear) return null;
+  const age = deathYear - birthYear;
+  return age >= 0 && age < 130 ? age : null;
+}
+
+function ageOf(value: string) {
+  const today = new Date();
+  const iso = calendarValue(value);
+  if (iso) {
+    const [year, month, day] = iso.split("-").map(Number);
+    let age = today.getFullYear() - year;
+    if (today.getMonth() + 1 < month || (today.getMonth() + 1 === month && today.getDate() < day)) age -= 1;
+    return age >= 0 && age < 130 ? age : null;
+  }
+  const year = Number(yearOf(value));
+  if (!year) return null;
+  const age = today.getFullYear() - year;
+  return age >= 0 && age < 130 ? age : null;
+}
+
+function yearOf(value: string) {
+  return value.match(/\d{4}/)?.[0] ?? value.match(/\d{3}/)?.[0] ?? "";
 }
 
 function shorten(value: string, max: number) {
@@ -1382,6 +1443,68 @@ function zoomAt(view: View, factor: number, x: number, y: number, previousX: num
     x: x - (x - view.x) * applied + (x - previousX),
     y: y - (y - view.y) * applied + (y - previousY),
   };
+}
+
+function spouseLineColor(line: TreeLine) {
+  if (line.kind !== "spouse") return SPOUSE_LINE_COLORS.married;
+  return SPOUSE_LINE_COLORS[line.status ?? "married"] ?? SPOUSE_LINE_COLORS.married;
+}
+
+function ColorLegend({ onClose }: { onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true" aria-label="מקרא">
+      <div className="flex max-h-[85dvh] w-full max-w-xs flex-col rounded-2xl bg-white p-4 text-start">
+        <h2 className="text-base font-medium">מקרא</h2>
+        <div className="mt-3 min-h-0 flex-1 overflow-y-auto">
+          <LegendGroup title="כרטיסים">
+            <ColorSwatch label="נבחר" fill="#d7efe9" border="#128f86" />
+            <ColorSwatch label="בן או בת זוג מחוץ למשפחה" fill="#f4f4f4" border="#d4d4d4" />
+            <ColorSwatch label="מקושר לעץ אחר" fill="#fff" border="#c45c12" />
+          </LegendGroup>
+          <LegendGroup title="מין">
+            <ColorSwatch label="זכר" fill="#2563eb" />
+            <ColorSwatch label="נקבה" fill="#db2777" />
+          </LegendGroup>
+          <LegendGroup title="קווים">
+            {UNION_STATUSES.map((status) => (
+              <LineSwatch key={status} label={unionStatusLabel(status)} color={SPOUSE_LINE_COLORS[status]} />
+            ))}
+            <LineSwatch label="הורים וילדים" color={SPOUSE_LINE_COLORS.married} />
+          </LegendGroup>
+        </div>
+        <button type="button" className="mt-4 w-full rounded-xl bg-neutral-100 py-3 font-medium text-neutral-700" onClick={onClose}>
+          סגירה
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function LegendGroup({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="mt-3 first:mt-0">
+      <h3 className="text-sm font-medium text-neutral-500">{title}</h3>
+      <ul className="mt-2 flex flex-col gap-2">{children}</ul>
+    </section>
+  );
+}
+
+function ColorSwatch({ label, fill, border }: { label: string; fill: string; border?: string }) {
+  return (
+    <li className="flex items-center gap-3">
+      <span className="size-5 shrink-0 rounded-md border-2" style={{ background: fill, borderColor: border ?? fill }} />
+      <span className="text-sm">{label}</span>
+    </li>
+  );
+}
+
+function LineSwatch({ label, color }: { label: string; color: string }) {
+  return (
+    <li className="flex items-center gap-3">
+      <span className="h-1 w-8 shrink-0 rounded-full" style={{ background: color }} />
+      <span className="text-sm">{label}</span>
+    </li>
+  );
 }
 
 function linePath(line: { x1: number; y1: number; x2: number; y2: number }) {

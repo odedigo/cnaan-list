@@ -1,6 +1,6 @@
 /** Places every person in a family chart, grouped by parents and spouses. */
 
-import type { FamilyChild, FamilyPerson, FamilyUnion } from "@/lib/family-trees";
+import type { FamilyChild, FamilyPerson, FamilyUnion, UnionStatus } from "@/lib/family-trees";
 
 export const CARD_W = 156;
 export const CARD_H = 72;
@@ -10,7 +10,7 @@ const GAP_X = 28;
 const ROW = CARD_H + 88;
 
 export type TreeBox = { id: string; x: number; y: number; height: number };
-export type TreeLine = { x1: number; y1: number; x2: number; y2: number };
+export type TreeLine = { x1: number; y1: number; x2: number; y2: number; kind: "spouse" | "child"; status?: UnionStatus };
 
 type Placed = { id: string; x: number; y: number };
 type Span = { left: number; right: number; boxes: Placed[] };
@@ -147,9 +147,9 @@ export function layoutTree(people: FamilyPerson[], unions: FamilyUnion[], childr
       if (Math.abs(first.y - second.y) < 2) {
         const [leftBox, rightBox] = first.x < second.x ? [first, second] : [second, first];
         const y = leftBox.y + cardHeight(leftBox.id) / 2;
-        lines.push({ x1: leftBox.x + CARD_W, y1: y, x2: rightBox.x, y2: y });
+        lines.push({ x1: leftBox.x + CARD_W, y1: y, x2: rightBox.x, y2: y, kind: "spouse", status: union.status });
       } else {
-        lines.push({ x1: first.x + CARD_W / 2, y1: first.y + cardHeight(first.id) / 2, x2: second.x + CARD_W / 2, y2: second.y + cardHeight(second.id) / 2 });
+        lines.push({ x1: first.x + CARD_W / 2, y1: first.y + cardHeight(first.id) / 2, x2: second.x + CARD_W / 2, y2: second.y + cardHeight(second.id) / 2, kind: "spouse", status: union.status });
       }
     }
     const parents = [first, second].filter((box): box is Placed => Boolean(box));
@@ -160,7 +160,7 @@ export function layoutTree(people: FamilyPerson[], unions: FamilyUnion[], childr
       if (above.length === 0) continue;
       const sourceX = above.reduce((sum, box) => sum + box.x + CARD_W / 2, 0) / above.length;
       const parentBottom = Math.max(...above.map((box) => box.y + cardHeight(box.id)));
-      lines.push({ x1: sourceX, y1: parentBottom, x2: child.x + CARD_W / 2, y2: child.y });
+      lines.push({ x1: sourceX, y1: parentBottom, x2: child.x + CARD_W / 2, y2: child.y, kind: "child" });
     }
   }
 

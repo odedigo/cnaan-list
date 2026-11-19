@@ -20,6 +20,19 @@ export function HomeIcon(props: IconProps) {
   );
 }
 
+export function LegendIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true" {...props}>
+      <circle cx="6" cy="7" r="1.7" fill="currentColor" stroke="none" />
+      <path d="M11 7h8" strokeLinecap="round" />
+      <circle cx="6" cy="12" r="1.7" fill="currentColor" stroke="none" />
+      <path d="M11 12h8" strokeLinecap="round" />
+      <circle cx="6" cy="17" r="1.7" fill="currentColor" stroke="none" />
+      <path d="M11 17h8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export function SearchIcon(props: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true" {...props}>
