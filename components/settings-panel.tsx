@@ -32,6 +32,7 @@ import {
 } from "@/lib/single-category";
 import { readPackingSingleOpen, writePackingSingleOpen } from "@/lib/packing-single-category";
 import { readShowStoreBadge, writeShowStoreBadge } from "@/lib/store-badge";
+import { readTreeHebrewNames, writeTreeHebrewNames } from "@/lib/tree-hebrew-names";
 import { createClient } from "@/lib/supabase/client";
 import { isProduction } from "@/lib/supabase/env";
 
@@ -200,6 +201,7 @@ export function SignedInSettings({ username }: { username: string }) {
   const [singleCategory, setSingleCategory] = useState(true);
   const [packingSingle, setPackingSingle] = useState(true);
   const [showStoreBadge, setShowStoreBadge] = useState(true);
+  const [treeHebrewNames, setTreeHebrewNames] = useState(true);
   const [accounts, setAccounts] = useState<SavedAccount[]>([]);
   const [userId, setUserId] = useState("");
   const [accountEmail, setAccountEmail] = useState("");
@@ -215,6 +217,7 @@ export function SignedInSettings({ username }: { username: string }) {
     setSingleCategory(readSingleOpenCategory());
     setPackingSingle(readPackingSingleOpen());
     setShowStoreBadge(readShowStoreBadge());
+    setTreeHebrewNames(readTreeHebrewNames());
     const sync = () => setAccounts(readSavedAccounts());
     sync();
     window.addEventListener(savedAccountsEvent, sync);
@@ -420,6 +423,19 @@ export function SignedInSettings({ username }: { username: string }) {
               className="size-5 accent-[var(--teal)]"
             />
             <span>הצגת תג החנות על הקטגוריה</span>
+          </label>
+          <label className="mt-3 flex items-center gap-3 text-sm">
+            <input
+              type="checkbox"
+              checked={treeHebrewNames}
+              onChange={(event) => {
+                const enabled = event.target.checked;
+                setTreeHebrewNames(enabled);
+                writeTreeHebrewNames(enabled);
+              }}
+              className="size-5 accent-[var(--teal)]"
+            />
+            <span>שמות בעברית בעץ המשפחה</span>
           </label>
           <label className="mt-3 flex items-center gap-3 text-sm">
             <input

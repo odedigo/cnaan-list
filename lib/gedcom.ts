@@ -15,6 +15,11 @@ export type GedcomPerson = {
   deathPlace: string;
   deceased: boolean;
   note: string;
+  nickname: string;
+  cause: string;
+  occupation: string;
+  source: string;
+  media: string;
 };
 
 export type GedcomUnionStatus = "married" | "divorced" | "widowed" | "separated" | "partner";
@@ -50,6 +55,8 @@ export function parseGedcom(bytes: Uint8Array): GedcomTree {
 
   const people = new Map<string, GedcomPerson>();
   const families: { partnerA: string; partnerB: string; children: string[]; status: GedcomUnionStatus }[] = [];
+  const sourceRecords = new Map<string, string>();
+  const mediaRecords = new Map<string, string>();
 
   let index = 0;
   while (index < lines.length) {
@@ -63,7 +70,14 @@ export function parseGedcom(bytes: Uint8Array): GedcomTree {
     const body = lines.slice(index + 1, end);
     if (start.tag === "INDI" && start.xref && !people.has(start.xref)) people.set(start.xref, readPerson(start.xref, body));
     if (start.tag === "FAM") families.push(readFamily(body));
+    if (start.tag === "SOUR" && start.xref) sourceRecords.set(start.xref, readSourceRecord(body));
+    if (start.tag === "OBJE" && start.xref) mediaRecords.set(start.xref, readMediaRecord(body));
     index = end;
+  }
+
+  for (const person of people.values()) {
+    person.source = resolvePointers(person.source, sourceRecords);
+    person.media = resolvePointers(person.media, mediaRecords);
   }
 
   for (const family of families) {
@@ -155,7 +169,20 @@ function readPerson(xref: string, body: GedcomLine[]): GedcomPerson {
     deathPlace: "",
     deceased: false,
     note: "",
+    nickname: "",
+    cause: "",
+    occupation: "",
+    source: "",
+    media: "",
   };
+  const nicks: string[] = [];
+  const jobs: string[] = [];
+  const sources: string[] = [];
+  const media: string[] = [];
+  let cause = "";
+  let source: TextParts | null = null;
+  let object: TextParts | null = null;
+  let conc: ConcTarget = "";
   let section: "" | "birth" | "death" | "note" = "";
   let name: { role: "primary" | "extra"; parts: NameParts } | null = null;
   let tran: { parts: NameParts; lang: string; hebrew: boolean } | null = null;
@@ -165,11 +192,38 @@ function readPerson(xref: string, body: GedcomLine[]): GedcomPerson {
     if (tran.hebrew || (!tran.lang.trim() && !hebrew)) hebrew = tran.parts;
     tran = null;
   };
+  const commitSource = () => {
+    const text = formatParts(source);
+    if (text) sources.push(text);
+    source = null;
+  };
+  const commitObject = () => {
+    const text = formatParts(object);
+    if (text) media.push(text);
+    object = null;
+  };
   for (const line of body) {
+    if (line.tag === "CONC" || line.tag === "CONT") {
+      const extra = line.tag === "CONT" ? `\n${line.value}` : line.value;
+      if (conc === "note") person.note += extra;
+      else if (conc === "nick" && nicks.length > 0) nicks[nicks.length - 1] += extra;
+      else if (conc === "cause") cause += extra;
+      else if (conc === "job" && jobs.length > 0) jobs[jobs.length - 1] += extra;
+      else if (conc === "source" && source) source.head += extra;
+      else if (conc === "page" && source) source.page += extra;
+      else if (conc === "text" && source) source.text += extra;
+      else if (conc === "title" && source) source.title += extra;
+      else if (conc === "title" && object) object.title += extra;
+      else if (conc === "file" && object) object.file += extra;
+      continue;
+    }
     if (line.level === 1) {
       keepTran();
+      commitSource();
+      commitObject();
       section = "";
       name = null;
+      conc = "";
       if (line.tag === "NAME") {
         const parts = splitName(line.value);
         if (!person.given && !person.surname) {
@@ -188,6 +242,19 @@ function readPerson(xref: string, body: GedcomLine[]): GedcomPerson {
       else if (line.tag === "NOTE") {
         section = "note";
         person.note = line.value;
+        conc = "note";
+      } else if (line.tag === "NICK") {
+        nicks.push(line.value);
+        conc = "nick";
+      } else if (line.tag === "OCCU") {
+        jobs.push(line.value);
+        conc = "job";
+      } else if (line.tag === "SOUR") {
+        source = emptyParts(line.value);
+        conc = "source";
+      } else if (line.tag === "OBJE") {
+        object = emptyParts(pointerOf(line.value));
+        conc = "";
       }
       continue;
     }
@@ -209,15 +276,48 @@ function readPerson(xref: string, body: GedcomLine[]): GedcomPerson {
     else if (line.level === 3 && tran && line.tag === "SURN" && line.value) tran.parts.surname = clean(line.value);
     else if (line.level === 2 && section === "birth" && line.tag === "DATE") person.birthDate = clean(line.value);
     else if (line.level === 2 && section === "birth" && line.tag === "PLAC") person.birthPlace = clean(line.value);
-    else if (line.level === 2 && section === "death" && line.tag === "DATE") person.deathDate = clean(line.value);
+    else if (line.level === 2 && name && line.tag === "NICK") {
+      nicks.push(line.value);
+      conc = "nick";
+    } else if (line.level === 2 && section === "death" && line.tag === "DATE") person.deathDate = clean(line.value);
     else if (line.level === 2 && section === "death" && line.tag === "PLAC") person.deathPlace = clean(line.value);
-    else if (line.level >= 2 && section === "note" && line.tag === "CONC") person.note += line.value;
-    else if (line.level >= 2 && section === "note" && line.tag === "CONT") person.note += `\n${line.value}`;
+    else if (line.level === 2 && section === "death" && line.tag === "CAUS") {
+      cause = line.value;
+      conc = "cause";
+    } else if (line.level === 2 && line.tag === "SOUR") {
+      commitSource();
+      source = emptyParts(line.value);
+      conc = "source";
+    } else if (source && line.tag === "PAGE") {
+      source.page = line.value;
+      conc = "page";
+    } else if (source && line.tag === "TEXT") {
+      source.text = joinText(source.text, line.value);
+      conc = "text";
+    } else if (source && line.tag === "TITL") {
+      source.title = line.value;
+      conc = "title";
+    } else if (object && line.tag === "FILE") {
+      object.file = line.value;
+      conc = "file";
+    } else if (object && line.tag === "TITL") {
+      object.title = line.value;
+      conc = "title";
+    } else if (line.level === 2 && jobs.length > 0 && line.tag === "PLAC" && section !== "birth" && section !== "death") {
+      jobs[jobs.length - 1] += jobs[jobs.length - 1].trim() ? `, ${line.value}` : line.value;
+    } else conc = "";
   }
   keepTran();
+  commitSource();
+  commitObject();
   person.hebrewGiven = hebrew?.given ?? "";
   person.hebrewSurname = hebrew?.surname ?? "";
-  person.note = person.note.trim();
+  person.note = tidy(plainNote(person.note));
+  person.nickname = joinUnique(nicks);
+  person.cause = clean(cause);
+  person.occupation = joinLines(jobs);
+  person.source = sources.join("\n\n");
+  person.media = media.join("\n");
   return person;
 }
 
@@ -265,7 +365,151 @@ function emptyPerson(xref: string): GedcomPerson {
     deathPlace: "",
     deceased: false,
     note: "",
+    nickname: "",
+    cause: "",
+    occupation: "",
+    source: "",
+    media: "",
   };
+}
+
+type TextParts = { head: string; page: string; text: string; title: string; file: string };
+type ConcTarget = "" | "note" | "nick" | "cause" | "job" | "source" | "page" | "text" | "title" | "file";
+
+function emptyParts(head = ""): TextParts {
+  return { head, page: "", text: "", title: "", file: "" };
+}
+
+function pointerOf(value: string) {
+  return value.match(/@[^@]+@/)?.[0] ?? "";
+}
+
+function formatParts(parts: TextParts | null) {
+  if (!parts) return "";
+  const file = tidy(parts.file);
+  const title = clean(parts.title);
+  if (file || (title && !tidy(parts.head) && !clean(parts.page) && !tidy(parts.text))) {
+    return title && file ? `${title} | ${file}` : file || title;
+  }
+  const summary = [title, tidy(parts.head), clean(parts.page)].filter(Boolean).join(" · ");
+  const text = tidy(parts.text);
+  return [summary, text].filter(Boolean).join("\n");
+}
+
+function readSourceRecord(body: GedcomLine[]) {
+  const parts = emptyParts();
+  let conc: ConcTarget = "";
+  for (const line of body) {
+    if (line.tag === "CONC" || line.tag === "CONT") {
+      const extra = line.tag === "CONT" ? `\n${line.value}` : line.value;
+      if (conc === "title") parts.title += extra;
+      else if (conc === "source") parts.head += extra;
+      else if (conc === "text") parts.text += extra;
+      continue;
+    }
+    conc = "";
+    if (line.tag === "TITL") {
+      parts.title = line.value;
+      conc = "title";
+    } else if (line.tag === "AUTH" || line.tag === "PUBL" || line.tag === "ABBR") {
+      parts.head = joinText(parts.head, line.value);
+      conc = "source";
+    } else if (line.tag === "TEXT" || line.tag === "NOTE") {
+      parts.text = joinText(parts.text, line.value);
+      conc = "text";
+    }
+  }
+  return formatParts(parts);
+}
+
+function readMediaRecord(body: GedcomLine[]) {
+  const parts = emptyParts();
+  let conc: ConcTarget = "";
+  for (const line of body) {
+    if (line.tag === "CONC" || line.tag === "CONT") {
+      const extra = line.tag === "CONT" ? `\n${line.value}` : line.value;
+      if (conc === "file") parts.file += extra;
+      else if (conc === "title") parts.title += extra;
+      continue;
+    }
+    conc = "";
+    if (line.tag === "FILE") {
+      parts.file = line.value;
+      conc = "file";
+    } else if (line.tag === "TITL") {
+      parts.title = line.value;
+      conc = "title";
+    }
+  }
+  return formatParts(parts);
+}
+
+function resolvePointers(value: string, records: Map<string, string>) {
+  if (!value.trim() || records.size === 0) return value;
+  return value.replace(/@[^@\s]+@/g, (pointer) => records.get(pointer) || pointer);
+}
+
+function joinText(current: string, value: string) {
+  if (!current.trim()) return value;
+  if (!value.trim()) return current;
+  return `${current}\n${value}`;
+}
+
+function joinUnique(values: string[]) {
+  const seen = new Set<string>();
+  const next: string[] = [];
+  for (const value of values) {
+    const text = clean(value);
+    if (!text || seen.has(text)) continue;
+    seen.add(text);
+    next.push(text);
+  }
+  return next.join(", ");
+}
+
+function joinLines(values: string[]) {
+  return values.map((value) => clean(value)).filter(Boolean).join("\n");
+}
+
+function tidy(value: string) {
+  return value.replace(/[ \t]+\n/g, "\n").replace(/[ \t]{2,}/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+/** Turns an HTML note into plain text. A note without tags is left as it is. */
+export function plainNote(value: string) {
+  let text = value.replace(/\r\n?/g, "\n");
+  for (let pass = 0; pass < 2 && !hasHtml(text); pass += 1) {
+    const decoded = decodeEntities(text);
+    if (decoded === text) break;
+    text = decoded;
+  }
+  if (!hasHtml(text)) return value;
+  const stripped = text
+    .replace(/<\s*br\b[^>]*>/gi, "\n")
+    .replace(/<\s*\/\s*(?:p|div|h[1-6]|tr|li|blockquote|section|table|ul|ol|pre)\b[^>]*>/gi, "\n")
+    .replace(/<[^>]+>/g, "");
+  return tidy(decodeEntities(stripped));
+}
+
+function hasHtml(value: string) {
+  return /<\/?[a-z][^>]*>/i.test(value);
+}
+
+function decodeEntities(value: string) {
+  return value
+    .replace(/&#(\d+);/g, (_, digits: string) => fromCode(Number(digits)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, digits: string) => fromCode(Number.parseInt(digits, 16)))
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&quot;/gi, '"')
+    .replace(/&apos;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&amp;/gi, "&");
+}
+
+function fromCode(code: number) {
+  if (!Number.isFinite(code) || code < 0 || code > 0x10ffff) return "";
+  return String.fromCodePoint(code);
 }
 
 type NameParts = { given: string; surname: string };
@@ -304,6 +548,7 @@ export function gedcomText(tree: GedcomTree) {
       if (person.hebrewGiven.trim()) lines.push(`3 GIVN ${gedcomValue(person.hebrewGiven)}`);
       if (person.hebrewSurname.trim()) lines.push(`3 SURN ${gedcomValue(person.hebrewSurname)}`);
     }
+    if (person.nickname.trim()) lines.push(...textLines(2, "NICK", person.nickname));
     if (person.sex === "m") lines.push("1 SEX M");
     else if (person.sex === "f") lines.push("1 SEX F");
     if (person.birthDate.trim() || person.birthPlace.trim()) {
@@ -311,12 +556,18 @@ export function gedcomText(tree: GedcomTree) {
       if (person.birthDate.trim()) lines.push(`2 DATE ${gedcomValue(gedcomDate(person.birthDate))}`);
       if (person.birthPlace.trim()) lines.push(`2 PLAC ${gedcomValue(person.birthPlace)}`);
     }
-    if (person.deceased || person.deathDate.trim() || person.deathPlace.trim()) {
+    if (person.deceased || person.deathDate.trim() || person.deathPlace.trim() || person.cause.trim()) {
       lines.push("1 DEAT Y");
       if (person.deathDate.trim()) lines.push(`2 DATE ${gedcomValue(gedcomDate(person.deathDate))}`);
       if (person.deathPlace.trim()) lines.push(`2 PLAC ${gedcomValue(person.deathPlace)}`);
+      if (person.cause.trim()) lines.push(...textLines(2, "CAUS", person.cause));
     }
-    if (person.note.trim()) lines.push(...noteLines(person.note));
+    for (const job of person.occupation.split("\n")) {
+      if (job.trim()) lines.push(...textLines(1, "OCCU", job));
+    }
+    for (const chunk of person.source.split(/\n{2,}/)) lines.push(...exportTagged(1, "SOUR", chunk));
+    for (const item of person.media.split("\n")) lines.push(...mediaLines(item));
+    if (person.note.trim()) lines.push(...textLines(1, "NOTE", person.note));
   }
   tree.unions.forEach((union, index) => {
     const left = union.partnerA ? byXref.get(union.partnerA) : undefined;
@@ -358,15 +609,36 @@ function gedcomValue(value: string) {
   return value.replace(/@/g, "@@").replace(/[\r\n]+/g, " ").trim();
 }
 
-function noteLines(note: string) {
+function textLines(level: number, tag: string, value: string) {
   const lines: string[] = [];
-  note.split("\n").forEach((part, index) => {
+  const next = level + 1;
+  value.split("\n").forEach((part, index) => {
     const pieces = part.match(/.{1,200}/g) ?? [""];
     pieces.forEach((piece, pieceIndex) => {
-      if (index === 0 && pieceIndex === 0) lines.push(`1 NOTE ${gedcomValue(piece)}`);
-      else if (pieceIndex === 0) lines.push(`2 CONT ${gedcomValue(piece)}`);
-      else lines.push(`2 CONC ${piece.replace(/@/g, "@@")}`);
+      if (index === 0 && pieceIndex === 0) lines.push(`${level} ${tag} ${gedcomValue(piece)}`);
+      else if (pieceIndex === 0) lines.push(`${next} CONT ${gedcomValue(piece)}`);
+      else lines.push(`${next} CONC ${piece.replace(/@/g, "@@")}`);
     });
   });
+  return lines;
+}
+
+function exportTagged(level: number, tag: string, value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return [];
+  if (/^@[^@]+@$/.test(trimmed)) return [`${level} ${tag} ${trimmed}`];
+  return textLines(level, tag, trimmed);
+}
+
+function mediaLines(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return [];
+  if (/^@[^@]+@$/.test(trimmed)) return [`1 OBJE ${trimmed}`];
+  const splitAt = trimmed.lastIndexOf(" | ");
+  const title = splitAt >= 0 ? trimmed.slice(0, splitAt).trim() : "";
+  const file = splitAt >= 0 ? trimmed.slice(splitAt + 3).trim() : trimmed;
+  const lines = ["1 OBJE"];
+  if (file) lines.push(...textLines(2, "FILE", file));
+  if (title) lines.push(...textLines(2, "TITL", title));
   return lines;
 }

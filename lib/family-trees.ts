@@ -2,7 +2,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { gedcomText, parseGedcom, type GedcomSex, type GedcomTree } from "@/lib/gedcom";
+import { gedcomText, parseGedcom, plainNote, type GedcomSex, type GedcomTree } from "@/lib/gedcom";
 import { shrinkImage } from "@/lib/images";
 
 export type FamilySex = GedcomSex;
@@ -29,6 +29,11 @@ export type FamilyPerson = {
   death_place: string;
   note: string;
   deceased: boolean;
+  nickname: string;
+  cause_of_death: string;
+  occupation: string;
+  source: string;
+  media: string;
   image_path: string | null;
   link_id: string | null;
 };
@@ -78,12 +83,20 @@ export type PersonDraft = {
   death_place: string;
   note: string;
   deceased: boolean;
+  nickname: string;
+  cause_of_death: string;
+  occupation: string;
+  source: string;
+  media: string;
 };
 
 const UNION_COLUMNS = "id, account_id, tree_id, partner_a, partner_b, status";
 const UNION_COLUMNS_WITHOUT_STATUS = "id, account_id, tree_id, partner_a, partner_b";
-const PERSON_COLUMNS = "id, account_id, tree_id, given_name, surname, hebrew_given, hebrew_surname, sex, birth_date, birth_place, death_date, death_place, note, deceased, image_path";
+const PERSON_FACTS = "nickname, cause_of_death, occupation, source, media";
+const PERSON_COLUMNS_WITHOUT_FACTS = "id, account_id, tree_id, given_name, surname, hebrew_given, hebrew_surname, sex, birth_date, birth_place, death_date, death_place, note, deceased, image_path";
+const PERSON_COLUMNS = `${PERSON_COLUMNS_WITHOUT_FACTS}, ${PERSON_FACTS}`;
 const PERSON_COLUMNS_WITH_LINK = `${PERSON_COLUMNS}, link_id`;
+const PERSON_COLUMNS_WITHOUT_FACTS_WITH_LINK = `${PERSON_COLUMNS_WITHOUT_FACTS}, link_id`;
 const PERSON_COLUMNS_WITHOUT_HEBREW = "id, account_id, tree_id, given_name, surname, sex, birth_date, birth_place, death_date, death_place, note, deceased, image_path";
 const PERSON_COLUMNS_WITHOUT_DECEASED = "id, account_id, tree_id, given_name, surname, sex, birth_date, birth_place, death_date, death_place, note, image_path";
 const PERSON_COLUMNS_WITHOUT_IMAGE = "id, account_id, tree_id, given_name, surname, sex, birth_date, birth_place, death_date, death_place, note";
@@ -300,6 +313,11 @@ export async function duplicateFamilyTree(supabase: SupabaseClient, source: Fami
         death_place: person.death_place,
         note: person.note,
         deceased: person.deceased,
+        nickname: person.nickname,
+        cause_of_death: person.cause_of_death,
+        occupation: person.occupation,
+        source: person.source,
+        media: person.media,
         image_path: images.get(person.id) ?? null,
         link_id: person.link_id,
       })),
@@ -402,8 +420,13 @@ export async function importGedcomFile(
         birth_place: clip(person.birthPlace, 120),
         death_date: clip(person.deathDate, 80),
         death_place: clip(person.deathPlace, 120),
-        note: clip(person.note, 1000),
+        note: clip(plainNote(person.note), 1000),
         deceased: person.deceased || Boolean(person.deathDate.trim()),
+        nickname: clip(person.nickname, 120),
+        cause_of_death: clip(person.cause, 200),
+        occupation: clip(person.occupation, 1000),
+        source: clip(person.source, 2000),
+        media: clip(person.media, 2000),
       };
     });
     await insertChunks(supabase, "family_people", people, (ratio) => onProgress?.(0.08 + ratio * 0.62));
@@ -468,16 +491,25 @@ export async function saveFamilyPerson(supabase: SupabaseClient, personId: strin
     birth_place: clip(draft.birth_place, 120),
     death_date: clip(draft.death_date, 80),
     death_place: clip(draft.death_place, 120),
-    note: clip(draft.note, 1000),
+    note: clip(plainNote(draft.note), 1000),
     deceased: draft.deceased || Boolean(draft.death_date.trim()),
+    nickname: clip(draft.nickname, 120),
+    cause_of_death: clip(draft.cause_of_death, 200),
+    occupation: clip(draft.occupation, 1000),
+    source: clip(draft.source, 2000),
+    media: clip(draft.media, 2000),
   };
   let result = await supabase.from("family_people").update(row).eq("id", personId);
   if (missingColumn(result.error)) {
-    const { hebrew_given: _hebrewGiven, hebrew_surname: _hebrewSurname, ...withoutHebrew } = row;
-    result = await supabase.from("family_people").update(withoutHebrew).eq("id", personId);
+    const { nickname: _nickname, cause_of_death: _cause, occupation: _occupation, source: _source, media: _media, ...withoutFacts } = row;
+    result = await supabase.from("family_people").update(withoutFacts).eq("id", personId);
     if (missingColumn(result.error)) {
-      const { deceased: _deceased, ...rest } = withoutHebrew;
-      result = await supabase.from("family_people").update(rest).eq("id", personId);
+      const { hebrew_given: _hebrewGiven, hebrew_surname: _hebrewSurname, ...withoutHebrew } = withoutFacts;
+      result = await supabase.from("family_people").update(withoutHebrew).eq("id", personId);
+      if (missingColumn(result.error)) {
+        const { deceased: _deceased, ...rest } = withoutHebrew;
+        result = await supabase.from("family_people").update(rest).eq("id", personId);
+      }
     }
   }
   raise(result.error, SAVE_FAILED);
@@ -543,6 +575,11 @@ export async function addFamilySpouse(supabase: SupabaseClient, accountId: strin
       death_place: "",
       note: "",
       deceased: status === "widowed",
+      nickname: "",
+      cause_of_death: "",
+      occupation: "",
+      source: "",
+      media: "",
     });
     spouse = { ...spouse, ...saved, image_path: spouse.image_path };
   }
@@ -682,6 +719,11 @@ function draftFromPerson(person: FamilyPerson): PersonDraft {
     death_place: person.death_place,
     note: person.note,
     deceased: person.deceased,
+    nickname: person.nickname,
+    cause_of_death: person.cause_of_death,
+    occupation: person.occupation,
+    source: person.source,
+    media: person.media,
   };
 }
 
@@ -741,6 +783,11 @@ function gedcomFromGraph(graph: FamilyGraph): GedcomTree {
       deathPlace: person.death_place,
       deceased: person.deceased || Boolean(person.death_date.trim()),
       note: person.note,
+      nickname: person.nickname,
+      cause: person.cause_of_death,
+      occupation: person.occupation,
+      source: person.source,
+      media: person.media,
     })),
     unions: graph.unions.flatMap((union) => {
       const partnerA = xref.get(union.partner_a);
@@ -775,15 +822,20 @@ function normalizePerson(row: FamilyPerson): FamilyPerson {
     birth_place: row.birth_place ?? "",
     death_date: row.death_date ?? "",
     death_place: row.death_place ?? "",
-    note: row.note ?? "",
+    note: plainNote(row.note ?? ""),
     deceased: Boolean(row.deceased) || Boolean(row.death_date),
+    nickname: row.nickname ?? "",
+    cause_of_death: row.cause_of_death ?? "",
+    occupation: row.occupation ?? "",
+    source: row.source ?? "",
+    media: row.media ?? "",
     image_path: row.image_path || null,
     link_id: row.link_id || null,
   };
 }
 
 async function loadPeople(supabase: SupabaseClient, treeId: string) {
-  const selects = [PERSON_COLUMNS_WITH_LINK, PERSON_COLUMNS, PERSON_COLUMNS_WITHOUT_HEBREW, PERSON_COLUMNS_WITHOUT_DECEASED, PERSON_COLUMNS_WITHOUT_IMAGE];
+  const selects = [PERSON_COLUMNS_WITH_LINK, PERSON_COLUMNS, PERSON_COLUMNS_WITHOUT_FACTS_WITH_LINK, PERSON_COLUMNS_WITHOUT_FACTS, PERSON_COLUMNS_WITHOUT_HEBREW, PERSON_COLUMNS_WITHOUT_DECEASED, PERSON_COLUMNS_WITHOUT_IMAGE];
   let failure: { message: string; code?: string } | null = null;
   for (const columns of selects) {
     const result = await supabase.from("family_people").select(columns).eq("tree_id", treeId);

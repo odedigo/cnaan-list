@@ -226,6 +226,16 @@ create table if not exists public.family_people (
   constraint family_people_death_date_length check (char_length(death_date) <= 80),
   constraint family_people_death_place_length check (char_length(death_place) <= 120),
   constraint family_people_note_length check (char_length(note) <= 1000),
+  nickname text not null default '',
+  cause_of_death text not null default '',
+  occupation text not null default '',
+  source text not null default '',
+  media text not null default '',
+  constraint family_people_nickname_length check (char_length(nickname) <= 120),
+  constraint family_people_cause_length check (char_length(cause_of_death) <= 200),
+  constraint family_people_occupation_length check (char_length(occupation) <= 1000),
+  constraint family_people_source_length check (char_length(source) <= 2000),
+  constraint family_people_media_length check (char_length(media) <= 2000),
   constraint family_people_image_path_length check (image_path is null or char_length(btrim(image_path)) between 1 and 500)
 );
 

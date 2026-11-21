@@ -8,6 +8,8 @@ import { createPortal } from "react-dom";
 import { ChevronIcon, FolderIcon, HomeIcon, LegendIcon, LinkIcon, PlusIcon, SearchIcon, TrashIcon } from "@/components/icons";
 import { CARD_H, CARD_W, layoutTree, rootPersonId, spousesOutsideFamily, type TreeLine } from "@/lib/family-layout";
 import { personLabel, personName, UNION_STATUSES, unionStatusLabel, type FamilyGraph, type FamilyLink, type FamilyPerson, type FamilyPersonBrief, type FamilyTree, type PersonDraft, type SpouseInput, type UnionStatus } from "@/lib/family-trees";
+import { plainNote } from "@/lib/gedcom";
+import { readTreeHebrewNames, treeHebrewNamesEvent } from "@/lib/tree-hebrew-names";
 
 type View = { x: number; y: number; scale: number };
 
@@ -81,9 +83,16 @@ export function TreeEditor({
   const [legendOpen, setLegendOpen] = useState(false);
   const [jump, setJump] = useState<{ id: string; token: number } | null>(null);
   const [linkMenu, setLinkMenu] = useState<{ x: number; y: number; links: FamilyLink[] } | null>(null);
+  const [hebrewNames, setHebrewNames] = useState(true);
   const appliedFocus = useRef(0);
 
   useEffect(() => setReady(true), []);
+  useEffect(() => {
+    const sync = () => setHebrewNames(readTreeHebrewNames());
+    sync();
+    window.addEventListener(treeHebrewNamesEvent, sync);
+    return () => window.removeEventListener(treeHebrewNamesEvent, sync);
+  }, []);
   useEffect(() => {
     document.documentElement.dataset.allowLandscape = "1";
     return () => {
@@ -152,6 +161,7 @@ export function TreeEditor({
         }}
         onLoadImage={onLoadImage}
         links={links}
+        hebrewNames={hebrewNames}
         onOpenLinks={(personId, x, y) => {
           const list = links[personId] ?? [];
           if (list.length === 0) return;
@@ -288,6 +298,7 @@ function Chart({
   onCreate,
   onLoadImage,
   links,
+  hebrewNames,
   onOpenLinks,
 }: {
   name: string;
@@ -303,6 +314,7 @@ function Chart({
   onCreate: () => void;
   onLoadImage: (path: string) => Promise<Blob | null>;
   links: Record<string, FamilyLink[]>;
+  hebrewNames: boolean;
   onOpenLinks: (personId: string, x: number, y: number) => void;
 }) {
   const canvas = useRef<SVGSVGElement>(null);
@@ -480,8 +492,8 @@ function Chart({
           onPointerCancel={onPointerUp}
         >
           <g transform={`translate(${view.x} ${view.y}) scale(${view.scale})`}>
-            {layout.lines.map((line, index) => (
-              <path key={index} d={linePath(line)} fill="none" stroke={spouseLineColor(line)} strokeWidth={2} />
+            {treeLinePaths(layout.lines).map((d, index) => (
+              <path key={index} d={d} fill="none" stroke={spouseLineColor(layout.lines[index])} strokeWidth={2} />
             ))}
             {layout.boxes.map((box) => {
               const person = byId.get(box.id);
@@ -492,7 +504,7 @@ function Chart({
               const linked = (links[person.id]?.length ?? 0) > 0;
               const photoX = box.x + 8;
               const photoY = box.y + (cardH - 28) / 2;
-              const title = nodeTitle(person);
+              const title = nodeTitle(person, hebrewNames);
               const lived = years(person);
               const nameX = box.x + CARD_W / 2 + (photo ? 10 : 0);
               const nameLimit = photo ? 14 : 18;
@@ -551,7 +563,7 @@ function Chart({
                       <img src={photo} alt="" width={28} height={28} style={{ display: "block", width: 28, height: 28, borderRadius: 14, objectFit: "cover" }} />
                     </foreignObject>
                   ) : null}
-                  <text x={nameX} y={box.y + (title.sub ? (lived ? 20 : 28) : 30)} textAnchor="middle" direction="rtl" fill="#171717" style={{ fontSize: 15, fontWeight: 700 }}>
+                  <text x={nameX} y={box.y + (title.sub ? (lived ? 20 : 28) : 30)} textAnchor="middle" direction={title.dir} fill="#171717" style={{ fontSize: 15, fontWeight: 700, unicodeBidi: "isolate" }}>
                     {shorten(title.main, nameLimit)}
                   </text>
                   {title.sub ? (
@@ -798,6 +810,7 @@ function PersonDialog({
               <Field label="שם משפחה" value={draft.surname} maxLength={80} onChange={(value) => setField("surname", value)} />
               <Field label="שם פרטי בעברית" value={draft.hebrew_given} maxLength={80} onChange={(value) => setField("hebrew_given", value)} />
               <Field label="שם משפחה בעברית" value={draft.hebrew_surname} maxLength={80} onChange={(value) => setField("hebrew_surname", value)} />
+              <Field label="כינוי" value={draft.nickname} maxLength={120} onChange={(value) => setField("nickname", value)} />
               <label className="block">
                 <span className="text-neutral-600">מין</span>
                 <select className="mt-1 w-full rounded-xl border border-neutral-300 bg-white py-2 ps-3 outline-none" style={{ fontSize: "1rem" }} value={draft.sex} onChange={(event) => setField("sex", event.target.value as PersonDraft["sex"])}>
@@ -855,6 +868,7 @@ function PersonDialog({
                 onChange={(value) => setDraft((current) => ({ ...current, death_date: value, deceased: value.trim() ? true : current.deceased }))}
               />
               <Field label="מקום פטירה" value={draft.death_place} maxLength={120} onChange={(value) => setField("death_place", value)} />
+              <Field label="סיבת פטירה" value={draft.cause_of_death} maxLength={200} onChange={(value) => setField("cause_of_death", value)} />
             </div>
           ) : null}
           {tab === "family" ? (
@@ -945,10 +959,25 @@ function PersonDialog({
           ) : null}
           {tab === "connections" ? <ConnectionSummary personId={person.id} graph={graph} onOpenPerson={onOpenPerson} /> : null}
           {tab === "note" ? (
-            <label className="block">
-              <span className="text-neutral-600">הערה</span>
-              <textarea value={draft.note} maxLength={1000} rows={8} onChange={(event) => setField("note", event.target.value)} className="mt-1 w-full rounded-xl border border-neutral-300 px-3 py-2 outline-none" style={{ fontSize: "1rem" }} aria-label="הערה" />
-            </label>
+            <div className="grid gap-4">
+              <label className="block">
+                <span className="text-neutral-600">הערה</span>
+                <textarea value={draft.note} maxLength={1000} rows={6} onChange={(event) => setField("note", event.target.value)} className="mt-1 w-full rounded-xl border border-neutral-300 px-3 py-2 outline-none" style={{ fontSize: "1rem" }} aria-label="הערה" />
+              </label>
+              <label className="block">
+                <span className="text-neutral-600">עיסוק</span>
+                <textarea value={draft.occupation} maxLength={1000} rows={3} onChange={(event) => setField("occupation", event.target.value)} className="mt-1 w-full rounded-xl border border-neutral-300 px-3 py-2 outline-none" style={{ fontSize: "1rem" }} aria-label="עיסוק" />
+              </label>
+              <label className="block">
+                <span className="text-neutral-600">מקור</span>
+                <textarea value={draft.source} maxLength={2000} rows={4} onChange={(event) => setField("source", event.target.value)} className="mt-1 w-full rounded-xl border border-neutral-300 px-3 py-2 outline-none" style={{ fontSize: "1rem" }} aria-label="מקור" />
+              </label>
+              <label className="block">
+                <span className="text-neutral-600">מדיה</span>
+                <textarea value={draft.media} maxLength={2000} rows={4} onChange={(event) => setField("media", event.target.value)} className="mt-1 w-full rounded-xl border border-neutral-300 px-3 py-2 outline-none" style={{ fontSize: "1rem" }} aria-label="מדיה" />
+                <span className="mt-1 block text-sm text-neutral-500">שורה לכל פריט. כותרת | קובץ</span>
+              </label>
+            </div>
           ) : null}
         </div>
         <input
@@ -1179,8 +1208,13 @@ function draftOf(person: FamilyPerson): PersonDraft {
     birth_place: person.birth_place,
     death_date: person.death_date,
     death_place: person.death_place,
-    note: person.note,
+    note: plainNote(person.note),
     deceased: person.deceased,
+    nickname: person.nickname,
+    cause_of_death: person.cause_of_death,
+    occupation: person.occupation,
+    source: person.source,
+    media: person.media,
   };
 }
 
@@ -1214,6 +1248,32 @@ function parentsOf(personId: string, graph: FamilyGraph, byId: Map<string, Famil
   return found;
 }
 
+function siblingsOf(personId: string, graph: FamilyGraph, byId: Map<string, FamilyPerson>, unionById: Map<string, FamilyGraph["unions"][number]>) {
+  const parentIds = new Set<string>();
+  for (const link of graph.children) {
+    if (link.person_id !== personId) continue;
+    const union = unionById.get(link.union_id);
+    if (!union) continue;
+    if (union.partner_a) parentIds.add(union.partner_a);
+    if (union.partner_b) parentIds.add(union.partner_b);
+  }
+  if (parentIds.size === 0) return [];
+  const unionIds = new Set(graph.unions.filter((union) => parentIds.has(union.partner_a) || (union.partner_b != null && parentIds.has(union.partner_b))).map((union) => union.id));
+  const links = graph.children
+    .filter((link) => unionIds.has(link.union_id) && link.person_id !== personId && !parentIds.has(link.person_id))
+    .sort((a, b) => a.sort_order - b.sort_order || a.person_id.localeCompare(b.person_id));
+  const found: FamilyPerson[] = [];
+  const seen = new Set<string>();
+  for (const link of links) {
+    if (seen.has(link.person_id)) continue;
+    const person = byId.get(link.person_id);
+    if (!person) continue;
+    seen.add(person.id);
+    found.push(person);
+  }
+  return found;
+}
+
 function ConnectionSummary({ personId, graph, onOpenPerson }: { personId: string; graph: FamilyGraph; onOpenPerson: (id: string) => void }) {
   const byId = new Map(graph.people.map((person) => [person.id, person]));
   const unionById = new Map(graph.unions.map((union) => [union.id, union]));
@@ -1228,11 +1288,13 @@ function ConnectionSummary({ personId, graph, onOpenPerson }: { personId: string
     }
   }
   const spouses = spouseLinks(personId, graph).filter((link) => link.status === "married").map((link) => link.person);
+  const siblings = siblingsOf(personId, graph, byId, unionById);
 
   return (
     <div className="grid gap-5">
       <ConnectionGroup title="סבים וסבתות" people={grandparents} onOpenPerson={onOpenPerson} />
       <ConnectionGroup title="הורים" people={parents} onOpenPerson={onOpenPerson} />
+      <ConnectionGroup title="אחים ואחיות" people={siblings} onOpenPerson={onOpenPerson} />
       <ConnectionGroup title="בן/בת זוג נוכחי" people={spouses} onOpenPerson={onOpenPerson} />
       <section>
         <h3 className="font-medium text-neutral-600">ילדים</h3>
@@ -1339,12 +1401,22 @@ function PersonNames({ person }: { person: FamilyPerson }) {
   return <span className="font-medium">{text}</span>;
 }
 
-function nodeTitle(person: FamilyPerson) {
+function nodeTitle(person: FamilyPerson, preferHebrew?: boolean) {
   const english = `${person.given_name} ${person.surname}`.replace(/\s+/g, " ").trim();
   const hebrew = `${person.hebrew_given ?? ""} ${person.hebrew_surname ?? ""}`.replace(/\s+/g, " ").trim();
-  if (hebrew && english) return { main: hebrew, sub: english, label: `${hebrew} (${english})` };
+  if (preferHebrew === true) {
+    if (hebrew) return { main: hebrew, sub: "", label: hebrew, dir: "rtl" as const };
+    const main = english || personName(person);
+    return { main, sub: "", label: main, dir: english ? ("ltr" as const) : ("rtl" as const) };
+  }
+  if (preferHebrew === false) {
+    if (english) return { main: english, sub: "", label: english, dir: "ltr" as const };
+    const main = hebrew || personName(person);
+    return { main, sub: "", label: main, dir: "rtl" as const };
+  }
+  if (hebrew && english) return { main: hebrew, sub: english, label: `${hebrew} (${english})`, dir: "rtl" as const };
   const main = hebrew || personName(person);
-  return { main, sub: "", label: main };
+  return { main, sub: "", label: main, dir: hebrew || !english ? ("rtl" as const) : ("ltr" as const) };
 }
 
 function years(person: FamilyPerson) {
@@ -1507,8 +1579,102 @@ function LineSwatch({ label, color }: { label: string; color: string }) {
   );
 }
 
-function linePath(line: { x1: number; y1: number; x2: number; y2: number }) {
-  if (Math.abs(line.y1 - line.y2) < 2) return `M ${line.x1} ${line.y1} H ${line.x2}`;
-  const mid = (line.y1 + line.y2) / 2;
-  return `M ${line.x1} ${line.y1} V ${mid} H ${line.x2} V ${line.y2}`;
+type LineSeg = { x1: number; y1: number; x2: number; y2: number; horizontal: boolean };
+
+const HOP = 8;
+
+function treeLinePaths(lines: TreeLine[]) {
+  const parts = lines.map(segmentsOf);
+  const hops: { x: number; y: number }[][] = parts.map(() => []);
+  for (let i = 0; i < parts.length; i += 1) {
+    for (let j = i + 1; j < parts.length; j += 1) {
+      for (const a of parts[i]) {
+        for (const b of parts[j]) {
+          const point = segmentCrossing(a, b);
+          if (point) hops[j].push(point);
+        }
+      }
+    }
+  }
+  return parts.map((segments, index) => pathWithHops(segments, hops[index]));
+}
+
+function segmentsOf(line: TreeLine): LineSeg[] {
+  const segs: LineSeg[] = [];
+  for (let index = 0; index < line.points.length - 1; index += 1) {
+    const start = line.points[index];
+    const end = line.points[index + 1];
+    if (Math.hypot(end.x - start.x, end.y - start.y) < 0.5) continue;
+    segs.push({
+      x1: start.x,
+      y1: start.y,
+      x2: end.x,
+      y2: end.y,
+      horizontal: Math.abs(start.y - end.y) <= Math.abs(start.x - end.x),
+    });
+  }
+  return segs;
+}
+
+function segmentCrossing(a: LineSeg, b: LineSeg) {
+  if (a.horizontal === b.horizontal) return null;
+  const horizontal = a.horizontal ? a : b;
+  const vertical = a.horizontal ? b : a;
+  const x = vertical.x1;
+  const y = horizontal.y1;
+  const left = Math.min(horizontal.x1, horizontal.x2);
+  const right = Math.max(horizontal.x1, horizontal.x2);
+  const top = Math.min(vertical.y1, vertical.y2);
+  const bottom = Math.max(vertical.y1, vertical.y2);
+  if (x <= left + 1 || x >= right - 1 || y <= top + 1 || y >= bottom - 1) return null;
+  return { x, y };
+}
+
+function pathWithHops(segments: LineSeg[], hops: { x: number; y: number }[]) {
+  const first = segments[0];
+  if (!first) return "";
+  let d = `M ${first.x1} ${first.y1}`;
+  for (const seg of segments) {
+    const len = Math.hypot(seg.x2 - seg.x1, seg.y2 - seg.y1);
+    if (len < 1) continue;
+    const ux = (seg.x2 - seg.x1) / len;
+    const uy = (seg.y2 - seg.y1) / len;
+    const along = hops
+      .filter((hop) => hopOnSegment(hop, seg))
+      .map((hop) => ({ hop, t: (hop.x - seg.x1) * ux + (hop.y - seg.y1) * uy }))
+      .sort((a, b) => a.t - b.t);
+    let blockedUntil = 0;
+    for (let index = 0; index < along.length; index += 1) {
+      const current = along[index];
+      const nextT = index + 1 < along.length ? along[index + 1].t : len;
+      const room = Math.min(
+        current.t - blockedUntil,
+        index + 1 < along.length ? (nextT - current.t) / 2 : len - current.t,
+      );
+      const radius = Math.min(HOP, room - 0.5);
+      if (radius < 4) continue;
+      const { hop } = current;
+      const beforeX = hop.x - ux * radius;
+      const beforeY = hop.y - uy * radius;
+      const afterX = hop.x + ux * radius;
+      const afterY = hop.y + uy * radius;
+      d += ` L ${beforeX} ${beforeY} A ${radius} ${radius} 0 0 1 ${afterX} ${afterY}`;
+      blockedUntil = current.t + radius;
+    }
+    d += ` L ${seg.x2} ${seg.y2}`;
+  }
+  return d;
+}
+
+function hopOnSegment(hop: { x: number; y: number }, seg: LineSeg) {
+  if (seg.horizontal) {
+    if (Math.abs(hop.y - seg.y1) > 0.5) return false;
+    const left = Math.min(seg.x1, seg.x2);
+    const right = Math.max(seg.x1, seg.x2);
+    return hop.x > left + 0.5 && hop.x < right - 0.5;
+  }
+  if (Math.abs(hop.x - seg.x1) > 0.5) return false;
+  const top = Math.min(seg.y1, seg.y2);
+  const bottom = Math.max(seg.y1, seg.y2);
+  return hop.y > top + 0.5 && hop.y < bottom - 0.5;
 }
