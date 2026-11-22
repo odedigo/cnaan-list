@@ -14,7 +14,7 @@ import {
   addFamilyPerson,
   addFamilySpouse,
   createFamilyTree,
-  deleteFamilyPerson,
+  deleteFamilyPeople,
   deleteFamilyTree,
   duplicateFamilyTree,
   exportFamilyGedcom,
@@ -482,22 +482,24 @@ export function TreesPage({ active }: { active: boolean }) {
                 : current,
             );
           }}
-          onDeletePerson={async (personId) => {
+          onDeletePerson={async (personId, alsoIds) => {
+            const ids = [personId, ...alsoIds.filter((id) => id !== personId)];
             const removed = await run(async () => {
-              await deleteFamilyPerson(supabase, personId);
+              await deleteFamilyPeople(supabase, ids);
               return true;
             });
             if (!removed) return;
+            const removedIds = new Set(ids);
             setGraph((current) => {
               if (!current) return current;
               const unions = current.unions
-                .filter((union) => union.partner_a !== personId)
-                .map((union) => (union.partner_b === personId ? { ...union, partner_b: null } : union));
+                .filter((union) => !removedIds.has(union.partner_a))
+                .map((union) => (union.partner_b && removedIds.has(union.partner_b) ? { ...union, partner_b: null } : union));
               const unionIds = new Set(unions.map((union) => union.id));
               return {
-                people: current.people.filter((person) => person.id !== personId),
+                people: current.people.filter((person) => !removedIds.has(person.id)),
                 unions,
-                children: current.children.filter((link) => link.person_id !== personId && unionIds.has(link.union_id)),
+                children: current.children.filter((link) => !removedIds.has(link.person_id) && unionIds.has(link.union_id)),
               };
             });
           }}

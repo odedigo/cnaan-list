@@ -517,11 +517,24 @@ export async function saveFamilyPerson(supabase: SupabaseClient, personId: strin
 }
 
 export async function deleteFamilyPerson(supabase: SupabaseClient, personId: string) {
-  const { data } = await supabase.from("family_people").select("image_path").eq("id", personId).maybeSingle();
-  const { error } = await supabase.from("family_people").delete().eq("id", personId);
-  raise(error, "לא ניתן למחוק את האדם");
-  const path = (data as { image_path?: string | null } | null)?.image_path;
-  if (path) await supabase.storage.from("item-images").remove([path]);
+  await deleteFamilyPeople(supabase, [personId]);
+}
+
+export async function deleteFamilyPeople(supabase: SupabaseClient, personIds: string[]) {
+  const ids = [...new Set(personIds.filter(Boolean))];
+  if (ids.length === 0) return;
+  const paths: string[] = [];
+  for (let index = 0; index < ids.length; index += 100) {
+    const chunk = ids.slice(index, index + 100);
+    const { data } = await supabase.from("family_people").select("image_path").in("id", chunk);
+    for (const row of data ?? []) {
+      const path = (row as { image_path?: string | null }).image_path;
+      if (path) paths.push(path);
+    }
+    const { error } = await supabase.from("family_people").delete().in("id", chunk);
+    raise(error, "לא ניתן למחוק את האדם");
+  }
+  if (paths.length > 0) await supabase.storage.from("item-images").remove(paths);
 }
 
 export async function setFamilyPersonImage(supabase: SupabaseClient, person: FamilyPerson, file: File | null) {

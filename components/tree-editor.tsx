@@ -62,7 +62,7 @@ export function TreeEditor({
   onSetUnionStatus: (unionId: string, status: UnionStatus) => Promise<void>;
   onAddChild: (personId: string) => Promise<string | null>;
   onAddParents: (personId: string) => Promise<string | null>;
-  onDeletePerson: (personId: string) => Promise<void>;
+  onDeletePerson: (personId: string, alsoIds: string[]) => Promise<void>;
   onLoadImage: (path: string) => Promise<Blob | null>;
   onPersonImage: (personId: string, file: File | null) => Promise<void>;
   links: Record<string, FamilyLink[]>;
@@ -78,6 +78,7 @@ export function TreeEditor({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [clearUpward, setClearUpward] = useState(false);
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [legendOpen, setLegendOpen] = useState(false);
@@ -126,6 +127,7 @@ export function TreeEditor({
 
   const selected = graph?.people.find((person) => person.id === selectedId) ?? null;
   const matches = matchingPeople(graph?.people ?? [], query);
+  const relatedIds = confirming && selected && graph ? upwardIds(selected.id, graph) : [];
 
   function jumpTo(id: string) {
     setSelectedId(id);
@@ -222,7 +224,10 @@ export function TreeEditor({
           }}
           onAddChild={() => onAddChild(selected.id)}
           onAddParents={() => onAddParents(selected.id)}
-          onDelete={() => setConfirming(true)}
+          onDelete={() => {
+            setClearUpward(false);
+            setConfirming(true);
+          }}
           onImage={(file) => onPersonImage(selected.id, file)}
           links={links[selected.id] ?? []}
           otherTrees={trees.filter((row) => row.id !== selected.tree_id)}
@@ -233,24 +238,44 @@ export function TreeEditor({
         />
       ) : null}
       {legendOpen ? <ColorLegend onClose={() => setLegendOpen(false)} /> : null}
-      {confirming && selected ? (
+      {confirming && selected && graph ? (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true" aria-label="מחיקת אדם">
-          <div className="w-full max-w-xs rounded-2xl bg-white p-4 text-start">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-4 text-start">
             <p className="text-sm font-medium">{`למחוק את "${personName(selected)}"?`}</p>
+            {relatedIds.length > 0 ? (
+              <label className="mt-4 flex items-center gap-3 text-sm">
+                <input
+                  type="checkbox"
+                  className="size-5 accent-[var(--teal)]"
+                  checked={clearUpward}
+                  onChange={(event) => setClearUpward(event.target.checked)}
+                />
+                <span>{`למחוק גם אבות, אחים ובני זוג (${relatedIds.length})`}</span>
+              </label>
+            ) : null}
             <button
               type="button"
               className="mt-4 w-full rounded-xl bg-red-600 py-3 font-medium text-white disabled:opacity-40"
               disabled={busy}
               onClick={() => {
                 const id = selected.id;
+                const also = clearUpward ? relatedIds : [];
                 setConfirming(false);
+                setClearUpward(false);
                 setDetailsOpen(false);
-                void onDeletePerson(id);
+                void onDeletePerson(id, also);
               }}
             >
               מחיקה
             </button>
-            <button type="button" className="mt-2 w-full rounded-xl bg-neutral-100 py-3 font-medium text-neutral-700" onClick={() => setConfirming(false)}>
+            <button
+              type="button"
+              className="mt-2 w-full rounded-xl bg-neutral-100 py-3 font-medium text-neutral-700"
+              onClick={() => {
+                setConfirming(false);
+                setClearUpward(false);
+              }}
+            >
               ביטול
             </button>
           </div>
@@ -1272,6 +1297,114 @@ function siblingsOf(personId: string, graph: FamilyGraph, byId: Map<string, Fami
     found.push(person);
   }
   return found;
+}
+
+function upwardIds(personId: string, graph: FamilyGraph) {
+  const byId = new Map(graph.people.map((person) => [person.id, person]));
+  const unionById = new Map(graph.unions.map((union) => [union.id, union]));
+  const ids = new Set<string>();
+  const ancestors: string[] = [];
+  const visitAncestors = (id: string) => {
+    for (const parent of parentsOf(id, graph, byId, unionById)) {
+      if (parent.id === personId || ids.has(parent.id)) continue;
+      ids.add(parent.id);
+      ancestors.push(parent.id);
+      visitAncestors(parent.id);
+    }
+  };
+  visitAncestors(personId);
+  const siblings: string[] = [];
+  for (const id of [personId, ...ancestors]) {
+    for (const sibling of siblingsOf(id, graph, byId, unionById)) {
+      if (sibling.id === personId || ids.has(sibling.id)) continue;
+      ids.add(sibling.id);
+      siblings.push(sibling.id);
+    }
+    for (const link of spouseLinks(id, graph)) {
+      if (link.person.id !== personId) ids.add(link.person.id);
+    }
+  }
+  for (const id of siblings) {
+    for (const link of spouseLinks(id, graph)) {
+      if (link.person.id !== personId) ids.add(link.person.id);
+    }
+  }
+  ids.delete(personId);
+  const removed = new Set([personId, ...ids]);
+  const descendants = descendantIds(personId, graph);
+  const everyone = new Set(graph.people.map((person) => person.id));
+  const original = reachable([personId], familyNeighbors(graph, everyone));
+  const alive = new Set([...everyone].filter((id) => !removed.has(id)));
+  let guard = alive.size + 1;
+  while (guard > 0) {
+    guard -= 1;
+    const neighbors = familyNeighbors(graph, alive);
+    const anchors = [...descendants].filter((id) => alive.has(id));
+    const keep = anchors.length > 0 ? reachable(anchors, neighbors) : null;
+    let changed = false;
+    for (const id of [...alive]) {
+      const degree = neighbors.get(id)?.size ?? 0;
+      const splitOff = keep !== null && original.has(id) && !keep.has(id);
+      if (degree > 0 && !splitOff) continue;
+      alive.delete(id);
+      ids.add(id);
+      changed = true;
+    }
+    if (!changed) break;
+  }
+  ids.delete(personId);
+  return [...ids];
+}
+
+function descendantIds(personId: string, graph: FamilyGraph) {
+  const found = new Set<string>();
+  const stack: string[] = [];
+  for (const union of graph.unions) {
+    if (union.partner_a !== personId && union.partner_b !== personId) continue;
+    for (const link of graph.children) if (link.union_id === union.id) stack.push(link.person_id);
+  }
+  while (stack.length > 0) {
+    const id = stack.pop() ?? "";
+    if (!id || id === personId || found.has(id)) continue;
+    found.add(id);
+    for (const union of graph.unions) {
+      if (union.partner_a !== id && union.partner_b !== id) continue;
+      for (const link of graph.children) if (link.union_id === union.id) stack.push(link.person_id);
+    }
+  }
+  return found;
+}
+
+function familyNeighbors(graph: FamilyGraph, alive: Set<string>) {
+  const neighbors = new Map<string, Set<string>>();
+  for (const id of alive) neighbors.set(id, new Set());
+  const link = (left: string, right: string) => {
+    if (left === right || !alive.has(left) || !alive.has(right)) return;
+    neighbors.get(left)?.add(right);
+    neighbors.get(right)?.add(left);
+  };
+  for (const union of graph.unions) {
+    if (!union.partner_a || !alive.has(union.partner_a)) continue;
+    if (union.partner_b) link(union.partner_a, union.partner_b);
+    for (const child of graph.children) {
+      if (child.union_id !== union.id) continue;
+      link(union.partner_a, child.person_id);
+      if (union.partner_b) link(union.partner_b, child.person_id);
+    }
+  }
+  return neighbors;
+}
+
+function reachable(starts: string[], neighbors: Map<string, Set<string>>) {
+  const seen = new Set<string>();
+  const stack = starts.filter((id) => neighbors.has(id));
+  while (stack.length > 0) {
+    const id = stack.pop() ?? "";
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    for (const next of neighbors.get(id) ?? []) if (!seen.has(next)) stack.push(next);
+  }
+  return seen;
 }
 
 function ConnectionSummary({ personId, graph, onOpenPerson }: { personId: string; graph: FamilyGraph; onOpenPerson: (id: string) => void }) {
