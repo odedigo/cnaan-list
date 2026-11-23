@@ -196,89 +196,11 @@ create table if not exists public.family_trees (
   name text not null,
   sort_order integer not null default 0,
   created_at timestamptz not null default now(),
+  gedcom text not null default '',
   constraint family_trees_name_length check (char_length(btrim(name)) between 1 and 80)
 );
 
-create table if not exists public.family_people (
-  id uuid primary key default gen_random_uuid(),
-  account_id uuid not null references public.accounts (id) on delete cascade,
-  tree_id uuid not null references public.family_trees (id) on delete cascade,
-  given_name text not null default '',
-  surname text not null default '',
-  hebrew_given text not null default '',
-  hebrew_surname text not null default '',
-  sex text not null default 'u',
-  birth_date text not null default '',
-  birth_place text not null default '',
-  death_date text not null default '',
-  death_place text not null default '',
-  note text not null default '',
-  deceased boolean not null default false,
-  image_path text,
-  link_id uuid,
-  constraint family_people_sex_check check (sex in ('m', 'f', 'u')),
-  constraint family_people_given_length check (char_length(given_name) <= 80),
-  constraint family_people_surname_length check (char_length(surname) <= 80),
-  constraint family_people_hebrew_given_length check (char_length(hebrew_given) <= 80),
-  constraint family_people_hebrew_surname_length check (char_length(hebrew_surname) <= 80),
-  constraint family_people_birth_date_length check (char_length(birth_date) <= 80),
-  constraint family_people_birth_place_length check (char_length(birth_place) <= 120),
-  constraint family_people_death_date_length check (char_length(death_date) <= 80),
-  constraint family_people_death_place_length check (char_length(death_place) <= 120),
-  constraint family_people_note_length check (char_length(note) <= 1000),
-  nickname text not null default '',
-  cause_of_death text not null default '',
-  occupation text not null default '',
-  source text not null default '',
-  media text not null default '',
-  constraint family_people_nickname_length check (char_length(nickname) <= 120),
-  constraint family_people_cause_length check (char_length(cause_of_death) <= 200),
-  constraint family_people_occupation_length check (char_length(occupation) <= 1000),
-  constraint family_people_source_length check (char_length(source) <= 2000),
-  constraint family_people_media_length check (char_length(media) <= 2000),
-  constraint family_people_image_path_length check (image_path is null or char_length(btrim(image_path)) between 1 and 500)
-);
-
-create table if not exists public.family_unions (
-  id uuid primary key default gen_random_uuid(),
-  account_id uuid not null references public.accounts (id) on delete cascade,
-  tree_id uuid not null references public.family_trees (id) on delete cascade,
-  partner_a uuid not null references public.family_people (id) on delete cascade,
-  partner_b uuid references public.family_people (id) on delete set null,
-  status text not null default 'married',
-  constraint family_unions_distinct check (partner_b is null or partner_a <> partner_b),
-  constraint family_unions_status_check check (status in ('married', 'divorced', 'widowed', 'separated', 'partner'))
-);
-
-create table if not exists public.family_children (
-  union_id uuid not null references public.family_unions (id) on delete cascade,
-  person_id uuid not null references public.family_people (id) on delete cascade,
-  account_id uuid not null references public.accounts (id) on delete cascade,
-  sort_order integer not null default 0,
-  primary key (union_id, person_id)
-);
-
-alter table public.family_people add column if not exists image_path text;
-alter table public.family_people add column if not exists deceased boolean not null default false;
-alter table public.family_people add column if not exists hebrew_given text not null default '';
-alter table public.family_people add column if not exists hebrew_surname text not null default '';
-alter table public.family_people add column if not exists link_id uuid;
-alter table public.family_people drop constraint if exists family_people_hebrew_given_length;
-alter table public.family_people
-  add constraint family_people_hebrew_given_length check (char_length(hebrew_given) <= 80);
-alter table public.family_people drop constraint if exists family_people_hebrew_surname_length;
-alter table public.family_people
-  add constraint family_people_hebrew_surname_length check (char_length(hebrew_surname) <= 80);
-alter table public.family_people drop constraint if exists family_people_image_path_length;
-alter table public.family_people
-  add constraint family_people_image_path_length
-  check (image_path is null or char_length(btrim(image_path)) between 1 and 500);
-
-alter table public.family_unions add column if not exists status text not null default 'married';
-alter table public.family_unions drop constraint if exists family_unions_status_check;
-alter table public.family_unions
-  add constraint family_unions_status_check
-  check (status in ('married', 'divorced', 'widowed', 'separated', 'partner'));
+alter table public.family_trees add column if not exists gedcom text not null default '';
 
 create index if not exists stores_account_sort_idx on public.stores (account_id, sort_order);
 create unique index if not exists stores_account_name_idx on public.stores (account_id, lower(name));
@@ -308,10 +230,6 @@ create unique index if not exists recipes_account_source_path_idx
 create index if not exists recipe_labels_category_idx
   on public.recipe_labels (category_id);
 create index if not exists family_trees_account_sort_idx on public.family_trees (account_id, sort_order);
-create index if not exists family_people_tree_idx on public.family_people (tree_id);
-create index if not exists family_people_link_idx on public.family_people (account_id, link_id) where link_id is not null;
-create index if not exists family_unions_tree_idx on public.family_unions (tree_id);
-create index if not exists family_children_person_idx on public.family_children (person_id);
 
 alter table public.profiles enable row level security;
 alter table public.accounts enable row level security;
@@ -329,9 +247,6 @@ alter table public.recipe_categories enable row level security;
 alter table public.recipes enable row level security;
 alter table public.recipe_labels enable row level security;
 alter table public.family_trees enable row level security;
-alter table public.family_people enable row level security;
-alter table public.family_unions enable row level security;
-alter table public.family_children enable row level security;
 
 drop policy if exists "read own profile" on public.profiles;
 create policy "read own profile"
@@ -502,64 +417,6 @@ create policy "own family trees"
   using (account_id in (select id from public.accounts where owner_id = auth.uid()))
   with check (account_id in (select id from public.accounts where owner_id = auth.uid()));
 
-drop policy if exists "own family people" on public.family_people;
-create policy "own family people"
-  on public.family_people for all to authenticated
-  using (account_id in (select id from public.accounts where owner_id = auth.uid()))
-  with check (
-    account_id in (select id from public.accounts where owner_id = auth.uid())
-    and exists (
-      select 1 from public.family_trees as tree
-      where tree.id = tree_id and tree.account_id = family_people.account_id
-    )
-  );
-
-drop policy if exists "own family unions" on public.family_unions;
-create policy "own family unions"
-  on public.family_unions for all to authenticated
-  using (account_id in (select id from public.accounts where owner_id = auth.uid()))
-  with check (
-    account_id in (select id from public.accounts where owner_id = auth.uid())
-    and exists (
-      select 1 from public.family_trees as tree
-      where tree.id = tree_id and tree.account_id = family_unions.account_id
-    )
-    and exists (
-      select 1 from public.family_people as person
-      where person.id = partner_a
-        and person.tree_id = family_unions.tree_id
-        and person.account_id = family_unions.account_id
-    )
-    and (
-      partner_b is null
-      or exists (
-        select 1 from public.family_people as person
-        where person.id = partner_b
-          and person.tree_id = family_unions.tree_id
-          and person.account_id = family_unions.account_id
-      )
-    )
-  );
-
-drop policy if exists "own family children" on public.family_children;
-create policy "own family children"
-  on public.family_children for all to authenticated
-  using (account_id in (select id from public.accounts where owner_id = auth.uid()))
-  with check (
-    account_id in (select id from public.accounts where owner_id = auth.uid())
-    and exists (
-      select 1
-      from public.family_unions as union_row
-      join public.family_people as child on child.id = person_id
-      where union_row.id = union_id
-        and union_row.account_id = family_children.account_id
-        and child.account_id = family_children.account_id
-        and child.tree_id = union_row.tree_id
-        and child.id <> union_row.partner_a
-        and (union_row.partner_b is null or child.id <> union_row.partner_b)
-    )
-  );
-
 revoke all on public.profiles from anon;
 revoke all on public.accounts from anon;
 revoke all on public.stores from anon;
@@ -576,9 +433,6 @@ revoke all on public.recipe_categories from anon;
 revoke all on public.recipes from anon;
 revoke all on public.recipe_labels from anon;
 revoke all on public.family_trees from anon;
-revoke all on public.family_people from anon;
-revoke all on public.family_unions from anon;
-revoke all on public.family_children from anon;
 
 grant select on public.profiles to authenticated;
 grant select on public.accounts to authenticated;
@@ -597,9 +451,6 @@ grant select, insert, update, delete on public.recipe_categories to authenticate
 grant select, insert, update, delete on public.recipes to authenticated;
 grant select, insert, update, delete on public.recipe_labels to authenticated;
 grant select, insert, update, delete on public.family_trees to authenticated;
-grant select, insert, update, delete on public.family_people to authenticated;
-grant select, insert, update, delete on public.family_unions to authenticated;
-grant select, insert, update, delete on public.family_children to authenticated;
 
 create or replace function public.current_account_id()
 returns uuid

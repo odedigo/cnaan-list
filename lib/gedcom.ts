@@ -20,6 +20,10 @@ export type GedcomPerson = {
   occupation: string;
   source: string;
   media: string;
+  address: string;
+  city: string;
+  country: string;
+  email: string;
 };
 
 export type GedcomUnionStatus = "married" | "divorced" | "widowed" | "separated" | "partner";
@@ -45,6 +49,11 @@ type GedcomLine = {
 
 const UNSUPPORTED_CHARSET = "הקידוד של הקובץ אינו נתמך";
 const NOT_GEDCOM = "הקובץ אינו קובץ GEDCOM";
+
+export function gedcomFileText(bytes: Uint8Array) {
+  parseGedcom(bytes);
+  return decodeGedcom(bytes).replace(/^\uFEFF/, "");
+}
 
 export function parseGedcom(bytes: Uint8Array): GedcomTree {
   const text = decodeGedcom(bytes).replace(/^\uFEFF/, "");
@@ -86,7 +95,7 @@ export function parseGedcom(bytes: Uint8Array): GedcomTree {
     }
   }
 
-  const claimed = new Set<string>();
+  const parentSlots = new Map<string, number>();
   const unions: GedcomUnion[] = [];
   for (const family of families) {
     const partnerA = people.has(family.partnerA) ? family.partnerA : "";
@@ -94,10 +103,13 @@ export function parseGedcom(bytes: Uint8Array): GedcomTree {
     const first = partnerA || partnerB;
     if (!first) continue;
     const second = partnerA && partnerB && partnerA !== partnerB ? partnerB : null;
+    const incoming = second ? 2 : 1;
     const children: string[] = [];
     for (const child of family.children) {
-      if (!people.has(child) || claimed.has(child) || child === first || child === second) continue;
-      claimed.add(child);
+      if (!people.has(child) || child === first || child === second) continue;
+      const used = parentSlots.get(child) ?? 0;
+      if (used >= 2 || used + incoming > 2) continue;
+      parentSlots.set(child, used + incoming);
       children.push(child);
     }
     let status = family.status;
@@ -149,7 +161,7 @@ function parseLines(text: string) {
       level: Number(match[1]),
       xref: match[2] ?? "",
       tag: match[3].toUpperCase(),
-      value: match[4] ?? "",
+      value: (match[4] ?? "").replace(/@@/g, "@"),
     });
   }
   return lines;
@@ -174,6 +186,10 @@ function readPerson(xref: string, body: GedcomLine[]): GedcomPerson {
     occupation: "",
     source: "",
     media: "",
+    address: "",
+    city: "",
+    country: "",
+    email: "",
   };
   const nicks: string[] = [];
   const jobs: string[] = [];
@@ -182,8 +198,10 @@ function readPerson(xref: string, body: GedcomLine[]): GedcomPerson {
   let cause = "";
   let source: TextParts | null = null;
   let object: TextParts | null = null;
+  let place: PlaceBits | null = null;
+  const places: PlaceBits[] = [];
   let conc: ConcTarget = "";
-  let section: "" | "birth" | "death" | "note" = "";
+  let section: "" | "birth" | "death" | "note" | "resi" = "";
   let name: { role: "primary" | "extra"; parts: NameParts } | null = null;
   let tran: { parts: NameParts; lang: string; hebrew: boolean } | null = null;
   let hebrew: NameParts | null = null;
@@ -198,9 +216,16 @@ function readPerson(xref: string, body: GedcomLine[]): GedcomPerson {
     source = null;
   };
   const commitObject = () => {
-    const text = formatParts(object);
-    if (text) media.push(text);
+    const text = formatMedia(object);
+    if (text) {
+      if (object?.primary) media.unshift(text);
+      else media.push(text);
+    }
     object = null;
+  };
+  const commitPlace = () => {
+    if (place && (place.address || place.city || place.country || place.email)) places.push(place);
+    place = null;
   };
   for (const line of body) {
     if (line.tag === "CONC" || line.tag === "CONT") {
@@ -215,12 +240,14 @@ function readPerson(xref: string, body: GedcomLine[]): GedcomPerson {
       else if (conc === "title" && source) source.title += extra;
       else if (conc === "title" && object) object.title += extra;
       else if (conc === "file" && object) object.file += extra;
+      else if (conc === "addr" && place) place.address += extra;
       continue;
     }
     if (line.level === 1) {
       keepTran();
       commitSource();
       commitObject();
+      commitPlace();
       section = "";
       name = null;
       conc = "";
@@ -255,7 +282,13 @@ function readPerson(xref: string, body: GedcomLine[]): GedcomPerson {
       } else if (line.tag === "OBJE") {
         object = emptyParts(pointerOf(line.value));
         conc = "";
-      }
+      } else if (line.tag === "ADDR") {
+        place = emptyPlace(line.value, 2);
+        conc = "addr";
+      } else if (line.tag === "EMAIL") {
+        place = emptyPlace("", 2);
+        place.email = line.value;
+      } else if (line.tag === "RESI") section = "resi";
       continue;
     }
     if (line.level === 2 && name && line.tag === "GIVN" && line.value) {
@@ -281,6 +314,16 @@ function readPerson(xref: string, body: GedcomLine[]): GedcomPerson {
       conc = "nick";
     } else if (line.level === 2 && section === "death" && line.tag === "DATE") person.deathDate = clean(line.value);
     else if (line.level === 2 && section === "death" && line.tag === "PLAC") person.deathPlace = clean(line.value);
+    else if (line.level === 2 && (section === "resi" || section === "birth" || section === "death") && line.tag === "ADDR") {
+      commitPlace();
+      place = emptyPlace(line.value, section === "resi" ? 1 : section === "birth" ? 3 : 4);
+      conc = "addr";
+    } else if (place && (line.tag === "CITY" || line.tag === "CTRY" || line.tag === "EMAIL")) {
+      if (line.tag === "CITY") place.city = line.value;
+      else if (line.tag === "CTRY") place.country = line.value;
+      else place.email = line.value;
+      conc = "";
+    }
     else if (line.level === 2 && section === "death" && line.tag === "CAUS") {
       cause = line.value;
       conc = "cause";
@@ -303,13 +346,25 @@ function readPerson(xref: string, body: GedcomLine[]): GedcomPerson {
     } else if (object && line.tag === "TITL") {
       object.title = line.value;
       conc = "title";
-    } else if (line.level === 2 && jobs.length > 0 && line.tag === "PLAC" && section !== "birth" && section !== "death") {
+    } else if (object && line.tag === "FORM") {
+      object.form = line.value;
+      conc = "";
+    } else if (object && line.tag === "_PRIM" && /^(Y|YES|TRUE|1)$/i.test(line.value.trim())) {
+      object.primary = true;
+    } else if (line.level === 2 && jobs.length > 0 && line.tag === "PLAC" && section !== "birth" && section !== "death" && section !== "resi") {
       jobs[jobs.length - 1] += jobs[jobs.length - 1].trim() ? `, ${line.value}` : line.value;
     } else conc = "";
   }
   keepTran();
   commitSource();
   commitObject();
+  commitPlace();
+  const chosen = places.sort((a, b) => a.rank - b.rank)[0];
+  person.email = clean(places.map((item) => item.email).find((item) => item.trim()) ?? "");
+  const address = tidy(chosen?.address ?? "");
+  person.address = address === person.email ? "" : address;
+  person.city = clean(chosen?.city ?? "");
+  person.country = clean(chosen?.country ?? "");
   person.hebrewGiven = hebrew?.given ?? "";
   person.hebrewSurname = hebrew?.surname ?? "";
   person.note = tidy(plainNote(person.note));
@@ -370,18 +425,38 @@ function emptyPerson(xref: string): GedcomPerson {
     occupation: "",
     source: "",
     media: "",
+    address: "",
+    city: "",
+    country: "",
+    email: "",
   };
 }
 
-type TextParts = { head: string; page: string; text: string; title: string; file: string };
-type ConcTarget = "" | "note" | "nick" | "cause" | "job" | "source" | "page" | "text" | "title" | "file";
+type TextParts = { head: string; page: string; text: string; title: string; file: string; form: string; primary: boolean };
+type PlaceBits = { address: string; city: string; country: string; email: string; rank: number };
+type ConcTarget = "" | "note" | "nick" | "cause" | "job" | "source" | "page" | "text" | "title" | "file" | "addr";
 
 function emptyParts(head = ""): TextParts {
-  return { head, page: "", text: "", title: "", file: "" };
+  return { head, page: "", text: "", title: "", file: "", form: "", primary: false };
+}
+
+function emptyPlace(address: string, rank: number): PlaceBits {
+  return { address, city: "", country: "", email: "", rank };
 }
 
 function pointerOf(value: string) {
   return value.match(/@[^@]+@/)?.[0] ?? "";
+}
+
+function formatMedia(parts: TextParts | null) {
+  if (!parts) return "";
+  const file = tidy(parts.file);
+  const title = clean(parts.title);
+  const form = clean(parts.form).replace(/^\./, "");
+  const target = file || tidy(parts.head);
+  if (!target && !title) return "";
+  if (form) return [title, target, form].filter(Boolean).join(" | ");
+  return title && target ? `${title} | ${target}` : target || title;
 }
 
 function formatParts(parts: TextParts | null) {
@@ -436,12 +511,14 @@ function readMediaRecord(body: GedcomLine[]) {
     if (line.tag === "FILE") {
       parts.file = line.value;
       conc = "file";
+    } else if (line.tag === "FORM") {
+      parts.form = line.value;
     } else if (line.tag === "TITL") {
       parts.title = line.value;
       conc = "title";
     }
   }
-  return formatParts(parts);
+  return formatMedia(parts);
 }
 
 function resolvePointers(value: string, records: Map<string, string>) {
@@ -567,6 +644,12 @@ export function gedcomText(tree: GedcomTree) {
     }
     for (const chunk of person.source.split(/\n{2,}/)) lines.push(...exportTagged(1, "SOUR", chunk));
     for (const item of person.media.split("\n")) lines.push(...mediaLines(item));
+    if (person.address.trim() || person.city.trim() || person.country.trim() || person.email.trim()) {
+      lines.push(...textLines(1, "ADDR", person.address));
+      if (person.city.trim()) lines.push(`2 CITY ${gedcomValue(person.city)}`);
+      if (person.country.trim()) lines.push(`2 CTRY ${gedcomValue(person.country)}`);
+      if (person.email.trim()) lines.push(`2 EMAIL ${gedcomValue(person.email)}`);
+    }
     if (person.note.trim()) lines.push(...textLines(1, "NOTE", person.note));
   }
   tree.unions.forEach((union, index) => {
@@ -630,15 +713,35 @@ function exportTagged(level: number, tag: string, value: string) {
   return textLines(level, tag, trimmed);
 }
 
+export function gedcomImageUrl(media: string) {
+  for (const item of media.split("\n")) {
+    const file = mediaParts(item).file;
+    if (/^https?:\/\//i.test(file)) return file;
+  }
+  return "";
+}
+
+function mediaParts(value: string) {
+  const bits = value.split(" | ").map((part) => part.trim()).filter(Boolean);
+  const formLike = (part: string) => /^(jpe?g|png|gif|webp|bmp|tiff?|pdf)$/i.test(part);
+  if (bits.length >= 2 && formLike(bits[bits.length - 1])) {
+    const form = bits.pop() ?? "";
+    const file = bits.pop() ?? "";
+    return { title: bits.join(" | "), file, form };
+  }
+  const splitAt = value.lastIndexOf(" | ");
+  if (splitAt < 0) return { title: "", file: value.trim(), form: "" };
+  return { title: value.slice(0, splitAt).trim(), file: value.slice(splitAt + 3).trim(), form: "" };
+}
+
 function mediaLines(value: string) {
   const trimmed = value.trim();
   if (!trimmed) return [];
   if (/^@[^@]+@$/.test(trimmed)) return [`1 OBJE ${trimmed}`];
-  const splitAt = trimmed.lastIndexOf(" | ");
-  const title = splitAt >= 0 ? trimmed.slice(0, splitAt).trim() : "";
-  const file = splitAt >= 0 ? trimmed.slice(splitAt + 3).trim() : trimmed;
+  const { title, file, form } = mediaParts(trimmed);
   const lines = ["1 OBJE"];
   if (file) lines.push(...textLines(2, "FILE", file));
+  if (form) lines.push(`3 FORM ${gedcomValue(form)}`);
   if (title) lines.push(...textLines(2, "TITL", title));
   return lines;
 }

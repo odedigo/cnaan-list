@@ -1,4 +1,4 @@
-/** Places every person in a family chart, grouped by parents and spouses. */
+/** Places every person in a family chart, grouped by parents and spouses. A spouse keeps their own ancestors on rows above them, and the chart grows taller to make room. */
 
 import type { FamilyChild, FamilyPerson, FamilyUnion, UnionStatus } from "@/lib/family-trees";
 
@@ -20,10 +20,17 @@ export type TreeLine = {
   points: TreePoint[];
   kind: "spouse" | "child";
   status?: UnionStatus;
+  color?: string;
 };
 
+export const FAMILY_LINE_COLORS = ["#0369a1", "#c2410c", "#6d28d9", "#3f6212", "#a16207", "#9f1239", "#0e7490", "#7c2d12", "#4338ca", "#be185d"];
+
 type Placed = { id: string; x: number; y: number; depth: number };
-type Span = { left: number; right: number; boxes: Placed[] };
+type Phantom = { id: string; x: number };
+type Span = { left: number; right: number; packLeft: number; packRight: number; boxes: Placed[]; phantoms: Phantom[] };
+type Reserve = { id: string; side: "start" | "end"; width: number };
+
+const EMPTY_SPAN: Span = { left: 0, right: 0, packLeft: 0, packRight: 0, boxes: [], phantoms: [] };
 
 export function layoutTree(people: FamilyPerson[], unions: FamilyUnion[], children: FamilyChild[], linked?: ReadonlySet<string>) {
   const cardHeight = (id: string) => (linked?.has(id) ? CARD_H + LINKED_EXTRA : CARD_H);
@@ -49,19 +56,39 @@ export function layoutTree(people: FamilyPerson[], unions: FamilyUnion[], childr
     }
   }
 
+  const parentsOf = new Map<string, string[]>();
+  for (const union of unions) {
+    const parents = [union.partner_a, union.partner_b].filter((id): id is string => Boolean(id && known.has(id)));
+    for (const link of kidsByUnion.get(union.id) ?? []) {
+      const list = parentsOf.get(link.person_id) ?? [];
+      for (const parent of parents) if (!list.includes(parent)) list.push(parent);
+      parentsOf.set(link.person_id, list);
+    }
+  }
+
   const visited = new Set<string>();
   const boxes: Placed[] = [];
   let cursor = 0;
 
   function place(span: Span) {
     if (span.boxes.length === 0) return;
-    const shift = cursor - span.left;
-    for (const box of span.boxes) boxes.push({ id: box.id, x: box.x + shift, y: box.y, depth: box.depth });
-    cursor = span.right + shift + GAP_X * 3;
+    const shift = cursor - span.packLeft;
+    for (const box of span.boxes) boxes.push({ ...box, x: box.x + shift });
+    cursor = span.packRight + shift + GAP_X * 3;
   }
 
-  function layoutDown(personId: string, depth: number, stack: Set<string>): Span {
-    if (!known.has(personId) || stack.has(personId) || visited.has(personId)) return { left: 0, right: 0, boxes: [] };
+  function layoutAncestors(childId: string, holeLeft: number, holeWidth: number, childDepth: number, stack: Set<string>, side: Reserve["side"]) {
+    const parents = (parentsOf.get(childId) ?? []).filter((id) => !visited.has(id) && !stack.has(id));
+    if (parents.length === 0) return [];
+    const span = layoutDown(parents[0], childDepth - 1, stack, { id: childId, side, width: holeWidth });
+    const phantom = span.phantoms.find((item) => item.id === childId);
+    const anchor = phantom ? phantom.x : (span.packLeft + span.packRight) / 2 - holeWidth / 2;
+    const shift = holeLeft - anchor;
+    return span.boxes.map((box) => ({ ...box, x: box.x + shift }));
+  }
+
+  function layoutDown(personId: string, depth: number, stack: Set<string>, reserve?: Reserve): Span {
+    if (!known.has(personId) || stack.has(personId) || visited.has(personId)) return EMPTY_SPAN;
     visited.add(personId);
     const next = new Set(stack);
     next.add(personId);
@@ -70,6 +97,7 @@ export function layoutTree(people: FamilyPerson[], unions: FamilyUnion[], childr
     const memberSet = new Set(members);
     const pending = [personId];
     const childList: string[] = [];
+    const phantomIds: string[] = [];
     const childSeen = new Set<string>();
     while (pending.length > 0) {
       const current = pending.shift() ?? "";
@@ -84,50 +112,89 @@ export function layoutTree(people: FamilyPerson[], unions: FamilyUnion[], childr
         }
         for (const link of kidsByUnion.get(union.id) ?? []) {
           const childId = link.person_id;
-          if (childSeen.has(childId) || memberSet.has(childId) || visited.has(childId) || next.has(childId)) continue;
+          if (childSeen.has(childId) || memberSet.has(childId)) continue;
+          if (next.has(childId) && childId !== reserve?.id) continue;
           childSeen.add(childId);
+          if (visited.has(childId)) {
+            if (reserve && childId === reserve.id) phantomIds.push(childId);
+            continue;
+          }
           childList.push(childId);
         }
       }
     }
 
-    const childSpans: Span[] = [];
+    const rowIds = reserve?.side === "start" ? [...phantomIds, ...childList] : [...childList, ...phantomIds];
+    const slots: { coreLeft: number; coreRight: number; boxes: Placed[]; phantom?: Phantom }[] = [];
     let childCursor = 0;
-    for (const childId of childList) {
+    for (const childId of rowIds) {
+      if (phantomIds.includes(childId)) {
+        const width = reserve?.width ?? CARD_W;
+        const left = childCursor;
+        slots.push({ coreLeft: left, coreRight: left + width, boxes: [], phantom: { id: childId, x: left } });
+        childCursor = left + width + GAP_X;
+        continue;
+      }
       const span = layoutDown(childId, depth + 1, next);
       if (span.boxes.length === 0) continue;
-      const shift = childCursor - span.left;
-      childSpans.push({
-        left: span.left + shift,
-        right: span.right + shift,
-        boxes: span.boxes.map((box) => ({ id: box.id, x: box.x + shift, y: box.y, depth: box.depth })),
+      const shift = childCursor - span.packLeft;
+      slots.push({
+        coreLeft: span.left + shift,
+        coreRight: span.right + shift,
+        boxes: span.boxes.map((box) => ({ ...box, x: box.x + shift })),
       });
-      childCursor = span.right + shift + GAP_X;
+      childCursor = span.packRight + shift + GAP_X;
     }
 
     const membersWidth = members.length * CARD_W + Math.max(0, members.length - 1) * GAP_X;
     const spouses = members.slice(1);
     const ordered = spouses.length > 1 ? [spouses[0], members[0], ...spouses.slice(1)] : members;
+    const reserved = reserve ? slots.find((slot) => slot.phantom?.id === reserve.id) : undefined;
     let memberStart = 0;
-    let spanLeft = 0;
-    let spanRight = membersWidth;
-    if (childSpans.length > 0) {
-      const childrenLeft = childSpans[0].left;
-      const childrenRight = childSpans[childSpans.length - 1].right;
+    if (reserved?.phantom) {
+      memberStart = reserved.phantom.x + (reserve?.width ?? CARD_W) / 2 - membersWidth / 2;
+    } else if (slots.length > 0) {
+      const childrenLeft = Math.min(...slots.map((slot) => slot.coreLeft));
+      const childrenRight = Math.max(...slots.map((slot) => slot.coreRight));
       memberStart = (childrenLeft + childrenRight) / 2 - membersWidth / 2;
-      spanLeft = Math.min(memberStart, childrenLeft);
-      spanRight = Math.max(memberStart + membersWidth, childrenRight);
     }
-    const memberBoxes = ordered.map((id, index) => ({
+    const memberBoxes: Placed[] = ordered.map((id, index) => ({
       id,
       x: memberStart + index * (CARD_W + GAP_X),
       y: 0,
       depth,
     }));
+    const primaryX = memberBoxes.find((box) => box.id === members[0])?.x ?? memberStart;
+    const extra: Placed[] = [];
+    for (const box of memberBoxes) {
+      const parents = (parentsOf.get(box.id) ?? []).filter((id) => !visited.has(id) && !next.has(id));
+      if (parents.length === 0) continue;
+      const leftEdge = Math.min(primaryX, box.x);
+      const holeLeft = box.x <= primaryX ? leftEdge : box.x;
+      const holeWidth = box.x <= primaryX ? primaryX + CARD_W - leftEdge : CARD_W;
+      const side: Reserve["side"] = box.x <= primaryX ? "end" : "start";
+      extra.push(...layoutAncestors(box.id, holeLeft, holeWidth, depth, next, side));
+    }
+    const all = [...memberBoxes, ...slots.flatMap((slot) => slot.boxes), ...extra];
+    let left = memberStart;
+    let right = memberStart + membersWidth;
+    for (const slot of slots) {
+      left = Math.min(left, slot.coreLeft);
+      right = Math.max(right, slot.coreRight);
+    }
+    let packLeft = left;
+    let packRight = right;
+    for (const box of all) {
+      packLeft = Math.min(packLeft, box.x);
+      packRight = Math.max(packRight, box.x + CARD_W);
+    }
     return {
-      left: spanLeft,
-      right: spanRight,
-      boxes: [...memberBoxes, ...childSpans.flatMap((span) => span.boxes)],
+      left,
+      right,
+      packLeft,
+      packRight,
+      boxes: all,
+      phantoms: slots.flatMap((slot) => (slot.phantom ? [slot.phantom] : [])),
     };
   }
 
@@ -153,6 +220,9 @@ export function layoutTree(people: FamilyPerson[], unions: FamilyUnion[], childr
   }
 
   const placedList = uniqueBoxes(boxes);
+  openDepths(placedList, unions, kidsByUnion);
+  const minDepth = placedList.reduce((min, box) => Math.min(min, box.depth), 0);
+  if (minDepth < 0) for (const box of placedList) box.depth -= minDepth;
   const placed = new Map(placedList.map((box) => [box.id, box]));
   const maxDepth = placedList.reduce((max, box) => Math.max(max, box.depth), 0);
   const heightAt = new Map<number, number>();
@@ -233,12 +303,13 @@ export function layoutTree(people: FamilyPerson[], unions: FamilyUnion[], childr
   for (const box of placedList) box.y = genY[box.depth] ?? 16;
 
   const routes: Route[] = [];
+  const lineage = familyLineColors(unions, children);
   function busY(gap: number, lane: number) {
     const top = (genY[gap] ?? 16) + (heightAt.get(gap) ?? CARD_H) + BAND_PAD;
     return top + lane * LANE;
   }
-  function addRoute(points: TreePoint[], kind: Route["kind"], status?: UnionStatus) {
-    const route = routeOf(points, kind, status);
+  function addRoute(points: TreePoint[], kind: Route["kind"], status?: UnionStatus, color?: string) {
+    const route = routeOf(points, kind, status, color);
     if (route.points.length >= 2) routes.push(route);
   }
 
@@ -297,12 +368,16 @@ export function layoutTree(people: FamilyPerson[], unions: FamilyUnion[], childr
       const childXs = kids.map((kid) => kid.x + CARD_W / 2);
       const left = Math.min(anchor.x, ...childXs);
       const right = Math.max(anchor.x, ...childXs);
+      const kidColors = kids.map((kid) => lineage.get(kid.id));
+      const shared = kidColors.every((color) => color && color === kidColors[0]) ? kidColors[0] : undefined;
       addRoute(
         [
           { x: anchor.x, y: anchor.y },
           { x: anchor.x, y },
         ],
         "child",
+        undefined,
+        shared,
       );
       if (right - left > 1) {
         addRoute(
@@ -311,6 +386,8 @@ export function layoutTree(people: FamilyPerson[], unions: FamilyUnion[], childr
             { x: right, y },
           ],
           "child",
+          undefined,
+          shared,
         );
       }
       for (const kid of kids) {
@@ -321,6 +398,8 @@ export function layoutTree(people: FamilyPerson[], unions: FamilyUnion[], childr
             { x, y: kid.y },
           ],
           "child",
+          undefined,
+          lineage.get(kid.id),
         );
       }
     }
@@ -369,7 +448,7 @@ export function rootPersonId(people: FamilyPerson[], children: FamilyChild[]) {
   return people.find((person) => !childIds.has(person.id))?.id ?? people[0].id;
 }
 
-type Route = { points: TreePoint[]; kind: TreeLine["kind"]; status?: UnionStatus };
+type Route = { points: TreePoint[]; kind: TreeLine["kind"]; status?: UnionStatus; color?: string };
 
 function cardExitX(box: Placed, towardX: number) {
   return towardX >= box.x + CARD_W / 2 ? box.x + CARD_W : box.x;
@@ -426,7 +505,7 @@ function rangeOverlap(a1: number, a2: number, b1: number, b2: number) {
   return right - left > 1;
 }
 
-function routeOf(points: TreePoint[], kind: Route["kind"], status?: UnionStatus): Route {
+function routeOf(points: TreePoint[], kind: Route["kind"], status?: UnionStatus, color?: string): Route {
   const next: TreePoint[] = [];
   for (const point of points) {
     const previous = next[next.length - 1];
@@ -444,7 +523,7 @@ function routeOf(points: TreePoint[], kind: Route["kind"], status?: UnionStatus)
     }
     next.push(point);
   }
-  return { points: next, kind, status };
+  return { points: next, kind, status, color };
 }
 
 function toTreeLine(route: Route): TreeLine {
@@ -458,7 +537,194 @@ function toTreeLine(route: Route): TreeLine {
     points: route.points,
     kind: route.kind,
     status: route.status,
+    color: route.color,
   };
+}
+
+/** Each spouse who has ancestors in the tree gets a color, shared with the ancestors above them. */
+export function familyLineColors(unions: FamilyUnion[], children: FamilyChild[]) {
+  const parentsOf = new Map<string, string[]>();
+  const linksByUnion = new Map<string, FamilyChild[]>();
+  for (const link of children) {
+    const list = linksByUnion.get(link.union_id) ?? [];
+    list.push(link);
+    linksByUnion.set(link.union_id, list);
+  }
+  for (const union of unions) {
+    const parents = [union.partner_a, union.partner_b].filter((id): id is string => Boolean(id));
+    for (const link of linksByUnion.get(union.id) ?? []) {
+      const list = parentsOf.get(link.person_id) ?? [];
+      for (const parent of parents) if (!list.includes(parent)) list.push(parent);
+      parentsOf.set(link.person_id, list);
+    }
+  }
+  const depthOf = new Map<string, number>();
+  const ancestorDepth = (id: string, stack: Set<string>): number => {
+    const cached = depthOf.get(id);
+    if (cached !== undefined) return cached;
+    if (stack.has(id)) return 0;
+    const parents = parentsOf.get(id) ?? [];
+    if (parents.length === 0) {
+      depthOf.set(id, 0);
+      return 0;
+    }
+    stack.add(id);
+    let depth = 0;
+    for (const parent of parents) depth = Math.max(depth, ancestorDepth(parent, stack));
+    stack.delete(id);
+    const value = depth + 1;
+    depthOf.set(id, value);
+    return value;
+  };
+  const paintUp = (id: string, value: string) => {
+    const stack = new Set<string>([id]);
+    const walk = (current: string) => {
+      for (const parent of parentsOf.get(current) ?? []) {
+        if (stack.has(parent) || color.has(parent)) continue;
+        stack.add(parent);
+        color.set(parent, value);
+        walk(parent);
+      }
+    };
+    walk(id);
+  };
+  const color = new Map<string, string>();
+  let cursor = 0;
+  const take = () => {
+    const value = FAMILY_LINE_COLORS[cursor % FAMILY_LINE_COLORS.length];
+    cursor += 1;
+    return value;
+  };
+  const couples = unions.filter((union) => union.partner_a && union.partner_b && parentsOf.has(union.partner_a) && parentsOf.has(union.partner_b));
+  couples.sort((a, b) => {
+    const left = Math.max(ancestorDepth(a.partner_a, new Set()), ancestorDepth(a.partner_b ?? "", new Set()));
+    const right = Math.max(ancestorDepth(b.partner_a, new Set()), ancestorDepth(b.partner_b ?? "", new Set()));
+    return right - left;
+  });
+  for (const union of couples) {
+    const first = union.partner_a;
+    const second = union.partner_b ?? "";
+    let firstColor = color.get(first);
+    let secondColor = color.get(second);
+    if (!firstColor) {
+      firstColor = take();
+      color.set(first, firstColor);
+    }
+    if (!secondColor || secondColor === firstColor) {
+      secondColor = take();
+      if (secondColor === firstColor) secondColor = take();
+      color.set(second, secondColor);
+    }
+    paintUp(first, firstColor);
+    paintUp(second, secondColor);
+  }
+  return color;
+}
+
+function parentMap(boxes: Placed[], unions: FamilyUnion[], kidsByUnion: Map<string, FamilyChild[]>) {
+  const known = new Set(boxes.map((box) => box.id));
+  const parentsOf = new Map<string, string[]>();
+  for (const union of unions) {
+    const parents = [union.partner_a, union.partner_b].filter((id): id is string => Boolean(id && known.has(id)));
+    for (const link of kidsByUnion.get(union.id) ?? []) {
+      if (!known.has(link.person_id)) continue;
+      const list = parentsOf.get(link.person_id) ?? [];
+      for (const parent of parents) if (!list.includes(parent)) list.push(parent);
+      parentsOf.set(link.person_id, list);
+    }
+  }
+  return parentsOf;
+}
+
+function rangesOverlap(a: Placed, b: Placed) {
+  return a.id !== b.id && a.depth === b.depth && a.x < b.x + CARD_W + GAP_X && b.x < a.x + CARD_W + GAP_X;
+}
+
+function liftCrowdedParents(boxes: Placed[], unions: FamilyUnion[], kidsByUnion: Map<string, FamilyChild[]>) {
+  const byId = new Map(boxes.map((box) => [box.id, box]));
+  const parentsOf = parentMap(boxes, unions, kidsByUnion);
+  let guard = 24;
+  while (guard-- > 0) {
+    let lifted = false;
+    for (const child of boxes) {
+      const parents = (parentsOf.get(child.id) ?? []).map((id) => byId.get(id)).filter((box): box is Placed => Boolean(box));
+      if (parents.length === 0) continue;
+      const parentIds = new Set(parents.map((box) => box.id));
+      const crowded = parents.some((parent) => boxes.some((other) => rangesOverlap(parent, other) && !parentIds.has(other.id)));
+      if (!crowded) continue;
+      const seen = new Set<string>();
+      const queue = [...parentIds];
+      while (queue.length > 0) {
+        const id = queue.shift() ?? "";
+        if (seen.has(id)) continue;
+        seen.add(id);
+        const ancestor = byId.get(id);
+        if (ancestor) ancestor.depth -= 1;
+        for (const up of parentsOf.get(id) ?? []) queue.push(up);
+        for (const union of unions) {
+          const other = union.partner_a === id ? union.partner_b : union.partner_b === id ? union.partner_a : null;
+          if (other && byId.has(other)) queue.push(other);
+        }
+      }
+      lifted = true;
+      break;
+    }
+    if (!lifted) break;
+  }
+  let min = 0;
+  for (const box of boxes) min = Math.min(min, box.depth);
+  if (min !== 0) for (const box of boxes) box.depth -= min;
+}
+
+function openDepths(boxes: Placed[], unions: FamilyUnion[], kidsByUnion: Map<string, FamilyChild[]>) {
+  if (boxes.length === 0) return;
+  const byId = new Map(boxes.map((box) => [box.id, box]));
+  const parentsOf = new Map<string, string[]>();
+  for (const union of unions) {
+    const parents = [union.partner_a, union.partner_b].filter((id): id is string => Boolean(id && byId.has(id)));
+    for (const link of kidsByUnion.get(union.id) ?? []) {
+      if (!byId.has(link.person_id)) continue;
+      const kids = parentsOf.get(link.person_id) ?? [];
+      for (const parent of parents) if (!kids.includes(parent)) kids.push(parent);
+      parentsOf.set(link.person_id, kids);
+    }
+  }
+  const cap = boxes.length;
+  const normalize = () => {
+    let min = 0;
+    for (const box of boxes) min = Math.min(min, box.depth);
+    if (min !== 0) for (const box of boxes) box.depth -= min;
+  };
+  normalize();
+  let guard = cap + 2;
+  let changed = true;
+  while (changed && guard-- > 0) {
+    changed = false;
+    for (const [childId, parents] of parentsOf) {
+      const child = byId.get(childId);
+      if (!child || parents.length === 0) continue;
+      const need = Math.min(cap, Math.max(...parents.map((id) => byId.get(id)?.depth ?? 0)) + 1);
+      if (child.depth < need) {
+        child.depth = need;
+        changed = true;
+      }
+    }
+    for (const union of unions) {
+      const first = union.partner_a ? byId.get(union.partner_a) : undefined;
+      const second = union.partner_b ? byId.get(union.partner_b) : undefined;
+      if (!first || !second || first.depth === second.depth) continue;
+      const target = Math.min(cap, Math.max(first.depth, second.depth));
+      if (first.depth !== target) {
+        first.depth = target;
+        changed = true;
+      }
+      if (second.depth !== target) {
+        second.depth = target;
+        changed = true;
+      }
+    }
+  }
+  normalize();
 }
 
 function uniqueBoxes(boxes: Placed[]) {

@@ -246,6 +246,15 @@ export function ClearMarksIcon(props: IconProps) {
   );
 }
 
+export function UnlinkIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true" {...props}>
+      <path d="M10 8.2H7.6a3.5 3.5 0 0 0 0 7h2.4" strokeLinecap="round" />
+      <path d="M14 8.2h2.4a3.5 3.5 0 0 1 0 7H14" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export function TrashIcon(props: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" {...props}>

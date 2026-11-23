@@ -5,8 +5,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
-import { ChevronIcon, FolderIcon, HomeIcon, LegendIcon, LinkIcon, PlusIcon, SearchIcon, TrashIcon } from "@/components/icons";
-import { CARD_H, CARD_W, layoutTree, rootPersonId, spousesOutsideFamily, type TreeLine } from "@/lib/family-layout";
+import { ChevronIcon, CloseIcon, FolderIcon, HomeIcon, LegendIcon, LinkIcon, PlusIcon, SearchIcon, TrashIcon } from "@/components/icons";
+import { CARD_H, CARD_W, FAMILY_LINE_COLORS, familyLineColors, layoutTree, rootPersonId, spousesOutsideFamily, type TreeBox, type TreeLine } from "@/lib/family-layout";
 import { personLabel, personName, UNION_STATUSES, unionStatusLabel, type FamilyGraph, type FamilyLink, type FamilyPerson, type FamilyPersonBrief, type FamilyTree, type PersonDraft, type SpouseInput, type UnionStatus } from "@/lib/family-trees";
 import { plainNote } from "@/lib/gedcom";
 import { readTreeHebrewNames, treeHebrewNamesEvent } from "@/lib/tree-hebrew-names";
@@ -44,7 +44,7 @@ export function TreeEditor({
   trees,
   focusPersonId,
   focusToken,
-  onOpenLink,
+  onLoadGraph,
   onLinkPerson,
   onUnlinkPerson,
   onLoadTreePeople,
@@ -69,7 +69,7 @@ export function TreeEditor({
   trees: FamilyTree[];
   focusPersonId: string | null;
   focusToken: number;
-  onOpenLink: (treeId: string, personId: string) => void;
+  onLoadGraph: (treeId: string) => Promise<FamilyGraph>;
   onLinkPerson: (personId: string, otherId: string) => Promise<void>;
   onUnlinkPerson: (personId: string) => Promise<void>;
   onLoadTreePeople: (treeId: string) => Promise<FamilyPersonBrief[]>;
@@ -83,9 +83,11 @@ export function TreeEditor({
   const [searchOpen, setSearchOpen] = useState(false);
   const [legendOpen, setLegendOpen] = useState(false);
   const [jump, setJump] = useState<{ id: string; token: number } | null>(null);
-  const [linkMenu, setLinkMenu] = useState<{ x: number; y: number; links: FamilyLink[] } | null>(null);
+  const [linkMenu, setLinkMenu] = useState<{ x: number; y: number; anchorId: string; links: FamilyLink[] } | null>(null);
+  const [inset, setInset] = useState<EmbeddedTree | null>(null);
   const [hebrewNames, setHebrewNames] = useState(true);
   const appliedFocus = useRef(0);
+  const insetRequest = useRef(0);
 
   useEffect(() => setReady(true), []);
   useEffect(() => {
@@ -122,6 +124,33 @@ export function TreeEditor({
     setSelectedId(null);
     setDetailsOpen(false);
   }, [graph, selectedId]);
+  useEffect(() => {
+    setInset(null);
+  }, [graph?.people[0]?.tree_id]);
+
+  function showLinked(anchorId: string, treeId: string, personId: string) {
+    const treeName = trees.find((row) => row.id === treeId)?.name ?? "עץ";
+    const request = insetRequest.current + 1;
+    insetRequest.current = request;
+    setDetailsOpen(false);
+    setLinkMenu(null);
+    setJump({ id: anchorId, token: Date.now() });
+    setInset({ anchorId, treeId, treeName, personId, graph: null, loading: true, error: "", stamp: request });
+    void onLoadGraph(treeId)
+      .then((loaded) => {
+        if (insetRequest.current !== request) return;
+        const opened = graph ? peopleOnlyInTree(graph, loaded, personId) : null;
+        if (opened && opened.people.every((person) => person.id === personId)) {
+          setInset(null);
+          return;
+        }
+        setInset((current) => (current && current.stamp === request ? { ...current, graph: loaded, loading: false } : current));
+      })
+      .catch(() => {
+        if (insetRequest.current !== request) return;
+        setInset((current) => (current && current.stamp === request ? { ...current, loading: false, error: "לא ניתן לטעון את העץ" } : current));
+      });
+  }
 
   if (!ready) return null;
 
@@ -164,14 +193,19 @@ export function TreeEditor({
         onLoadImage={onLoadImage}
         links={links}
         hebrewNames={hebrewNames}
+        inset={inset}
+        onCloseInset={() => {
+          insetRequest.current += 1;
+          setInset(null);
+        }}
         onOpenLinks={(personId, x, y) => {
           const list = links[personId] ?? [];
           if (list.length === 0) return;
           if (list.length === 1) {
-            onOpenLink(list[0].treeId, list[0].personId);
+            showLinked(personId, list[0].treeId, list[0].personId);
             return;
           }
-          setLinkMenu({ x, y, links: list });
+          setLinkMenu({ x, y, anchorId: personId, links: list });
         }}
       />
       <div className="absolute start-3 top-3 z-20 flex items-start gap-2">
@@ -231,7 +265,7 @@ export function TreeEditor({
           onImage={(file) => onPersonImage(selected.id, file)}
           links={links[selected.id] ?? []}
           otherTrees={trees.filter((row) => row.id !== selected.tree_id)}
-          onOpenLink={onOpenLink}
+          onOpenLink={(treeId, personId) => showLinked(selected.id, treeId, personId)}
           onLinkPerson={(otherId) => onLinkPerson(selected.id, otherId)}
           onUnlink={() => onUnlinkPerson(selected.id)}
           onLoadTreePeople={onLoadTreePeople}
@@ -292,8 +326,9 @@ export function TreeEditor({
                 role="menuitem"
                 className="block w-full px-3 py-2 text-start"
                 onClick={() => {
+                  const anchorId = linkMenu.anchorId;
                   setLinkMenu(null);
-                  onOpenLink(link.treeId, link.personId);
+                  showLinked(anchorId, link.treeId, link.personId);
                 }}
               >
                 <span className="block truncate font-medium">{link.treeName}</span>
@@ -307,6 +342,345 @@ export function TreeEditor({
   );
 
   return createPortal(panel, document.body);
+}
+
+type EmbeddedTree = {
+  anchorId: string;
+  treeId: string;
+  treeName: string;
+  personId: string;
+  graph: FamilyGraph | null;
+  loading: boolean;
+  error: string;
+  stamp: number;
+};
+
+type TreePanel = { x: number; y: number; w: number; h: number };
+
+function embedScene(layout: { boxes: TreeBox[]; lines: TreeLine[] }, source: FamilyGraph | null, inset: EmbeddedTree | null) {
+  const empty = {
+    boxes: layout.boxes,
+    lines: layout.lines,
+    panels: [] as TreePanel[],
+    focus: null as TreePanel | null,
+    insetBoxes: [] as TreeBox[],
+    insetLines: [] as TreeLine[],
+    insetPeople: [] as FamilyPerson[],
+    insetOutside: new Set<string>(),
+    insetColor: new Map<string, string>(),
+  };
+  if (!inset || !source) return empty;
+  const anchor = layout.boxes.find((box) => box.id === inset.anchorId);
+  if (!anchor) return empty;
+  if (!inset.graph) {
+    const panel = { x: anchor.x + CARD_W + 36, y: anchor.y + anchor.height / 2 - 74, w: 220, h: 148 };
+    const cleared = clearAround(layout, inset.anchorId, [panel], []);
+    return { ...empty, boxes: cleared.boxes, lines: cleared.lines, panels: [panel], focus: panel };
+  }
+  const filtered = peopleOnlyInTree(source, inset.graph, inset.personId);
+  const shown = filtered.people.filter((person) => person.id !== inset.personId);
+  if (shown.length === 0) return empty;
+  const other = layoutTree(filtered.people, filtered.unions, filtered.children);
+  const ghost = other.boxes.find((box) => box.id === inset.personId);
+  if (!ghost) return empty;
+  const dx = anchor.x - ghost.x;
+  const dy = anchor.y - ghost.y;
+  const insetBoxes = other.boxes.filter((box) => box.id !== ghost.id).map((box) => ({ ...box, x: box.x + dx, y: box.y + dy }));
+  const insetLines = other.lines.map((line) => shiftLine(line, dx, dy));
+  const panels = groupAround(insetBoxes, anchor).flatMap((group) => {
+    const panel = frameOf(group, anchor);
+    return panel ? [panel] : [];
+  });
+  const cleared = clearAround(layout, inset.anchorId, panels, insetBoxes);
+  const focus = unionPanel(panels);
+  return {
+    boxes: cleared.boxes,
+    lines: cleared.lines,
+    panels,
+    focus,
+    insetBoxes,
+    insetLines,
+    insetPeople: shown,
+    insetOutside: spousesOutsideFamily(filtered.unions, filtered.children),
+    insetColor: familyLineColors(filtered.unions, filtered.children),
+  };
+}
+
+function peopleOnlyInTree(source: FamilyGraph, other: FamilyGraph, linkedPersonId: string): FamilyGraph {
+  const sourceLinks = new Set(source.people.flatMap((person) => (person.link_id ? [person.link_id] : [])));
+  const drop = new Set(
+    other.people.filter((person) => person.id !== linkedPersonId && person.link_id !== null && sourceLinks.has(person.link_id)).map((person) => person.id),
+  );
+  const people = other.people.filter((person) => !drop.has(person.id));
+  const ids = new Set(people.map((person) => person.id));
+  const unions = other.unions.filter((union) => (union.partner_a && ids.has(union.partner_a)) || (union.partner_b && ids.has(union.partner_b)));
+  const unionIds = new Set(unions.map((union) => union.id));
+  const children = other.children.filter((link) => ids.has(link.person_id) && unionIds.has(link.union_id));
+  return { people, unions, children };
+}
+
+function shiftLine(line: TreeLine, dx: number, dy: number): TreeLine {
+  const points = line.points.map((point) => ({ x: point.x + dx, y: point.y + dy }));
+  const first = points[0] ?? { x: line.x1 + dx, y: line.y1 + dy };
+  const last = points[points.length - 1] ?? first;
+  return { ...line, x1: first.x, y1: first.y, x2: last.x, y2: last.y, points };
+}
+
+function groupAround(boxes: TreeBox[], anchor: TreeBox) {
+  const above: TreeBox[] = [];
+  const below: TreeBox[] = [];
+  const left: TreeBox[] = [];
+  const right: TreeBox[] = [];
+  for (const box of boxes) {
+    const midY = box.y + box.height / 2;
+    const midX = box.x + CARD_W / 2;
+    if (midY < anchor.y) above.push(box);
+    else if (midY > anchor.y + anchor.height) below.push(box);
+    else if (midX < anchor.x) left.push(box);
+    else right.push(box);
+  }
+  return [above, below, left, right].filter((group) => group.length > 0);
+}
+
+function frameOf(boxes: TreeBox[], anchor: TreeBox): TreePanel | null {
+  const bounds = boundsOf(boxes);
+  if (!bounds) return null;
+  const pad = 28;
+  const head = 36;
+  const gap = 16;
+  let x = bounds.minX - pad;
+  let y = bounds.minY - pad - head;
+  let right = bounds.minX + bounds.width + pad;
+  let bottom = bounds.minY + bounds.height + pad;
+  if (bounds.minY + bounds.height <= anchor.y + 1) bottom = Math.min(bottom, anchor.y - gap);
+  if (bounds.minY >= anchor.y + anchor.height - 1) y = Math.max(y, anchor.y + anchor.height + gap);
+  if (bounds.minX + bounds.width <= anchor.x + 1) right = Math.min(right, anchor.x - gap);
+  if (bounds.minX >= anchor.x + CARD_W - 1) x = Math.max(x, anchor.x + CARD_W + gap);
+  if (right - x < 20 || bottom - y < 20) return null;
+  return { x, y, w: right - x, h: bottom - y };
+}
+
+function unionPanel(panels: TreePanel[]): TreePanel | null {
+  if (panels.length === 0) return null;
+  const x = Math.min(...panels.map((panel) => panel.x));
+  const y = Math.min(...panels.map((panel) => panel.y));
+  const right = Math.max(...panels.map((panel) => panel.x + panel.w));
+  const bottom = Math.max(...panels.map((panel) => panel.y + panel.h));
+  return { x, y, w: right - x, h: bottom - y };
+}
+
+function clearAround(source: { boxes: TreeBox[]; lines: TreeLine[] }, anchorId: string, panels: TreePanel[], obstacles: TreeBox[]) {
+  const anchor = source.boxes.find((box) => box.id === anchorId);
+  const zones = [...panels, ...obstacles.map((box) => ({ x: box.x, y: box.y, w: CARD_W, h: box.height }))];
+  if (!anchor || zones.length === 0) return source;
+  const blocked = zones.map((zone) => ({ x: zone.x - 12, y: zone.y - 12, w: zone.w + 24, h: zone.h + 24 }));
+  let moving = source.boxes.filter((box) => box.id !== anchorId && blocked.some((zone) => rectsOverlap(boxRect(box), zone)));
+  let guard = 0;
+  while (guard < source.boxes.length) {
+    guard += 1;
+    const push = moving.length === 0 ? 0 : Math.max(...moving.map((box) => rightEdge(zones) + 36 - box.x), 0);
+    const extra = source.boxes.filter((box) => box.id !== anchorId && !moving.some((item) => item.id === box.id) && moving.some((item) => rectsOverlap(boxRect({ ...item, x: item.x + push }), boxRect(box))));
+    if (extra.length === 0) break;
+    moving = [...moving, ...extra];
+  }
+  let push = moving.length === 0 ? 0 : Math.max(...moving.map((box) => rightEdge(zones) + 36 - box.x), 0);
+  let slide = 0;
+  while (slide < 12 && moving.some((box) => rectsOverlap(boxRect({ ...box, x: box.x + push }), boxRect(anchor)))) {
+    push += CARD_W + 36;
+    slide += 1;
+  }
+  const moved = new Map(moving.map((box) => [box.id, push]));
+  const boxes = source.boxes.map((box) => (moved.has(box.id) ? { ...box, x: box.x + push } : box));
+  const lines = source.lines.map((line) => retouchLine(line, source.boxes, moved, panels));
+  return { boxes, lines };
+}
+
+function retouchLine(line: TreeLine, before: TreeBox[], moved: Map<string, number>, panels: TreePanel[]): TreeLine {
+  const attached = line.points.flatMap((point) => {
+    const host = before.find((box) => pointOnBox(point, box));
+    return host ? [moved.get(host.id) ?? 0] : [];
+  });
+  const same = attached.length > 0 && attached.every((dx) => dx === attached[0]);
+  const shifted = line.points.map((point) => {
+    if (same) return { x: point.x + attached[0], y: point.y };
+    const host = before.find((box) => pointOnBox(point, box));
+    const dx = host ? moved.get(host.id) ?? 0 : 0;
+    return { x: point.x + dx, y: point.y };
+  });
+  const points = routeOutside(shifted, panels);
+  const first = points[0] ?? { x: line.x1, y: line.y1 };
+  const last = points[points.length - 1] ?? first;
+  return { ...line, x1: first.x, y1: first.y, x2: last.x, y2: last.y, points };
+}
+
+function routeOutside(points: { x: number; y: number }[], panels: TreePanel[]) {
+  if (points.length === 0) return points;
+  const safe = points.map((point) => panels.reduce((current, panel) => leavePanel(current, panel), point));
+  const next = [safe[0]];
+  for (let index = 1; index < safe.length; index += 1) next.push(...joinOutside(next[next.length - 1], safe[index], panels));
+  return straighten(next);
+}
+
+function joinOutside(from: { x: number; y: number }, to: { x: number; y: number }, panels: TreePanel[]) {
+  if (Math.hypot(from.x - to.x, from.y - to.y) < 0.5) return [];
+  const across = elbow(from, to, true);
+  if (pathClear(across, panels)) return across.slice(1);
+  const down = elbow(from, to, false);
+  if (pathClear(down, panels)) return down.slice(1);
+  const hit = panels.find((panel) => !pathClear([from, to], [panel]));
+  if (!hit) return across.slice(1);
+  const rails = [rail(from, to, hit.y - 16), rail(from, to, hit.y + hit.h + 16), rail(from, to, hit.x - 16, true), rail(from, to, hit.x + hit.w + 16, true)];
+  const clear = rails.find((path) => pathClear(path, panels));
+  return (clear ?? aroundCorners(from, to, hit)).slice(1);
+}
+
+function elbow(from: { x: number; y: number }, to: { x: number; y: number }, horizontalFirst: boolean) {
+  if (Math.abs(from.x - to.x) < 0.5 || Math.abs(from.y - to.y) < 0.5) return [from, to];
+  return [from, horizontalFirst ? { x: to.x, y: from.y } : { x: from.x, y: to.y }, to];
+}
+
+function rail(from: { x: number; y: number }, to: { x: number; y: number }, edge: number, vertical = false) {
+  if (vertical) return [from, { x: edge, y: from.y }, { x: edge, y: to.y }, to];
+  return [from, { x: from.x, y: edge }, { x: to.x, y: edge }, to];
+}
+
+function aroundCorners(from: { x: number; y: number }, to: { x: number; y: number }, panel: TreePanel) {
+  const gap = 16;
+  const corners = [
+    { x: panel.x - gap, y: panel.y - gap },
+    { x: panel.x + panel.w + gap, y: panel.y - gap },
+    { x: panel.x + panel.w + gap, y: panel.y + panel.h + gap },
+    { x: panel.x - gap, y: panel.y + panel.h + gap },
+  ];
+  const start = nearestIndex(from, corners);
+  const end = nearestIndex(to, corners);
+  const paths = [walkCorners(corners, start, end, 1), walkCorners(corners, start, end, -1)].map((points) => orthogonalChain([from, ...points, to]));
+  return paths.find((path) => pathClear(path, [panel])) ?? paths[0];
+}
+
+function orthogonalChain(points: { x: number; y: number }[]) {
+  const next = [points[0]];
+  for (let index = 1; index < points.length; index += 1) next.push(...elbow(next[next.length - 1], points[index], true).slice(1));
+  return next;
+}
+
+function walkCorners(corners: { x: number; y: number }[], start: number, end: number, step: number) {
+  const points = [corners[start]];
+  let index = start;
+  while (index !== end) {
+    index = (index + step + corners.length) % corners.length;
+    points.push(corners[index]);
+  }
+  return points;
+}
+
+function nearestIndex(point: { x: number; y: number }, corners: { x: number; y: number }[]) {
+  let best = 0;
+  corners.forEach((corner, index) => {
+    if (Math.hypot(corner.x - point.x, corner.y - point.y) < Math.hypot(corners[best].x - point.x, corners[best].y - point.y)) best = index;
+  });
+  return best;
+}
+
+function pathClear(points: { x: number; y: number }[], panels: TreePanel[]) {
+  if (points.some((point) => panels.some((panel) => insidePanel(point, panel)))) return false;
+  for (let index = 1; index < points.length; index += 1) {
+    if (panels.some((panel) => segmentHitsRect(points[index - 1], points[index], panel))) return false;
+  }
+  return true;
+}
+
+function segmentHitsRect(from: { x: number; y: number }, to: { x: number; y: number }, zone: TreePanel) {
+  if (insidePanel(from, zone) || insidePanel(to, zone)) return true;
+  const right = zone.x + zone.w;
+  const bottom = zone.y + zone.h;
+  if (Math.abs(from.y - to.y) <= 0.5) {
+    const y = from.y;
+    if (y <= zone.y || y >= bottom) return false;
+    return Math.max(from.x, to.x) > zone.x && Math.min(from.x, to.x) < right;
+  }
+  if (Math.abs(from.x - to.x) <= 0.5) {
+    const x = from.x;
+    if (x <= zone.x || x >= right) return false;
+    return Math.max(from.y, to.y) > zone.y && Math.min(from.y, to.y) < bottom;
+  }
+  return Math.max(from.x, to.x) > zone.x && Math.min(from.x, to.x) < right && Math.max(from.y, to.y) > zone.y && Math.min(from.y, to.y) < bottom;
+}
+
+function insidePanel(point: { x: number; y: number }, zone: TreePanel) {
+  return point.x > zone.x && point.x < zone.x + zone.w && point.y > zone.y && point.y < zone.y + zone.h;
+}
+
+function leavePanel(point: { x: number; y: number }, zone: TreePanel) {
+  if (!insidePanel(point, zone)) return point;
+  const gap = 16;
+  const options = [
+    { x: zone.x - gap, y: point.y },
+    { x: zone.x + zone.w + gap, y: point.y },
+    { x: point.x, y: zone.y - gap },
+    { x: point.x, y: zone.y + zone.h + gap },
+  ];
+  return options.reduce((best, option) => (Math.hypot(option.x - point.x, option.y - point.y) < Math.hypot(best.x - point.x, best.y - point.y) ? option : best));
+}
+
+function straighten(points: { x: number; y: number }[]) {
+  if (points.length === 0) return points;
+  const elbowed = [points[0]];
+  for (let index = 1; index < points.length; index += 1) {
+    const prev = elbowed[elbowed.length - 1];
+    const point = points[index];
+    if (Math.abs(prev.x - point.x) >= 0.5 && Math.abs(prev.y - point.y) >= 0.5) elbowed.push({ x: point.x, y: prev.y });
+    elbowed.push(point);
+  }
+  const next: { x: number; y: number }[] = [];
+  for (const point of elbowed) {
+    const prev = next[next.length - 1];
+    if (prev && Math.abs(prev.x - point.x) < 0.5 && Math.abs(prev.y - point.y) < 0.5) continue;
+    const before = next[next.length - 2];
+    if (prev && before && colinear(before, prev, point)) {
+      next[next.length - 1] = point;
+      continue;
+    }
+    next.push(point);
+  }
+  return next;
+}
+
+function colinear(a: { x: number; y: number }, b: { x: number; y: number }, c: { x: number; y: number }) {
+  const horizontal = Math.abs(a.y - b.y) < 0.5 && Math.abs(b.y - c.y) < 0.5;
+  const vertical = Math.abs(a.x - b.x) < 0.5 && Math.abs(b.x - c.x) < 0.5;
+  return horizontal || vertical;
+}
+
+function pointOnBox(point: { x: number; y: number }, box: TreeBox) {
+  return point.x >= box.x - 3 && point.x <= box.x + CARD_W + 3 && point.y >= box.y - 3 && point.y <= box.y + box.height + 3;
+}
+
+function boxRect(box: TreeBox) {
+  return { x: box.x, y: box.y, w: CARD_W, h: box.height };
+}
+
+function rectsOverlap(a: TreePanel, b: TreePanel) {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+function rightEdge(zones: TreePanel[]) {
+  return zones.reduce((edge, zone) => Math.max(edge, zone.x + zone.w), 0);
+}
+
+function boundsOf(boxes: TreeBox[]) {
+  if (boxes.length === 0) return null;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const box of boxes) {
+    minX = Math.min(minX, box.x);
+    minY = Math.min(minY, box.y);
+    maxX = Math.max(maxX, box.x + CARD_W);
+    maxY = Math.max(maxY, box.y + box.height);
+  }
+  return { minX, minY, width: maxX - minX, height: maxY - minY };
 }
 
 function Chart({
@@ -324,6 +698,8 @@ function Chart({
   onLoadImage,
   links,
   hebrewNames,
+  inset,
+  onCloseInset,
   onOpenLinks,
 }: {
   name: string;
@@ -340,6 +716,8 @@ function Chart({
   onLoadImage: (path: string) => Promise<Blob | null>;
   links: Record<string, FamilyLink[]>;
   hebrewNames: boolean;
+  inset: EmbeddedTree | null;
+  onCloseInset: () => void;
   onOpenLinks: (personId: string, x: number, y: number) => void;
 }) {
   const canvas = useRef<SVGSVGElement>(null);
@@ -363,15 +741,20 @@ function Chart({
   );
   const byId = useMemo(() => new Map(graph?.people.map((person) => [person.id, person]) ?? []), [graph]);
   const outsideFamily = useMemo(() => (graph ? spousesOutsideFamily(graph.unions, graph.children) : new Set<string>()), [graph]);
-  const photos = usePersonPhotos(graph?.people, onLoadImage);
+  const familyColor = useMemo(() => (graph ? familyLineColors(graph.unions, graph.children) : new Map<string, string>()), [graph]);
+  const scene = useMemo(() => embedScene(layout, graph, inset), [layout, graph, inset]);
+  const titlePanel = scene.panels.reduce<TreePanel | null>((top, panel) => (!top || panel.y < top.y ? panel : top), null);
+  const insetById = useMemo(() => new Map(scene.insetPeople.map((person) => [person.id, person])), [scene.insetPeople]);
+  const photos = usePersonPhotos([...(graph?.people ?? []), ...scene.insetPeople], onLoadImage);
+  const appliedInset = useRef(0);
 
   useLayoutEffect(() => {
     const node = canvas.current;
-    if (!node || layout.boxes.length === 0) return;
+    if (!node || scene.boxes.length === 0) return;
     const place = () => {
       const rect = node.getBoundingClientRect();
       if (rect.width < 40 || rect.height < 40) return;
-      const next = new Map(layout.boxes.map((box) => [box.id, box]));
+      const next = new Map(scene.boxes.map((box) => [box.id, box]));
       const previous = placed.current;
       const before = selectedId ? previous.get(selectedId) : undefined;
       const after = selectedId ? next.get(selectedId) : undefined;
@@ -385,15 +768,15 @@ function Chart({
         }));
         return;
       }
-      const sameTree = layout.boxes.some((box) => previous.has(box.id));
+      const sameTree = scene.boxes.some((box) => previous.has(box.id));
       if (previous.size > 0 && sameTree) return;
-      setView(centerView(layout.boxes, rect.width, rect.height));
+      setView(centerView(scene.boxes, rect.width, rect.height));
     };
     place();
     const observer = new ResizeObserver(place);
     observer.observe(node);
     return () => observer.disconnect();
-  }, [layout.boxes, selectedId]);
+  }, [scene.boxes, selectedId]);
 
   useEffect(() => {
     const node = canvas.current;
@@ -407,11 +790,11 @@ function Chart({
     };
     node.addEventListener("wheel", onWheel, { passive: false });
     return () => node.removeEventListener("wheel", onWheel);
-  }, [layout.boxes.length]);
+  }, [scene.boxes.length]);
 
   useLayoutEffect(() => {
     const node = canvas.current;
-    const box = layout.boxes.find((item) => item.id === jumpId);
+    const box = scene.boxes.find((item) => item.id === jumpId);
     if (!node || !box || !jumpToken || appliedJump.current === jumpToken) return;
     const rect = node.getBoundingClientRect();
     if (rect.width < 40 || rect.height < 40) return;
@@ -421,7 +804,26 @@ function Chart({
       x: rect.width / 2 - (box.x + CARD_W / 2),
       y: rect.height / 2 - (box.y + box.height / 2),
     });
-  }, [jumpId, jumpToken, layout.boxes]);
+  }, [jumpId, jumpToken, scene.boxes]);
+
+  useLayoutEffect(() => {
+    const node = canvas.current;
+    const panel = scene.focus;
+    const anchor = inset ? scene.boxes.find((box) => box.id === inset.anchorId) : undefined;
+    if (!node || !panel || !inset || inset.loading || appliedInset.current === inset.stamp) return;
+    const rect = node.getBoundingClientRect();
+    if (rect.width < 40 || rect.height < 40) return;
+    appliedInset.current = inset.stamp;
+    const left = anchor ? Math.min(panel.x, anchor.x) : panel.x;
+    const top = anchor ? Math.min(panel.y, anchor.y) : panel.y;
+    const right = anchor ? Math.max(panel.x + panel.w, anchor.x + CARD_W) : panel.x + panel.w;
+    const bottom = anchor ? Math.max(panel.y + panel.h, anchor.y + anchor.height) : panel.y + panel.h;
+    setView((current) => ({
+      ...current,
+      x: rect.width / 2 - ((left + right) / 2) * current.scale,
+      y: rect.height / 2 - ((top + bottom) / 2) * current.scale,
+    }));
+  }, [inset, scene.boxes, scene.focus]);
 
   function zoomBy(factor: number) {
     const node = canvas.current;
@@ -517,10 +919,91 @@ function Chart({
           onPointerCancel={onPointerUp}
         >
           <g transform={`translate(${view.x} ${view.y}) scale(${view.scale})`}>
-            {treeLinePaths(layout.lines).map((d, index) => (
-              <path key={index} d={d} fill="none" stroke={spouseLineColor(layout.lines[index])} strokeWidth={2} />
+            {treeLinePaths(scene.lines).map((d, index) => (
+              <path key={index} d={d} fill="none" stroke={scene.lines[index].color ?? spouseLineColor(scene.lines[index])} strokeWidth={2} />
             ))}
-            {layout.boxes.map((box) => {
+            {scene.panels.length > 0 ? (
+              <g>
+                {scene.panels.map((panel, index) => (
+                  <rect key={`panel-${index}`} x={panel.x} y={panel.y} width={panel.w} height={panel.h} rx={16} fill="#fff" stroke="#171717" strokeWidth={1.5} />
+                ))}
+                {titlePanel ? (
+                  <text x={titlePanel.x + titlePanel.w / 2} y={titlePanel.y + 24} textAnchor="middle" direction="rtl" fill="#525252" style={{ fontSize: 14, fontWeight: 700 }}>
+                    {shorten(inset?.treeName ?? "", 32)}
+                  </text>
+                ) : null}
+                {inset?.loading && scene.focus ? (
+                  <text x={scene.focus.x + scene.focus.w / 2} y={scene.focus.y + scene.focus.h / 2} textAnchor="middle" direction="rtl" fill="#737373" style={{ fontSize: 14 }}>
+                    טוען…
+                  </text>
+                ) : null}
+                {inset?.error && scene.focus ? (
+                  <text x={scene.focus.x + scene.focus.w / 2} y={scene.focus.y + scene.focus.h / 2} textAnchor="middle" direction="rtl" fill="#b91c1c" style={{ fontSize: 14 }}>
+                    {inset.error}
+                  </text>
+                ) : null}
+                {treeLinePaths(scene.insetLines).map((d, index) => (
+                  <path key={`inset-line-${index}`} d={d} fill="none" stroke={scene.insetLines[index].color ?? spouseLineColor(scene.insetLines[index])} strokeWidth={2} />
+                ))}
+                {scene.insetBoxes.map((box) => {
+                  const person = insetById.get(box.id);
+                  if (!person) return null;
+                  const photo = person.image_path ? photos[person.image_path] : "";
+                  const cardH = box.height || CARD_H;
+                  const title = nodeTitle(person, hebrewNames);
+                  const lived = years(person);
+                  const nameX = box.x + CARD_W / 2 + (photo ? 10 : 0);
+                  const outside = scene.insetOutside.has(person.id);
+                  const family = scene.insetColor.get(person.id);
+                  return (
+                    <g key={`inset-${person.id}`} aria-label={title.label}>
+                      <rect x={box.x} y={box.y} width={CARD_W} height={cardH} rx={12} fill={outside ? "#f4f4f4" : "#fff"} stroke={family ?? (outside ? "#d4d4d4" : "#e5e5e5")} strokeWidth={family ? 2.5 : 1} />
+                      {person.sex === "m" || person.sex === "f" ? <GenderMark sex={person.sex} x={box.x + 5} y={box.y + 4} /> : null}
+                      {person.deceased ? (
+                        <svg x={box.x + CARD_W - 22} y={box.y + 6} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#737373" strokeWidth="1.8" aria-hidden="true">
+                          <path d="M12 10.2c1.3-1.7 1.3-3.4 0-5.2-1.3 1.8-1.3 3.5 0 5.2Z" strokeLinejoin="round" />
+                          <path d="M9 10.2h6V18a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1v-7.8Z" strokeLinejoin="round" />
+                        </svg>
+                      ) : null}
+                      {photo ? (
+                        <foreignObject x={box.x + 8} y={box.y + (cardH - 28) / 2} width={28} height={28} style={{ pointerEvents: "none" }}>
+                          <img src={photo} alt="" width={28} height={28} style={{ display: "block", width: 28, height: 28, borderRadius: 14, objectFit: "cover" }} />
+                        </foreignObject>
+                      ) : null}
+                      <text x={nameX} y={box.y + (title.sub ? (lived ? 20 : 28) : 30)} textAnchor="middle" direction={title.dir} fill="#171717" style={{ fontSize: 15, fontWeight: 700, unicodeBidi: "isolate" }}>
+                        {shorten(title.main, photo ? 14 : 18)}
+                      </text>
+                      {title.sub ? (
+                        <text x={nameX} y={box.y + (lived ? 36 : 48)} textAnchor="middle" direction="ltr" fill="#404040" style={{ fontSize: 11, unicodeBidi: "isolate" }}>
+                          {shorten(title.sub, photo ? 18 : 24)}
+                        </text>
+                      ) : null}
+                      <text x={box.x + CARD_W / 2} y={box.y + (title.sub && lived ? 54 : 52)} textAnchor="middle" direction="ltr" fill="#737373" style={{ fontSize: 12, unicodeBidi: "isolate" }}>
+                        {shorten(lived, 22)}
+                      </text>
+                    </g>
+                  );
+                })}
+                {titlePanel ? (
+                <foreignObject x={titlePanel.x + titlePanel.w - 38} y={titlePanel.y + 8} width={28} height={28}>
+                  <button
+                    type="button"
+                    data-close-inset=""
+                    className="grid size-7 place-items-center rounded-full bg-white text-neutral-700 shadow"
+                    aria-label="סגירת העץ"
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onCloseInset();
+                    }}
+                  >
+                    <CloseIcon className="size-4" />
+                  </button>
+                </foreignObject>
+                ) : null}
+              </g>
+            ) : null}
+            {scene.boxes.map((box) => {
               const person = byId.get(box.id);
               if (!person) return null;
               const active = person.id === (selectedId ?? focusId);
@@ -535,6 +1018,7 @@ function Chart({
               const nameLimit = photo ? 14 : 18;
               const sexLabel = person.sex === "m" ? "זכר" : person.sex === "f" ? "נקבה" : "";
               const outside = outsideFamily.has(person.id);
+              const family = familyColor.get(person.id);
               return (
                 <g
                   key={person.id}
@@ -556,8 +1040,8 @@ function Chart({
                     height={cardH}
                     rx={12}
                     fill={active ? "#d7efe9" : outside ? "#f4f4f4" : "#fff"}
-                    stroke={linked ? "#c45c12" : active ? "#128f86" : outside ? "#d4d4d4" : "#e5e5e5"}
-                    strokeWidth={linked || active ? 2.5 : 1}
+                    stroke={linked ? "#c45c12" : family ? family : active ? "#128f86" : outside ? "#d4d4d4" : "#e5e5e5"}
+                    strokeWidth={linked || active || family ? 2.5 : 1}
                   />
                   {linked ? (
                     <foreignObject x={box.x + 4} y={box.y + cardH - 24} width={22} height={22}>
@@ -836,6 +1320,10 @@ function PersonDialog({
               <Field label="שם פרטי בעברית" value={draft.hebrew_given} maxLength={80} onChange={(value) => setField("hebrew_given", value)} />
               <Field label="שם משפחה בעברית" value={draft.hebrew_surname} maxLength={80} onChange={(value) => setField("hebrew_surname", value)} />
               <Field label="כינוי" value={draft.nickname} maxLength={120} onChange={(value) => setField("nickname", value)} />
+              <Field label="כתובת" value={draft.address} maxLength={500} onChange={(value) => setField("address", value)} />
+              <Field label="עיר" value={draft.city} maxLength={120} onChange={(value) => setField("city", value)} />
+              <Field label="מדינה" value={draft.country} maxLength={120} onChange={(value) => setField("country", value)} />
+              <Field label="דוא״ל" value={draft.email} maxLength={200} onChange={(value) => setField("email", value)} />
               <label className="block">
                 <span className="text-neutral-600">מין</span>
                 <select className="mt-1 w-full rounded-xl border border-neutral-300 bg-white py-2 ps-3 outline-none" style={{ fontSize: "1rem" }} value={draft.sex} onChange={(event) => setField("sex", event.target.value as PersonDraft["sex"])}>
@@ -1000,7 +1488,7 @@ function PersonDialog({
               <label className="block">
                 <span className="text-neutral-600">מדיה</span>
                 <textarea value={draft.media} maxLength={2000} rows={4} onChange={(event) => setField("media", event.target.value)} className="mt-1 w-full rounded-xl border border-neutral-300 px-3 py-2 outline-none" style={{ fontSize: "1rem" }} aria-label="מדיה" />
-                <span className="mt-1 block text-sm text-neutral-500">שורה לכל פריט. כותרת | קובץ</span>
+                <span className="mt-1 block text-sm text-neutral-500">שורה לכל פריט. כותרת | קובץ | סוג</span>
               </label>
             </div>
           ) : null}
@@ -1240,6 +1728,10 @@ function draftOf(person: FamilyPerson): PersonDraft {
     occupation: person.occupation,
     source: person.source,
     media: person.media,
+    address: person.address,
+    city: person.city,
+    country: person.country,
+    email: person.email,
   };
 }
 
@@ -1675,6 +2167,11 @@ function ColorLegend({ onClose }: { onClose: () => void }) {
               <LineSwatch key={status} label={unionStatusLabel(status)} color={SPOUSE_LINE_COLORS[status]} />
             ))}
             <LineSwatch label="הורים וילדים" color={SPOUSE_LINE_COLORS.married} />
+          </LegendGroup>
+          <LegendGroup title="משפחות עם אבות בעץ">
+            <ColorSwatch label="משפחה אחת" fill="#fff" border={FAMILY_LINE_COLORS[0]} />
+            <ColorSwatch label="משפחת בן או בת הזוג" fill="#fff" border={FAMILY_LINE_COLORS[1]} />
+            <LineSwatch label="קו המשפחה" color={FAMILY_LINE_COLORS[0]} />
           </LegendGroup>
         </div>
         <button type="button" className="mt-4 w-full rounded-xl bg-neutral-100 py-3 font-medium text-neutral-700" onClick={onClose}>

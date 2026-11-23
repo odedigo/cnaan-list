@@ -135,12 +135,12 @@ export function AppShell({
     <>
       <LazyList mode="grocery" active={path === "/grocery"} warm={warm} scrolls={scrolls} restoreRef={restoreRef} shown={!lists || lists.sections.includes("shopping")} />
       <LazyList mode="inventory" active={path === "/inventory"} warm={warm} scrolls={scrolls} restoreRef={restoreRef} shown={!lists || lists.sections.includes("shopping")} />
-      <LazyChecklist active={path === "/lists"} warm={warm} scrolls={scrolls} restoreRef={restoreRef} shown={!lists || lists.sections.includes("lists")} />
-      <LazyRecipes active={path === "/recipes"} warm={warm} scrolls={scrolls} restoreRef={restoreRef} shown={!lists || lists.sections.includes("recipes")} />
-      <LazyPacking active={path === "/packing"} warm={warm} scrolls={scrolls} restoreRef={restoreRef} shown={!lists || lists.sections.includes("packing")} />
-      <LazyDates active={path === "/dates"} warm={warm} scrolls={scrolls} restoreRef={restoreRef} shown={!lists || lists.sections.includes("events")} />
-      <LazyTrees active={path === "/trees"} warm={warm} scrolls={scrolls} restoreRef={restoreRef} shown={!lists || lists.sections.includes("trees")} />
-      <LazyCalendar active={path === "/calendar"} warm={warm} scrolls={scrolls} restoreRef={restoreRef} shown={!lists || lists.sections.includes("calendar")} />
+      <LazyChecklist active={path === "/lists"} scrolls={scrolls} restoreRef={restoreRef} shown={!lists || lists.sections.includes("lists")} />
+      <LazyRecipes active={path === "/recipes"} scrolls={scrolls} restoreRef={restoreRef} shown={!lists || lists.sections.includes("recipes")} />
+      <LazyPacking active={path === "/packing"} scrolls={scrolls} restoreRef={restoreRef} shown={!lists || lists.sections.includes("packing")} />
+      <LazyDates active={path === "/dates"} scrolls={scrolls} restoreRef={restoreRef} shown={!lists || lists.sections.includes("events")} />
+      <LazyTrees active={path === "/trees"} scrolls={scrolls} restoreRef={restoreRef} shown={!lists || lists.sections.includes("trees")} />
+      <LazyCalendar active={path === "/calendar"} scrolls={scrolls} restoreRef={restoreRef} shown={!lists || lists.sections.includes("calendar")} />
       {path === "/settings" ? <SignedInSettingsView version={version} /> : null}
     </>
   );
@@ -161,13 +161,11 @@ export function AppShell({
 
 function LazyChecklist({
   active,
-  warm,
   scrolls,
   restoreRef,
   shown,
 }: {
   active: boolean;
-  warm: boolean;
   scrolls: RefObject<Record<string, number>>;
   restoreRef: RefObject<string | null>;
   shown: boolean;
@@ -175,8 +173,8 @@ function LazyChecklist({
   const [mounted, setMounted] = useState(active && shown);
 
   useEffect(() => {
-    if (shown && (active || warm)) setMounted(true);
-  }, [active, warm, shown]);
+    if (shown && active) setMounted(true);
+  }, [active, shown]);
 
   useLayoutEffect(() => {
     if (!active || restoreRef.current !== "/lists") return;
@@ -194,13 +192,11 @@ function LazyChecklist({
 
 function LazyRecipes({
   active,
-  warm,
   scrolls,
   restoreRef,
   shown,
 }: {
   active: boolean;
-  warm: boolean;
   scrolls: RefObject<Record<string, number>>;
   restoreRef: RefObject<string | null>;
   shown: boolean;
@@ -208,8 +204,8 @@ function LazyRecipes({
   const [mounted, setMounted] = useState(active && shown);
 
   useEffect(() => {
-    if (shown && (active || warm)) setMounted(true);
-  }, [active, warm, shown]);
+    if (shown && active) setMounted(true);
+  }, [active, shown]);
 
   useLayoutEffect(() => {
     if (!active || restoreRef.current !== "/recipes") return;
@@ -227,13 +223,11 @@ function LazyRecipes({
 
 function LazyPacking({
   active,
-  warm,
   scrolls,
   restoreRef,
   shown,
 }: {
   active: boolean;
-  warm: boolean;
   scrolls: RefObject<Record<string, number>>;
   restoreRef: RefObject<string | null>;
   shown: boolean;
@@ -241,8 +235,8 @@ function LazyPacking({
   const [mounted, setMounted] = useState(active && shown);
 
   useEffect(() => {
-    if (shown && (active || warm)) setMounted(true);
-  }, [active, warm, shown]);
+    if (shown && active) setMounted(true);
+  }, [active, shown]);
 
   useLayoutEffect(() => {
     if (!active || restoreRef.current !== "/packing") return;
@@ -260,13 +254,11 @@ function LazyPacking({
 
 function LazyDates({
   active,
-  warm,
   scrolls,
   restoreRef,
   shown,
 }: {
   active: boolean;
-  warm: boolean;
   scrolls: RefObject<Record<string, number>>;
   restoreRef: RefObject<string | null>;
   shown: boolean;
@@ -274,8 +266,8 @@ function LazyDates({
   const [mounted, setMounted] = useState(active && shown);
 
   useEffect(() => {
-    if (shown && (active || warm)) setMounted(true);
-  }, [active, warm, shown]);
+    if (shown && active) setMounted(true);
+  }, [active, shown]);
 
   useLayoutEffect(() => {
     if (!active || restoreRef.current !== "/dates") return;
@@ -293,13 +285,11 @@ function LazyDates({
 
 function LazyTrees({
   active,
-  warm,
   scrolls,
   restoreRef,
   shown,
 }: {
   active: boolean;
-  warm: boolean;
   scrolls: RefObject<Record<string, number>>;
   restoreRef: RefObject<string | null>;
   shown: boolean;
@@ -307,8 +297,8 @@ function LazyTrees({
   const [mounted, setMounted] = useState(active && shown);
 
   useEffect(() => {
-    if (shown && (active || warm)) setMounted(true);
-  }, [active, warm, shown]);
+    if (shown && active) setMounted(true);
+  }, [active, shown]);
 
   useLayoutEffect(() => {
     if (!active || restoreRef.current !== "/trees") return;
@@ -326,13 +316,11 @@ function LazyTrees({
 
 function LazyCalendar({
   active,
-  warm,
   scrolls,
   restoreRef,
   shown,
 }: {
   active: boolean;
-  warm: boolean;
   scrolls: RefObject<Record<string, number>>;
   restoreRef: RefObject<string | null>;
   shown: boolean;
@@ -340,8 +328,8 @@ function LazyCalendar({
   const [mounted, setMounted] = useState(active && shown);
 
   useEffect(() => {
-    if (shown && (active || warm)) setMounted(true);
-  }, [active, warm, shown]);
+    if (shown && active) setMounted(true);
+  }, [active, shown]);
 
   useLayoutEffect(() => {
     if (!active || restoreRef.current !== "/calendar") return;

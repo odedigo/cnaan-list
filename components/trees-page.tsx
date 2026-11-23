@@ -2,38 +2,26 @@
 
 /** Family trees: a named list, GEDCOM import, and the chart for the open tree. */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { AppHeader } from "@/components/app-header";
+import { FamilyChartView } from "@/components/family-chart-view";
 import { CloseIcon, CopyIcon, DotsIcon, DownloadIcon, PenIcon } from "@/components/icons";
 import { useLists } from "@/components/lists-provider";
-import { TreeEditor } from "@/components/tree-editor";
 import {
-  addFamilyChild,
-  addFamilyParents,
-  addFamilyPerson,
-  addFamilySpouse,
   createFamilyTree,
-  deleteFamilyPeople,
   deleteFamilyTree,
   duplicateFamilyTree,
   exportFamilyGedcom,
   importGedcomFile,
-  linkFamilyPeople,
-  loadFamilyGraph,
-  loadFamilyLinks,
-  loadFamilyPeopleBrief,
+  loadFamilyGedcom,
   loadFamilyTrees,
   renameFamilyTree,
-  saveFamilyPerson,
-  setFamilyPersonImage,
-  setFamilyUnionStatus,
-  unlinkFamilyPerson,
-  type FamilyGraph,
-  type FamilyLink,
+  saveFamilyGedcom,
   type FamilyTree,
 } from "@/lib/family-trees";
 import { pushAppHistory, replaceAppHistory } from "@/lib/history";
+import { lockScreenOrientation } from "@/lib/screen-orientation";
 import { createClient } from "@/lib/supabase/client";
 
 type NamePrompt = { title: string; initial: string; onSave: (name: string) => void };
@@ -46,25 +34,21 @@ export function TreesPage({ active }: { active: boolean }) {
   const [trees, setTrees] = useState<FamilyTree[]>([]);
   const [ready, setReady] = useState(false);
   const [treeId, setTreeId] = useState<string | null>(null);
-  const [graph, setGraph] = useState<FamilyGraph | null>(null);
+  const [gedcom, setGedcom] = useState<string | null>(null);
   const [menuId, setMenuId] = useState<string | null>(null);
   const [prompt, setPrompt] = useState<NamePrompt | null>(null);
   const [confirm, setConfirm] = useState<ConfirmPrompt | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [importing, setImporting] = useState<number | null>(null);
+  const [importing, setImporting] = useState(false);
   const [duplicating, setDuplicating] = useState(false);
-  const [links, setLinks] = useState<Record<string, FamilyLink[]>>({});
-  const [focus, setFocus] = useState<{ personId: string; token: number } | null>(null);
-  const [treeDepth, setTreeDepth] = useState(0);
+  const [, setTreeDepth] = useState(0);
+  const [pickingTrees, setPickingTrees] = useState(false);
+  const [pickedTrees, setPickedTrees] = useState<string[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
   const indexScroll = useRef(0);
   const tree = trees.find((row) => row.id === treeId) ?? null;
-  const loadPersonImage = useCallback(async (path: string) => {
-    const { data, error: downloadError } = await supabase.storage.from("item-images").download(path);
-    if (downloadError || !data) return null;
-    return data;
-  }, [supabase]);
+  const chartBytes = useMemo(() => (gedcom === null ? null : new TextEncoder().encode(gedcom)), [gedcom]);
 
   useEffect(() => {
     if (!active || !accountId) return;
@@ -100,14 +84,14 @@ export function TreesPage({ active }: { active: boolean }) {
 
   useEffect(() => {
     if (!treeId) {
-      setGraph(null);
+      setGedcom(null);
       return;
     }
     let cancel = false;
-    setGraph(null);
-    loadFamilyGraph(supabase, treeId)
+    setGedcom(null);
+    loadFamilyGedcom(supabase, treeId)
       .then((next) => {
-        if (!cancel) setGraph(next);
+        if (!cancel) setGedcom(next);
       })
       .catch((reason) => {
         if (!cancel) setError(message(reason));
@@ -118,25 +102,11 @@ export function TreesPage({ active }: { active: boolean }) {
   }, [supabase, treeId]);
 
   useEffect(() => {
-    if (!accountId || !graph) {
-      setLinks({});
-      return;
+    if (!active) {
+      setMenuId(null);
+      setPickingTrees(false);
+      setPickedTrees([]);
     }
-    let cancel = false;
-    loadFamilyLinks(supabase, accountId, graph.people)
-      .then((next) => {
-        if (!cancel) setLinks(next);
-      })
-      .catch(() => {
-        if (!cancel) setLinks({});
-      });
-    return () => {
-      cancel = true;
-    };
-  }, [accountId, graph, supabase]);
-
-  useEffect(() => {
-    if (!active) setMenuId(null);
   }, [active]);
 
   useEffect(() => {
@@ -145,9 +115,9 @@ export function TreesPage({ active }: { active: boolean }) {
   }, [ready, treeId, trees]);
 
   function openTree(id: string) {
+    lockScreenOrientation("landscape");
     setError("");
     setMenuId(null);
-    setFocus(null);
     setTreeDepth(0);
     indexScroll.current = window.scrollY;
     replaceAppHistory("/trees", { cnaanTree: { treeId: null } });
@@ -155,34 +125,12 @@ export function TreesPage({ active }: { active: boolean }) {
     setTreeId(id);
   }
 
-  function openLinked(nextTreeId: string, personId: string) {
-    setError("");
-    setFocus({ personId, token: Date.now() });
-    if (nextTreeId === treeId) return;
-    const depth = (readTreeHistory(window.history.state)?.depth ?? 0) + 1;
-    pushAppHistory("/trees", { cnaanTree: { treeId: nextTreeId, depth } });
-    setTreeDepth(depth);
-    setTreeId(nextTreeId);
-  }
-
-  const loadTreePeople = useCallback((id: string) => loadFamilyPeopleBrief(supabase, id), [supabase]);
-
   function back() {
     if (readTreeHistory(window.history.state)?.treeId) {
       window.history.back();
       return;
     }
     setTreeId(null);
-  }
-
-  function home() {
-    const depth = readTreeHistory(window.history.state)?.depth ?? treeDepth;
-    if (depth > 0) {
-      window.history.go(-(depth + 1));
-      return;
-    }
-    setTreeId(null);
-    setTreeDepth(0);
   }
 
   async function run<T>(action: () => Promise<T>) {
@@ -203,7 +151,7 @@ export function TreesPage({ active }: { active: boolean }) {
       {error && !treeId ? <p className="mx-3 mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p> : null}
       <AppHeader
         title="עצי משפחה"
-        actionsEnabled={ready && !busy && importing === null}
+        actionsEnabled={ready && !busy && !importing}
         onHeaderPlus={() =>
           setPrompt({
             title: "עץ חדש",
@@ -220,6 +168,15 @@ export function TreesPage({ active }: { active: boolean }) {
         headerPlusLabel="עץ חדש"
         onImportList={() => fileRef.current?.click()}
         importListLabel="ייבוא GEDCOM"
+        onDeleteMultiple={
+          trees.length > 0
+            ? () => {
+                setMenuId(null);
+                setPickedTrees([]);
+                setPickingTrees(true);
+              }
+            : undefined
+        }
       />
       <input
         ref={fileRef}
@@ -229,29 +186,40 @@ export function TreesPage({ active }: { active: boolean }) {
         onChange={(event) => {
           const file = event.target.files?.[0];
           event.target.value = "";
-          if (!file) return;
+          if (!file || !accountId) return;
           setError("");
-          setImporting(0);
-          void importGedcomFile(supabase, accountId, file, setImporting)
+          setImporting(true);
+          void importGedcomFile(supabase, accountId, file)
             .then((created) => {
               setTrees((current) => [...current, created].sort((a, b) => a.sort_order - b.sort_order));
-              openTree(created.id);
             })
             .catch((reason) => setError(message(reason)))
-            .finally(() => setImporting(null));
+            .finally(() => setImporting(false));
         }}
       />
-      {importing !== null ? <p className="px-4 py-3 text-center text-neutral-500">{`מייבא… ${Math.round(importing * 100)}%`}</p> : null}
+      {importing ? <p className="px-4 py-3 text-center text-neutral-500">מייבא…</p> : null}
       {duplicating ? <p className="px-4 py-3 text-center text-neutral-500">משכפל…</p> : null}
       {!ready ? <p className="px-4 py-8 text-center text-neutral-500">טוען…</p> : null}
-      {ready && trees.length === 0 && importing === null ? <p className="px-4 py-8 text-center text-neutral-500">אין עצי משפחה</p> : null}
-      <div className="px-3 pb-4 pt-3">
+      {ready && trees.length === 0 && !importing ? <p className="px-4 py-8 text-center text-neutral-500">אין עצי משפחה</p> : null}
+      <div className={`px-3 pt-3 ${pickingTrees ? "pb-28" : "pb-4"}`}>
         {trees.map((row) => (
           <div key={row.id} dir="rtl" className={`relative mb-2 flex items-center gap-1 rounded-lg bg-white py-2 pe-1 ps-3 shadow-sm ${menuId === row.id ? "z-30" : ""}`}>
+            {pickingTrees ? (
+              <label className="flex min-w-0 flex-1 items-center gap-3 py-1 text-start">
+                <input
+                  type="checkbox"
+                  className="size-5 accent-[var(--teal)]"
+                  checked={pickedTrees.includes(row.id)}
+                  onChange={() => setPickedTrees((current) => (current.includes(row.id) ? current.filter((id) => id !== row.id) : [...current, row.id]))}
+                />
+                <span className="min-w-0 flex-1 truncate text-base">{row.name}</span>
+              </label>
+            ) : (
             <button type="button" className="min-w-0 flex-1 truncate text-start text-base" onClick={() => openTree(row.id)}>
               {row.name}
             </button>
-            <div className="relative">
+            )}
+            {pickingTrees ? null : <div className="relative">
               <button
                 type="button"
                 className="grid size-8 place-items-center text-neutral-500"
@@ -345,10 +313,54 @@ export function TreesPage({ active }: { active: boolean }) {
                   </button>
                 </div>
               ) : null}
-            </div>
+            </div>}
           </div>
         ))}
       </div>
+      {pickingTrees ? (
+        <div className="fixed inset-x-0 z-40 mx-auto flex w-full max-w-[480px] gap-2 px-3" style={{ bottom: "calc(4.75rem + env(safe-area-inset-bottom))" }}>
+          <button
+            type="button"
+            className="flex-1 rounded-xl bg-white py-3 font-medium text-neutral-700 shadow-lg"
+            onClick={() => {
+              setPickingTrees(false);
+              setPickedTrees([]);
+            }}
+          >
+            ביטול
+          </button>
+          <button
+            type="button"
+            className="flex-1 rounded-xl bg-red-600 py-3 font-medium text-white shadow-lg disabled:bg-neutral-300"
+            disabled={pickedTrees.length === 0 || busy}
+            onClick={() => {
+              const ids = pickedTrees;
+              const count = ids.length;
+              setConfirm({
+                title: "מחיקת עצים",
+                body: count === 1 ? "למחוק עץ אחד?" : `למחוק ${count} עצים?`,
+                onConfirm: () => {
+                  void run(async () => {
+                    const removed: string[] = [];
+                    try {
+                      for (const id of ids) {
+                        await deleteFamilyTree(supabase, id);
+                        removed.push(id);
+                      }
+                    } finally {
+                      if (removed.length > 0) setTrees((current) => current.filter((item) => !removed.includes(item.id)));
+                      setPickedTrees((current) => current.filter((id) => !removed.includes(id)));
+                      if (removed.length === ids.length) setPickingTrees(false);
+                    }
+                  });
+                },
+              });
+            }}
+          >
+            מחיקה
+          </button>
+        </div>
+      ) : null}
       {menuId ? <button type="button" className="fixed inset-0 z-20 cursor-default" aria-label="סגירת תפריט" onClick={() => setMenuId(null)} /> : null}
       {prompt ? (
         <NameDialog
@@ -372,136 +384,16 @@ export function TreesPage({ active }: { active: boolean }) {
         />
       ) : null}
       {active && tree ? (
-        <TreeEditor
+        <FamilyChartView
           name={tree.name}
-          graph={graph}
+          bytes={chartBytes}
+          sourceKey={tree.id}
+          loading={gedcom === null && !error}
           error={error}
-          busy={busy || importing !== null}
           onBack={back}
-          showHome={treeDepth > 0}
-          onHome={home}
-          onCreatePerson={async () => {
-            const person = await run(() => addFamilyPerson(supabase, accountId, tree.id));
-            if (!person) return null;
-            setGraph((current) => (current ? { ...current, people: [...current.people, person] } : { people: [person], unions: [], children: [] }));
-            return person.id;
-          }}
-          onSavePerson={async (personId, draft) => {
-            const saved = await run(() => saveFamilyPerson(supabase, personId, draft));
-            if (!saved) return false;
-            setGraph((current) =>
-              current
-                ? { ...current, people: current.people.map((person) => (person.id === personId ? { ...person, ...saved } : person)) }
-                : current,
-            );
-            return true;
-          }}
-          onAddSpouse={async (personId, input) => {
-            const result = await run(() => addFamilySpouse(supabase, accountId, tree.id, personId, input));
-            if (!result) return null;
-            setGraph((current) => {
-              if (!current) return current;
-              const people = result.created
-                ? [...current.people, result.person]
-                : current.people.map((person) =>
-                    person.id === result.person.id
-                      ? { ...person, ...result.person, image_path: result.person.image_path ?? person.image_path, deceased: person.deceased || result.person.deceased }
-                      : person,
-                  );
-              const unions = current.unions.some((union) => union.id === result.union.id)
-                ? current.unions.map((union) => (union.id === result.union.id ? result.union : union))
-                : [...current.unions, result.union];
-              return { ...current, people, unions };
-            });
-            return result.person.id;
-          }}
-          onSetUnionStatus={async (unionId, status) => {
-            const saved = await run(() => setFamilyUnionStatus(supabase, unionId, status));
-            if (!saved) return;
-            setGraph((current) =>
-              current ? { ...current, unions: current.unions.map((union) => (union.id === unionId ? { ...union, status: saved } : union)) } : current,
-            );
-          }}
-          onAddChild={async (personId) => {
-            const result = await run(() => addFamilyChild(supabase, accountId, tree.id, personId));
-            if (!result) return null;
-            setGraph((current) => {
-              if (!current) return current;
-              return {
-                ...current,
-                people: [...current.people, result.person],
-                unions: result.union ? [...current.unions, result.union] : current.unions,
-                children: [...current.children, result.link],
-              };
-            });
-            return result.person.id;
-          }}
-          onAddParents={async (personId) => {
-            const result = await run(() => addFamilyParents(supabase, accountId, tree.id, personId));
-            if (!result) return null;
-            setGraph((current) =>
-              current
-                ? {
-                    ...current,
-                    people: [...current.people, ...result.parents],
-                    unions: [...current.unions, result.union],
-                    children: [...current.children, result.link],
-                  }
-                : current,
-            );
-            return result.parents[0]?.id ?? null;
-          }}
-          onLoadImage={loadPersonImage}
-          links={links}
-          trees={trees}
-          focusPersonId={focus?.personId ?? null}
-          focusToken={focus?.token ?? 0}
-          onOpenLink={openLinked}
-          onLoadTreePeople={loadTreePeople}
-          onLinkPerson={async (personId, otherId) => {
-            const linkId = await run(() => linkFamilyPeople(supabase, accountId, personId, otherId));
-            if (!linkId) return;
-            setGraph((current) => (current ? { ...current, people: current.people.map((person) => (person.id === personId ? { ...person, link_id: linkId } : person)) } : current));
-          }}
-          onUnlinkPerson={async (personId) => {
-            const removed = await run(async () => {
-              await unlinkFamilyPerson(supabase, accountId, personId);
-              return true;
-            });
-            if (!removed) return;
-            setGraph((current) => (current ? { ...current, people: current.people.map((person) => (person.id === personId ? { ...person, link_id: null } : person)) } : current));
-          }}
-          onPersonImage={async (personId, file) => {
-            const person = graph?.people.find((row) => row.id === personId);
-            if (!person) return;
-            const saved = await run(async () => ({ path: await setFamilyPersonImage(supabase, person, file) }));
-            if (!saved) return;
-            setGraph((current) =>
-              current
-                ? { ...current, people: current.people.map((row) => (row.id === personId ? { ...row, image_path: saved.path } : row)) }
-                : current,
-            );
-          }}
-          onDeletePerson={async (personId, alsoIds) => {
-            const ids = [personId, ...alsoIds.filter((id) => id !== personId)];
-            const removed = await run(async () => {
-              await deleteFamilyPeople(supabase, ids);
-              return true;
-            });
-            if (!removed) return;
-            const removedIds = new Set(ids);
-            setGraph((current) => {
-              if (!current) return current;
-              const unions = current.unions
-                .filter((union) => !removedIds.has(union.partner_a))
-                .map((union) => (union.partner_b && removedIds.has(union.partner_b) ? { ...union, partner_b: null } : union));
-              const unionIds = new Set(unions.map((union) => union.id));
-              return {
-                people: current.people.filter((person) => !removedIds.has(person.id)),
-                unions,
-                children: current.children.filter((link) => !removedIds.has(link.person_id) && unionIds.has(link.union_id)),
-              };
-            });
+          onCommit={async (text) => {
+            await saveFamilyGedcom(supabase, tree.id, text);
+            setGedcom(text);
           }}
         />
       ) : null}

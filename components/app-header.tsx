@@ -67,6 +67,7 @@ export function AppHeader({
   onExportList,
   onImportList,
   importListLabel = "ייבוא רשימה",
+  onDeleteMultiple,
   exportFileEnabled = true,
   showCredit = false,
   creditVersion = "",
@@ -107,6 +108,7 @@ export function AppHeader({
   onExportList?: () => void;
   onImportList?: () => void;
   importListLabel?: string;
+  onDeleteMultiple?: () => void;
   exportFileEnabled?: boolean;
   showCredit?: boolean;
   creditVersion?: string;
@@ -114,7 +116,7 @@ export function AppHeader({
   const [menuOpen, setMenuOpen] = useState(false);
   const [creditOpen, setCreditOpen] = useState(false);
   const showMenu = Boolean(
-    onAdd || onSort || onReorder || onPlus || onLink || onPasteRecipe || onPhotoRecipe || onReloadRecipes || onExportFile || onMarkAll || onClearMarks || onSortWithin || onExportList || onImportList,
+    onAdd || onSort || onReorder || onPlus || onLink || onPasteRecipe || onPhotoRecipe || onReloadRecipes || onExportFile || onMarkAll || onClearMarks || onSortWithin || onExportList || onImportList || onDeleteMultiple,
   );
   const searchButton = onSearchToggle ? (
     <button
@@ -249,6 +251,18 @@ export function AppHeader({
                     }}
                   >
                     <UploadIcon className="size-5" />
+                  </MenuItem>
+                ) : null}
+                {onDeleteMultiple ? (
+                  <MenuItem
+                    label="מחיקה מרובה"
+                    disabled={!actionsEnabled}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onDeleteMultiple();
+                    }}
+                  >
+                    <TrashIcon className="size-5" />
                   </MenuItem>
                 ) : null}
                 {onMarkAll ? (
