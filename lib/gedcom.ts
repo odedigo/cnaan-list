@@ -24,6 +24,8 @@ export type GedcomPerson = {
   city: string;
   country: string;
   email: string;
+  linkTree: string;
+  linkPerson: string;
 };
 
 export type GedcomUnionStatus = "married" | "divorced" | "widowed" | "separated" | "partner";
@@ -124,6 +126,79 @@ export function parseGedcom(bytes: Uint8Array): GedcomTree {
   return { people: [...people.values()], unions };
 }
 
+export function familyAbove(tree: GedcomTree, xref: string): GedcomTree {
+  const ids = new Set(tree.people.map((person) => person.xref));
+  if (!ids.has(xref)) return { people: [], unions: [] };
+  const rels = relationIndex(tree);
+  const excluded = new Set<string>();
+  const parents = new Set(rels.get(xref)?.parents ?? []);
+  const down = [xref];
+  while (down.length > 0) {
+    const id = down.pop();
+    if (!id || excluded.has(id) || !ids.has(id)) continue;
+    excluded.add(id);
+    const row = rels.get(id);
+    if (!row) continue;
+    for (const spouseId of row.spouses) {
+      if (parents.has(spouseId) || !ids.has(spouseId)) continue;
+      excluded.add(spouseId);
+    }
+    for (const childId of row.children) down.push(childId);
+  }
+  const copy = new Set<string>();
+  const queue = [...parents];
+  while (queue.length > 0) {
+    const id = queue.pop();
+    if (!id || excluded.has(id) || copy.has(id) || !ids.has(id)) continue;
+    copy.add(id);
+    const row = rels.get(id);
+    if (!row) continue;
+    queue.push(...row.parents, ...row.spouses, ...row.children);
+  }
+  const people = tree.people.filter((person) => copy.has(person.xref)).map((person) => ({ ...person, linkTree: "", linkPerson: "" }));
+  const unions: GedcomUnion[] = [];
+  for (const union of tree.unions) {
+    const partnerA = union.partnerA && copy.has(union.partnerA) ? union.partnerA : null;
+    const partnerB = union.partnerB && copy.has(union.partnerB) ? union.partnerB : null;
+    if (!partnerA && !partnerB) continue;
+    const children = union.children.filter((id) => copy.has(id) || id === xref);
+    if (children.length === 0 && !(partnerA && partnerB)) continue;
+    unions.push({ partnerA, partnerB, children, status: union.status });
+  }
+  return { people, unions };
+}
+
+function relationIndex(tree: GedcomTree) {
+  const rels = new Map<string, { parents: string[]; spouses: string[]; children: string[] }>();
+  const row = (id: string) => {
+    const current = rels.get(id);
+    if (current) return current;
+    const created = { parents: [] as string[], spouses: [] as string[], children: [] as string[] };
+    rels.set(id, created);
+    return created;
+  };
+  const add = (list: string[], id: string) => {
+    if (id && !list.includes(id)) list.push(id);
+  };
+  for (const union of tree.unions) {
+    const partners = [union.partnerA, union.partnerB].filter((id): id is string => Boolean(id));
+    if (partners.length === 2) {
+      const [left, right] = partners;
+      if (left && right) {
+        add(row(left).spouses, right);
+        add(row(right).spouses, left);
+      }
+    }
+    for (const child of union.children) {
+      for (const parent of partners) {
+        add(row(child).parents, parent);
+        add(row(parent).children, child);
+      }
+    }
+  }
+  return rels;
+}
+
 function decodeGedcom(bytes: Uint8Array) {
   if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xfe) return new TextDecoder("utf-16le").decode(bytes);
   if (bytes.length >= 2 && bytes[0] === 0xfe && bytes[1] === 0xff) return new TextDecoder("utf-16be").decode(bytes);
@@ -190,6 +265,8 @@ function readPerson(xref: string, body: GedcomLine[]): GedcomPerson {
     city: "",
     country: "",
     email: "",
+    linkTree: "",
+    linkPerson: "",
   };
   const nicks: string[] = [];
   const jobs: string[] = [];
@@ -207,7 +284,7 @@ function readPerson(xref: string, body: GedcomLine[]): GedcomPerson {
   let hebrew: NameParts | null = null;
   const keepTran = () => {
     if (!tran) return;
-    if (tran.hebrew || (!tran.lang.trim() && !hebrew)) hebrew = tran.parts;
+    if (tran.hebrew || (!(tran.lang ?? "").trim() && !hebrew)) hebrew = tran.parts;
     tran = null;
   };
   const commitSource = () => {
@@ -266,7 +343,13 @@ function readPerson(xref: string, body: GedcomLine[]): GedcomPerson {
         section = "death";
         person.deceased = true;
       } else if (line.tag === "ISDEAD" && /^(Y|YES|TRUE|1)$/i.test(line.value.trim())) person.deceased = true;
-      else if (line.tag === "NOTE") {
+      else if (line.tag === "_LINK") {
+        const [treeId, personId] = line.value.trim().split(/\s+/);
+        if (treeId && personId) {
+          person.linkTree = treeId;
+          person.linkPerson = personId;
+        }
+      } else if (line.tag === "NOTE") {
         section = "note";
         person.note = line.value;
         conc = "note";
@@ -352,7 +435,7 @@ function readPerson(xref: string, body: GedcomLine[]): GedcomPerson {
     } else if (object && line.tag === "_PRIM" && /^(Y|YES|TRUE|1)$/i.test(line.value.trim())) {
       object.primary = true;
     } else if (line.level === 2 && jobs.length > 0 && line.tag === "PLAC" && section !== "birth" && section !== "death" && section !== "resi") {
-      jobs[jobs.length - 1] += jobs[jobs.length - 1].trim() ? `, ${line.value}` : line.value;
+      jobs[jobs.length - 1] += (jobs[jobs.length - 1] ?? "").trim() ? `, ${line.value}` : line.value;
     } else conc = "";
   }
   keepTran();
@@ -360,7 +443,7 @@ function readPerson(xref: string, body: GedcomLine[]): GedcomPerson {
   commitObject();
   commitPlace();
   const chosen = places.sort((a, b) => a.rank - b.rank)[0];
-  person.email = clean(places.map((item) => item.email).find((item) => item.trim()) ?? "");
+  person.email = clean(places.map((item) => item.email).find((item) => (item ?? "").trim()) ?? "");
   const address = tidy(chosen?.address ?? "");
   person.address = address === person.email ? "" : address;
   person.city = clean(chosen?.city ?? "");
@@ -429,6 +512,8 @@ function emptyPerson(xref: string): GedcomPerson {
     city: "",
     country: "",
     email: "",
+    linkTree: "",
+    linkPerson: "",
   };
 }
 
@@ -616,7 +701,30 @@ const GEDCOM_MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "
 export function gedcomText(tree: GedcomTree) {
   const byXref = new Map(tree.people.map((person) => [person.xref, person]));
   const lines = ["0 HEAD", "1 SOUR CnaanList", "1 GEDC", "2 VERS 5.5.1", "2 FORM LINEAGE-LINKED", "1 CHAR UTF-8"];
-  for (const person of tree.people) {
+  for (const raw of tree.people) {
+    const person = {
+      ...raw,
+      given: raw.given ?? "",
+      surname: raw.surname ?? "",
+      hebrewGiven: raw.hebrewGiven ?? "",
+      hebrewSurname: raw.hebrewSurname ?? "",
+      birthDate: raw.birthDate ?? "",
+      birthPlace: raw.birthPlace ?? "",
+      deathDate: raw.deathDate ?? "",
+      deathPlace: raw.deathPlace ?? "",
+      note: raw.note ?? "",
+      nickname: raw.nickname ?? "",
+      cause: raw.cause ?? "",
+      occupation: raw.occupation ?? "",
+      source: raw.source ?? "",
+      media: raw.media ?? "",
+      address: raw.address ?? "",
+      city: raw.city ?? "",
+      country: raw.country ?? "",
+      email: raw.email ?? "",
+      linkTree: raw.linkTree ?? "",
+      linkPerson: raw.linkPerson ?? "",
+    };
     lines.push(`0 ${person.xref} INDI`);
     lines.push(`1 NAME ${gedcomValue(person.given)} /${gedcomValue(person.surname)}/`);
     if (person.hebrewGiven.trim() || person.hebrewSurname.trim()) {
@@ -651,6 +759,7 @@ export function gedcomText(tree: GedcomTree) {
       if (person.email.trim()) lines.push(`2 EMAIL ${gedcomValue(person.email)}`);
     }
     if (person.note.trim()) lines.push(...textLines(1, "NOTE", person.note));
+    if (person.linkTree.trim() && person.linkPerson.trim()) lines.push(`1 _LINK ${gedcomValue(person.linkTree)} ${gedcomValue(person.linkPerson)}`);
   }
   tree.unions.forEach((union, index) => {
     const left = union.partnerA ? byXref.get(union.partnerA) : undefined;

@@ -9,15 +9,20 @@ import { FamilyChartView } from "@/components/family-chart-view";
 import { CloseIcon, CopyIcon, DotsIcon, DownloadIcon, PenIcon } from "@/components/icons";
 import { useLists } from "@/components/lists-provider";
 import {
+  addFamilyPhoto,
   createFamilyTree,
+  deleteFamilyPhoto,
+  deleteFamilyPhotos,
   deleteFamilyTree,
   duplicateFamilyTree,
   exportFamilyGedcom,
   importGedcomFile,
   loadFamilyGedcom,
+  loadFamilyPhotos,
   loadFamilyTrees,
   renameFamilyTree,
   saveFamilyGedcom,
+  setFamilyPhotoThumbnail,
   type FamilyTree,
 } from "@/lib/family-trees";
 import { pushAppHistory, replaceAppHistory } from "@/lib/history";
@@ -395,6 +400,13 @@ export function TreesPage({ active }: { active: boolean }) {
             await saveFamilyGedcom(supabase, tree.id, text);
             setGedcom(text);
           }}
+          otherTrees={trees.filter((row) => row.id !== tree.id).map((row) => ({ id: row.id, name: row.name }))}
+          onLoadGedcom={(id) => loadFamilyGedcom(supabase, id)}
+          onLoadPhotos={(id) => loadFamilyPhotos(supabase, id)}
+          onAddPhoto={(xref, contentType, data, thumbnail) => addFamilyPhoto(supabase, tree.id, xref, contentType, data, thumbnail)}
+          onSetThumbnail={(xref, photoId) => setFamilyPhotoThumbnail(supabase, tree.id, xref, photoId)}
+          onDeletePhoto={(id) => deleteFamilyPhoto(supabase, id)}
+          onDeletePersonPhotos={(xrefs) => deleteFamilyPhotos(supabase, tree.id, xrefs)}
         />
       ) : null}
     </div>

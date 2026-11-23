@@ -202,6 +202,26 @@ create table if not exists public.family_trees (
 
 alter table public.family_trees add column if not exists gedcom text not null default '';
 
+create table if not exists public.family_person_images (
+  id uuid primary key default gen_random_uuid(),
+  tree_id uuid not null references public.family_trees (id) on delete cascade,
+  person_xref text not null,
+  content_type text not null,
+  data text not null,
+  thumbnail boolean not null default false,
+  created_at timestamptz not null default now(),
+  constraint family_person_images_xref_length check (char_length(btrim(person_xref)) between 1 and 80),
+  constraint family_person_images_type_check check (content_type in ('image/webp', 'image/jpeg', 'image/png')),
+  constraint family_person_images_data_length check (char_length(data) between 1 and 700000)
+);
+
+create index if not exists family_person_images_tree_person_idx
+  on public.family_person_images (tree_id, person_xref, created_at);
+
+create unique index if not exists family_person_images_one_thumbnail_idx
+  on public.family_person_images (tree_id, person_xref)
+  where thumbnail;
+
 create index if not exists stores_account_sort_idx on public.stores (account_id, sort_order);
 create unique index if not exists stores_account_name_idx on public.stores (account_id, lower(name));
 create unique index if not exists stores_one_protected_idx on public.stores (account_id) where protected;
@@ -247,6 +267,7 @@ alter table public.recipe_categories enable row level security;
 alter table public.recipes enable row level security;
 alter table public.recipe_labels enable row level security;
 alter table public.family_trees enable row level security;
+alter table public.family_person_images enable row level security;
 
 drop policy if exists "read own profile" on public.profiles;
 create policy "read own profile"
@@ -417,6 +438,22 @@ create policy "own family trees"
   using (account_id in (select id from public.accounts where owner_id = auth.uid()))
   with check (account_id in (select id from public.accounts where owner_id = auth.uid()));
 
+drop policy if exists "own family person images" on public.family_person_images;
+create policy "own family person images"
+  on public.family_person_images for all to authenticated
+  using (
+    tree_id in (
+      select id from public.family_trees
+      where account_id in (select id from public.accounts where owner_id = auth.uid())
+    )
+  )
+  with check (
+    tree_id in (
+      select id from public.family_trees
+      where account_id in (select id from public.accounts where owner_id = auth.uid())
+    )
+  );
+
 revoke all on public.profiles from anon;
 revoke all on public.accounts from anon;
 revoke all on public.stores from anon;
@@ -433,6 +470,7 @@ revoke all on public.recipe_categories from anon;
 revoke all on public.recipes from anon;
 revoke all on public.recipe_labels from anon;
 revoke all on public.family_trees from anon;
+revoke all on public.family_person_images from anon;
 
 grant select on public.profiles to authenticated;
 grant select on public.accounts to authenticated;
@@ -451,6 +489,7 @@ grant select, insert, update, delete on public.recipe_categories to authenticate
 grant select, insert, update, delete on public.recipes to authenticated;
 grant select, insert, update, delete on public.recipe_labels to authenticated;
 grant select, insert, update, delete on public.family_trees to authenticated;
+grant select, insert, update, delete on public.family_person_images to authenticated;
 
 create or replace function public.current_account_id()
 returns uuid

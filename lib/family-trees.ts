@@ -13,6 +13,14 @@ export type FamilyTree = {
   sort_order: number;
 };
 
+export type FamilyPhoto = {
+  id: string;
+  person_xref: string;
+  content_type: string;
+  data: string;
+  thumbnail: boolean;
+};
+
 export type FamilyPerson = {
   id: string;
   account_id: string;
@@ -107,6 +115,8 @@ export type FamilyLink = {
 export type FamilyPersonBrief = Pick<FamilyPerson, "id" | "given_name" | "surname" | "hebrew_given" | "hebrew_surname">;
 
 const SAVE_FAILED = "לא ניתן לשמור את עץ המשפחה";
+const PHOTO_SAVE_FAILED = "לא ניתן לשמור את התמונה";
+const PHOTO_DELETE_FAILED = "לא ניתן למחוק את התמונה";
 const LOAD_FAILED = "לא ניתן לטעון את עצי המשפחה";
 const MISSING_TABLE = "טבלאות עצי המשפחה אינן קיימות עדיין. יש להריץ את קובץ הסכמה.";
 const COPY_SUFFIX = "- עותק";
@@ -182,6 +192,12 @@ export async function deleteFamilyTree(supabase: SupabaseClient, treeId: string)
 
 export async function duplicateFamilyTree(supabase: SupabaseClient, source: FamilyTree) {
   const gedcom = await loadFamilyGedcom(supabase, source.id);
+  let photos: FamilyPhoto[] = [];
+  try {
+    photos = await loadFamilyPhotos(supabase, source.id);
+  } catch (reason) {
+    if (!(reason instanceof Error) || reason.message !== MISSING_TABLE) throw reason;
+  }
   const sortOrder = await nextSortOrder(supabase, source.account_id);
   const { data, error } = await supabase
     .from("family_trees")
@@ -189,7 +205,66 @@ export async function duplicateFamilyTree(supabase: SupabaseClient, source: Fami
     .select("id, account_id, name, sort_order")
     .single();
   raise(error, SAVE_FAILED);
-  return normalizeTree(data as FamilyTree);
+  const created = normalizeTree(data as FamilyTree);
+  if (photos.length === 0) return created;
+  const { error: imageError } = await supabase.from("family_person_images").insert(photos.map((photo) => ({
+    tree_id: created.id,
+    person_xref: photo.person_xref,
+    content_type: photo.content_type,
+    data: photo.data,
+    thumbnail: photo.thumbnail,
+  })));
+  if (imageError) {
+    await supabase.from("family_trees").delete().eq("id", created.id);
+    raise(imageError, SAVE_FAILED);
+  }
+  return created;
+}
+
+export async function loadFamilyPhotos(supabase: SupabaseClient, treeId: string) {
+  const { data, error } = await supabase
+    .from("family_person_images")
+    .select("id, person_xref, content_type, data, thumbnail")
+    .eq("tree_id", treeId)
+    .order("created_at");
+  raise(error, LOAD_FAILED);
+  return ((data ?? []) as FamilyPhoto[]).map(normalizePhoto);
+}
+
+export async function addFamilyPhoto(supabase: SupabaseClient, treeId: string, xref: string, contentType: string, data: string, thumbnail: boolean) {
+  const { data: row, error } = await supabase
+    .from("family_person_images")
+    .insert({ tree_id: treeId, person_xref: xref, content_type: contentType, data, thumbnail })
+    .select("id, person_xref, content_type, data, thumbnail")
+    .single();
+  raise(error, PHOTO_SAVE_FAILED);
+  return normalizePhoto(row as FamilyPhoto);
+}
+
+export async function setFamilyPhotoThumbnail(supabase: SupabaseClient, treeId: string, xref: string, photoId: string) {
+  const { error: clearError } = await supabase
+    .from("family_person_images")
+    .update({ thumbnail: false })
+    .eq("tree_id", treeId)
+    .eq("person_xref", xref)
+    .neq("id", photoId);
+  raise(clearError, PHOTO_SAVE_FAILED);
+  const { error } = await supabase.from("family_person_images").update({ thumbnail: true }).eq("id", photoId);
+  raise(error, PHOTO_SAVE_FAILED);
+}
+
+export async function deleteFamilyPhoto(supabase: SupabaseClient, photoId: string) {
+  const { error } = await supabase.from("family_person_images").delete().eq("id", photoId);
+  raise(error, PHOTO_DELETE_FAILED);
+}
+
+export async function deleteFamilyPhotos(supabase: SupabaseClient, treeId: string, xrefs: string[]) {
+  const ids = [...new Set(xrefs.map((xref) => xref.trim()).filter(Boolean))];
+  for (let index = 0; index < ids.length; index += 100) {
+    const chunk = ids.slice(index, index + 100);
+    const { error } = await supabase.from("family_person_images").delete().eq("tree_id", treeId).in("person_xref", chunk);
+    raise(error, PHOTO_DELETE_FAILED);
+  }
 }
 
 export async function exportFamilyGedcom(supabase: SupabaseClient, tree: FamilyTree) {
@@ -224,6 +299,16 @@ function duplicateTreeName(name: string) {
 
 function normalizeTree(row: FamilyTree): FamilyTree {
   return { id: row.id, account_id: row.account_id, name: row.name, sort_order: row.sort_order };
+}
+
+function normalizePhoto(row: FamilyPhoto): FamilyPhoto {
+  return {
+    id: row.id,
+    person_xref: row.person_xref,
+    content_type: row.content_type,
+    data: typeof row.data === "string" ? row.data.replace(/\s/g, "") : "",
+    thumbnail: row.thumbnail === true,
+  };
 }
 
 function raise(error: { message: string; code?: string } | null, message: string) {
